@@ -46,5 +46,8 @@ htmlcov/
 *.sqlite
 *.sqlite3
 
+# Database dumps
+backups/
+
 # Docs (kept local)
 docs/
