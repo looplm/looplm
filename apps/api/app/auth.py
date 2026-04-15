@@ -11,7 +11,7 @@ from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import bcrypt
 from jose import JWTError, jwt
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -118,15 +118,23 @@ async def get_current_project(
             raise HTTPException(status_code=404, detail="Project not found")
         return project
 
-    # No header: fall back to first project the user owns or is a member of
-    owned = select(Project).where(Project.owner_id == _user.id)
-    member_of = (
-        select(Project)
-        .join(ProjectMember, ProjectMember.project_id == Project.id)
-        .where(ProjectMember.user_id == _user.id)
+    # No header: fall back to first project the user owns or is a member of.
+    # Use a single ORM-friendly query (union() drops to Core rows, so
+    # scalar_one_or_none() would yield the first column — Project.id — instead
+    # of a Project entity).
+    member_subquery = select(ProjectMember.project_id).where(
+        ProjectMember.user_id == _user.id
     )
     result = await db.execute(
-        owned.union(member_of).order_by(Project.created_at.asc()).limit(1)
+        select(Project)
+        .where(
+            or_(
+                Project.owner_id == _user.id,
+                Project.id.in_(member_subquery),
+            )
+        )
+        .order_by(Project.created_at.asc())
+        .limit(1)
     )
     project = result.scalar_one_or_none()
     if not project:
