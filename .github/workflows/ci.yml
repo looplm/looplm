@@ -76,13 +76,16 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: timtres/${{ matrix.image }}
+          # latest=auto: only applied to the highest semver tag push,
+          # never on plain main pushes (Docker official convention).
+          flavor: |
+            latest=auto
           tags: |
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
