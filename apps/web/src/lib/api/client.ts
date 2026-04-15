@@ -4,7 +4,9 @@
 
 import type { Project } from "../api-types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Same-origin by default — Nginx (prod) and next.config.ts rewrites (dev) route /api/*
+// to the API. Absolute overrides still work if NEXT_PUBLIC_API_URL is explicitly set.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 // --- Auth token management ---
 
