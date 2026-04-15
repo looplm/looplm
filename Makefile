@@ -1,4 +1,4 @@
-.PHONY: dev infra web api stop stop-infra logs
+.PHONY: dev infra web api stop stop-infra logs release-patch release-minor release-major
 
 # Start everything: infra in Docker + web and api locally with hot reload
 dev: infra web api
@@ -35,3 +35,13 @@ stop-infra:
 # Tail logs from Docker services
 logs:
 	docker compose logs -f postgres redis minio
+
+# Cut a release (bump manifests, tag, push — triggers Docker Hub publish)
+release-patch:
+	@bash scripts/release.sh patch
+
+release-minor:
+	@bash scripts/release.sh minor
+
+release-major:
+	@bash scripts/release.sh major
