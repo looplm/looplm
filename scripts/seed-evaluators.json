@@ -1,0 +1,131 @@
+[
+  {
+    "name": "answerRelevance",
+    "display_name": "Answer Relevance",
+    "type": "llm_judge",
+    "description": "Checks whether the answer addresses the user's question. Accepts partial answers that go in the right direction.",
+    "relevance": "important",
+    "affects_pass": false,
+    "config": {
+      "prompt_template": "Du bist ein Experte für die Bewertung von Antwortrelevanz in einem RAG-System. Prüfe, ob die Antwort die Frage des Benutzers adressiert — UNTER BERÜCKSICHTIGUNG der verfügbaren Suchergebnisse.\n\nKriterien:\n- Die Antwort muss thematisch zur Frage passen\n- Die Kernfrage muss adressiert werden (auch wenn nicht vollständig beantwortet)\n- Teilantworten, die in die richtige Richtung gehen, sind akzeptabel\n- Komplett themenfremde Antworten führen zu FAIL\n\nWICHTIG — RAG-Kontext beachten:\n- Wenn die Suchergebnisse keine zur Frage passende Information enthalten, ist eine \"nichts gefunden\"-Antwort mit Rückfrage oder Umformulierungsvorschlag PASS — der Assistent adressiert die Frage korrekt, indem er transparent kommuniziert.\n- Nur wenn die Suchergebnisse relevante Information ENTHALTEN und die Antwort sie ignoriert oder am Thema vorbeigeht, ist das FAIL.\n\nBenutzerfrage: {input}\n\nSuchergebnisse (Kontext des Assistenten):\n{context}\n\nAntwort:\n{output}\n\nAntworte NUR im JSON-Format:\n{\"pass\": true/false, \"reason\": \"Kurze Begründung auf Deutsch\"}"
+    },
+    "source": "ragas"
+  },
+  {
+    "name": "conciseness",
+    "display_name": "Conciseness",
+    "type": "hybrid",
+    "description": "Checks answer length against per-test-case max_answer_length (or default_max_length). Exceeding the limit triggers an LLM conciseness review.",
+    "relevance": "minor",
+    "affects_pass": false,
+    "config": {
+      "check_type": "length_threshold",
+      "prompt_template": "Du bist ein Experte für die Bewertung der Prägnanz von Antworten. Prüfe, ob die Antwort unnötige Wiederholungen oder Fülltext enthält.\n\nFAIL bei:\n- Gleiche Information oder Schlussfolgerung wird mehrfach wiederholt\n- Mehrere Rückfragen, wo eine reichen würde\n- Meta-Kommentare über Wissensdatenbank/Suchvorgang/Filter, die über eine kurze Erwähnung hinausgehen\n- Lange Aufzählungen von Teams/Systemen/Beispielen, die nicht zur Beantwortung der Frage nötig sind\n- \"Nichts gefunden\"-Antworten, die mehr als 2-3 Sätze + 1 Rückfrage umfassen\n- Aufzählung was stattdessen gefunden wurde, wenn es nicht zur Frage passt\n\nPASS bei:\n- Ausführliche Schritt-für-Schritt-Anleitungen, wenn der Nutzer nach einem Prozess/Workflow fragt — das ist erwartetes Format, kein Fülltext\n- Lange Antworten bei komplexen Fachfragen mit mehreren Aspekten\n- Wörtliche Zitate aus Quellen, auch wenn sie lang sind\n- Einmalige, kurze Bestätigung des Team-Filters (z.B. \"Im EDM-Kontext:\")\n- Eine einzelne Rückfrage zur Klärung am Ende der Antwort\n\nBenutzerfrage: {input}\n\nAntwort:\n{output}\n\nAntworte NUR im JSON-Format:\n{\"pass\": true/false, \"reason\": \"Kurze Begründung auf Deutsch\"}",
+      "default_max_length": 500
+    },
+    "source": "ragas"
+  },
+  {
+    "name": "factualCorrectness",
+    "display_name": "Factual Correctness",
+    "type": "llm_judge",
+    "description": "Checks if the answer contains claims that directly contradict retrieved source documents. Only flags direct contradictions, not omissions.",
+    "relevance": "important",
+    "affects_pass": false,
+    "config": {
+      "prompt_template": "Du bist ein Experte für Faktenprüfung. Prüfe, ob die Antwort Behauptungen enthält, die den abgerufenen Quelldokumenten direkt widersprechen.\n\nWICHTIG:\n- Nur direkte Widersprüche zählen als FAIL\n- Auslassungen sind KEIN Fehler (nicht alles muss erwähnt werden)\n- Umformulierungen, die die Bedeutung beibehalten, sind KEIN Fehler\n- Allgemeinwissen, das nicht in den Quellen steht, ist KEIN Fehler\n\nQuelldokumente:\n{context}\n\nAntwort:\n{output}\n\nAntworte NUR im JSON-Format:\n{\"pass\": true/false, \"reason\": \"Kurze Begründung auf Deutsch\"}"
+    },
+    "source": "ragas"
+  },
+  {
+    "name": "faithfulness",
+    "display_name": "Faithfulness",
+    "type": "llm_judge",
+    "description": "Checks if all substantive claims in the answer are grounded in the retrieved context. Runs on every trace with retrieval for continuous monitoring.",
+    "relevance": "core",
+    "affects_pass": true,
+    "config": {
+      "prompt_template": "Du bist ein Experte für die Prüfung von Kontexttreue (Faithfulness). Prüfe, ob alle inhaltlichen Behauptungen in der Antwort durch den abgerufenen Kontext gestützt werden.\n\nKriterien:\n- Jede inhaltliche Behauptung muss im Kontext eine Grundlage haben\n- Allgemeinwissen (z.B. \"Python ist eine Programmiersprache\") ist akzeptabel\n- Formatierungshilfen und Strukturierungen sind kein Fehler\n- Erfundene Fakten, Zahlen oder Prozesse, die nicht im Kontext stehen, führen zu FAIL\n- Zusammenfassungen und Umformulierungen sind akzeptabel, solange sie korrekt sind\n\nBesonders prüfen:\n- Nennt die Antwort eine spezifischere Dokumentnummer als der Kontext (z.B. Kontext sagt \"TR-03109\", Antwort sagt \"TR-03109-3\")? → FAIL\n- Überträgt die Antwort Aussagen von System A auf System B (z.B. \"das geht in kVASy genauso\" wenn Kontext nur WinEV beschreibt)? → FAIL\n- Nennt die Antwort RFC-Nummern, IP-Adressen oder Zertifikatsprofile, die nicht im Kontext stehen? → FAIL\n\nNICHT als Faithfulness-Verstoß werten:\n- Rückfragen an den Benutzer (z.B. \"In welchem Team arbeitest du?\", \"Soll ich den Filter setzen?\")\n- Vorschläge zur Verbesserung der Suche (z.B. Filteranpassungen, alternative Suchbegriffe)\n- Beispiele in Rückfragen, die der Orientierung dienen (z.B. \"z.B. EDM, MSB, FoMa\")\n- Bestätigung des aktiven Team-Filters (z.B. \"Dein Filter ist auf EDM gesetzt\", \"Im EDM-Kontext:\"). Das ist Gesprächssteuerung zur Orientierung des Nutzers, keine inhaltliche Behauptung.\nDiese Elemente sind Gesprächssteuerung, keine inhaltlichen Behauptungen über den Kontext.\n\nAbgerufener Kontext:\n{context}\n\nAntwort:\n{output}\n\nAntworte NUR im JSON-Format:\n{\"pass\": true/false, \"reason\": \"Kurze Begründung auf Deutsch\"}"
+    },
+    "source": "ragas"
+  },
+  {
+    "name": "faithfulnessToSource",
+    "display_name": "Faithfulness to Source",
+    "type": "hybrid",
+    "description": "Checks verbatim reproduction when user requests exact info. Triggers on patterns like 'wörtlich', 'exakt', 'originaltext', then uses LLM judge to verify source fidelity.",
+    "relevance": "core",
+    "affects_pass": true,
+    "config": {
+      "pattern": "(?i)(wörtlich|exakt|originaltext|aus der quelle|genau die schritte|wort für wort|original\\s?text|exakte\\s?(wiedergabe|angaben))",
+      "check_type": "regex_match",
+      "prompt_template": "Du bist ein Experte für die Prüfung von Quelltreue. Der Benutzer hat wörtliche/exakte Informationen aus einer Quelle angefordert. Prüfe, ob die Antwort den Quelltext treu wiedergibt.\n\nKriterien:\n- Die wesentlichen Informationen aus der Quelle müssen enthalten sein\n- Umformulierungen sind akzeptabel, solange die Bedeutung erhalten bleibt\n- Fehlende wesentliche Punkte führen zu FAIL\n- Erfundene Informationen, die nicht in der Quelle stehen, führen zu FAIL\n\nNICHT als Quelltreue-Verstoß werten:\n- Rückfragen an den Benutzer (z.B. \"In welchem Team arbeitest du?\", \"Soll ich breiter suchen?\")\n- Beispiele in Klärungsfragen, die der Orientierung dienen (z.B. Aufzählung von Teamnamen oder Suchbegriffen)\n- Hinweise auf fehlende Dokumentation (z.B. \"Dazu habe ich nichts gefunden\")\n- Bestätigung des aktiven Team-Filters (z.B. \"Dein Filter ist auf EDM gesetzt\", \"Im EDM-Kontext:\"). Das ist Gesprächssteuerung, keine inhaltliche Aussage aus der Quelle.\nDiese Elemente sind Gesprächssteuerung und keine inhaltlichen Aussagen, die quelltreu sein müssen.\n\nBenutzeranfrage: {input}\n\nQuelltext aus Tool-Ausgaben:\n{context}\n\nAntwort:\n{output}\n\nAntworte NUR im JSON-Format:\n{\"pass\": true/false, \"reason\": \"Kurze Begründung auf Deutsch\"}",
+      "trigger_pattern": "(?i)(aus der Quelle|wörtlich|exakt|originaltext|wortwörtlich|vollständige Definition|genau die Schritte|1:1|Zitat)"
+    },
+    "source": "custom"
+  },
+  {
+    "name": "helpfulness",
+    "display_name": "Helpfulness",
+    "type": "llm_judge",
+    "description": "Checks if the answer is clear, well-structured, and actionable. Fails on confusing instructions, missing context, or chaotic structure.",
+    "relevance": "important",
+    "affects_pass": false,
+    "config": {
+      "prompt_template": "Du bist ein Experte für die Bewertung der Hilfsbereitschaft von Antworten in einem RAG-System. Prüfe, ob die Antwort hilfreich, klar und handlungsorientiert ist — UNTER BERÜCKSICHTIGUNG der dem Assistenten zur Verfügung stehenden Suchergebnisse.\n\nKriterien:\n- Klare Struktur (Absätze, Listen, Überschriften wo sinnvoll)\n- Konkrete, umsetzbare Schritte wo angemessen\n- Angemessener Detailgrad für die Frage\n- Kein wichtiger Kontext fehlt, der die Antwort unbrauchbar macht\n\nWICHTIG — RAG-Kontext beachten:\n- Der Assistent kann NUR mit den bereitgestellten Suchergebnissen arbeiten.\n- Wenn die Suchergebnisse die benötigte Information NICHT enthalten, ist eine kurze \"nichts gefunden\"-Antwort mit einer gezielten Rückfrage oder Umformulierungsvorschlag PASS — das ist das korrekte Verhalten.\n- Bewerte die Qualität der Antwort RELATIV zum verfügbaren Kontext, nicht gegen eine ideale Antwort.\n- Nur wenn der Kontext die Information ENTHÄLT und die Antwort sie trotzdem nicht nutzt oder schlecht aufbereitet, ist das ein FAIL.\n\nFAIL bei:\n- Unklare oder verwirrende Anweisungen\n- Kontext enthält die Antwort, aber Assistent nutzt sie nicht oder bereitet sie schlecht auf\n- Chaotische Struktur, die schwer zu folgen ist\n\nBenutzerfrage: {input}\n\nSuchergebnisse (Kontext des Assistenten):\n{context}\n\nAntwort:\n{output}\n\nAntworte NUR im JSON-Format:\n{\"pass\": true/false, \"reason\": \"Kurze Begründung auf Deutsch\"}"
+    },
+    "source": "ragas"
+  },
+  {
+    "name": "imageMissing",
+    "display_name": "Image Missing",
+    "type": "deterministic",
+    "description": "Checks that every IMAGE_X reference in the answer has a corresponding marker in tool outputs. In online mode, validates against available image count.",
+    "relevance": "core",
+    "affects_pass": true,
+    "config": {
+      "details": "Deterministic grader. Extracts ![alt](IMAGE_X) references from answer and verifies they exist in tool output context.",
+      "check_type": "image_missing"
+    },
+    "source": "custom"
+  },
+  {
+    "name": "imageOrdering",
+    "display_name": "Image Ordering",
+    "type": "deterministic",
+    "description": "Checks that images from the same source page appear in the correct relative order. Only evaluates when >=2 images from the same page are referenced.",
+    "relevance": "core",
+    "affects_pass": true,
+    "config": {
+      "details": "Deterministic grader. Groups IMAGE_X references by source page, checks ascending order within each group.",
+      "check_type": "image_ordering"
+    },
+    "source": "custom"
+  },
+  {
+    "name": "responseTime",
+    "display_name": "Response Time",
+    "type": "deterministic",
+    "description": "Checks if the target API response time is within the configured threshold. Records response_time_ms as a numeric score for trend analysis.",
+    "relevance": "important",
+    "affects_pass": false,
+    "config": {
+      "check_type": "response_time",
+      "max_response_time_ms": 10000
+    },
+    "source": "custom"
+  },
+  {
+    "name": "sourceRetrieval",
+    "display_name": "Source Retrieval",
+    "type": "deterministic",
+    "description": "Checks if expected source documents were retrieved by the search tool. Uses URL matching (primary) or title matching (fallback) against tool outputs.",
+    "relevance": "core",
+    "affects_pass": true,
+    "config": {
+      "details": "Deterministic grader. Extracts URLs from tool output (Quelle: https://...) and checks against expectedPageUrls or expectedSources.",
+      "check_type": "contains_urls"
+    },
+    "source": "ragas"
+  }
+]

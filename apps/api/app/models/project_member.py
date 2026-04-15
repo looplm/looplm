@@ -1,0 +1,34 @@
+"""ProjectMember model for role-based section access control."""
+
+from uuid import uuid4
+
+from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
+
+from app.models.models import Base
+
+ALL_SECTIONS = ["observe", "evaluate", "improve"]
+
+
+class ProjectMember(Base):
+    __tablename__ = "project_members"
+    __table_args__ = (
+        UniqueConstraint("project_id", "user_id", name="uq_project_members_project_user"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role = Column(String(20), nullable=False, server_default=text("'member'"))
+    allowed_sections = Column(
+        JSONB, nullable=False, server_default=text("'[\"observe\",\"evaluate\",\"improve\"]'::jsonb")
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    project = relationship("Project", back_populates="members")
+    user = relationship("User", back_populates="project_memberships")

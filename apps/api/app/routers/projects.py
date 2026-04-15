@@ -1,0 +1,170 @@
+"""Project CRUD endpoints."""
+
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth import get_current_user
+from app.db import get_db
+from app.models.project import Project
+from app.models.project_member import ProjectMember
+from app.models.user import User
+from app.schemas.projects import (
+    ProjectCreate,
+    ProjectListResponse,
+    ProjectResponse,
+    ProjectUpdate,
+)
+
+router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+# Settings keys that contain secrets — mask on read, skip no-op updates on write.
+_SECRET_SETTINGS_KEYS = {"code_agent_api_key"}
+
+
+def _mask(value: str | None) -> str:
+    """Mask a secret: show first 4 + last 3 chars."""
+    if not value:
+        return ""
+    if len(value) <= 7:
+        return value[0] + "..." + value[-1] if len(value) >= 2 else "***"
+    return value[:4] + "..." + value[-3:]
+
+
+def _mask_settings(settings: dict) -> dict:
+    """Return a copy of settings with secret values masked."""
+    out = dict(settings or {})
+    for key in _SECRET_SETTINGS_KEYS:
+        if key in out and out[key]:
+            out[key] = _mask(out[key])
+    return out
+
+
+def _project_response(project: Project, role: str = "owner") -> ProjectResponse:
+    """Build a ProjectResponse with masked settings."""
+    return ProjectResponse(
+        id=project.id,
+        owner_id=project.owner_id,
+        name=project.name,
+        description=project.description,
+        settings=_mask_settings(project.settings or {}),
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        role=role,
+    )
+
+
+@router.get("", response_model=ProjectListResponse)
+async def list_projects(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    # Owned projects
+    result = await db.execute(
+        select(Project).where(Project.owner_id == _user.id).order_by(Project.created_at.asc())
+    )
+    projects = [_project_response(p, role="owner") for p in result.scalars().all()]
+
+    # Projects where the user is a member
+    result = await db.execute(
+        select(Project, ProjectMember.role)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
+        .where(ProjectMember.user_id == _user.id)
+        .order_by(Project.created_at.asc())
+    )
+    for p, member_role in result.all():
+        projects.append(_project_response(p, role=member_role))
+
+    return ProjectListResponse(data=projects)
+
+
+@router.post("", response_model=ProjectResponse, status_code=201)
+async def create_project(
+    body: ProjectCreate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    project = Project(
+        owner_id=_user.id,
+        name=body.name,
+        description=body.description,
+    )
+    db.add(project)
+    await db.flush()
+    await db.refresh(project)
+    return _project_response(project)
+
+
+@router.get("/{project_id}", response_model=ProjectResponse)
+async def get_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.owner_id == _user.id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return _project_response(project)
+
+
+@router.patch("/{project_id}", response_model=ProjectResponse)
+async def update_project(
+    project_id: UUID,
+    body: ProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.owner_id == _user.id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if body.name is not None:
+        project.name = body.name
+    if body.description is not None:
+        project.description = body.description
+    if body.settings is not None:
+        merged = dict(project.settings or {})
+        for key, value in body.settings.items():
+            # Skip secret keys sent back with their masked value (no-op update)
+            if key in _SECRET_SETTINGS_KEYS and value and "..." in str(value):
+                continue
+            merged[key] = value
+        project.settings = merged
+    project.updated_at = datetime.now(timezone.utc)
+
+    await db.flush()
+    await db.refresh(project)
+    return _project_response(project)
+
+
+@router.delete("/{project_id}", status_code=204)
+async def delete_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.owner_id == _user.id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Prevent deleting the last project
+    count_result = await db.execute(
+        select(Project.id).where(Project.owner_id == _user.id)
+    )
+    if len(count_result.all()) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete your only project")
+
+    await db.delete(project)
+    return None
