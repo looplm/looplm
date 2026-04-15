@@ -40,7 +40,7 @@ def _request_json(path: str, method: str = "GET", payload: dict | None = None) -
 
 def main() -> int:
     ok = True
-    ok &= _request_json("/health")
+    ok &= _request_json("/api/health")
     ok &= _request_json("/api/v1/traces")
 
     if os.getenv("RUN_ANALYSIS_PREVIEW") == "1":
