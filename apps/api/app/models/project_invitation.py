@@ -8,8 +8,6 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.models.models import Base
 
-from app.models.project_member import ALL_SECTIONS
-
 
 def _generate_token() -> str:
     return secrets.token_urlsafe(32)
