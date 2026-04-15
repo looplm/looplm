@@ -1,0 +1,71 @@
+/**
+ * API functions for Datasets and Test Cases.
+ */
+
+import type {
+  TestDatasetItem,
+  TestDatasetListResponse,
+  TestCaseItem,
+  TestDatasetDetail,
+  TestCaseSuggestion,
+  TestCaseCreateBody,
+  TestDatasetExport,
+} from "../api-types";
+import { request } from "./client";
+
+// --- Datasets ---
+
+export const getDatasets = (params?: Record<string, string>) => {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return request<TestDatasetListResponse>(`/api/datasets${qs}`);
+};
+
+export const createDataset = (body: { name: string; description?: string; tags?: string[] }) =>
+  request<TestDatasetItem>("/api/datasets", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const getDataset = (id: string) =>
+  request<TestDatasetDetail>(`/api/datasets/${id}`);
+
+export const updateDataset = (id: string, body: { name?: string; description?: string; tags?: string[] }) =>
+  request<TestDatasetItem>(`/api/datasets/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+export const deleteDataset = (id: string) =>
+  request<void>(`/api/datasets/${id}`, { method: "DELETE" });
+
+export const bulkDeleteDatasets = (ids: string[]) =>
+  Promise.all(ids.map((id) => deleteDataset(id)));
+
+export const createTestCase = (datasetId: string, body: TestCaseCreateBody) =>
+  request<TestCaseItem>(`/api/datasets/${datasetId}/cases`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const updateTestCase = (datasetId: string, caseId: string, body: Partial<TestCaseCreateBody>) =>
+  request<TestCaseItem>(`/api/datasets/${datasetId}/cases/${caseId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+
+export const deleteTestCase = (datasetId: string, caseId: string) =>
+  request<void>(`/api/datasets/${datasetId}/cases/${caseId}`, { method: "DELETE" });
+
+export const exportDataset = (id: string) =>
+  request<TestDatasetExport>(`/api/datasets/${id}/export`);
+
+export const importDataset = (body: { name?: string; description?: string; testCases: unknown[]; filename?: string }) =>
+  request<TestDatasetItem>("/api/datasets/import", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const getTestCaseSuggestions = (params?: Record<string, string>) => {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return request<TestCaseSuggestion[]>(`/api/datasets/suggestions${qs}`);
+};

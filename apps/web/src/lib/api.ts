@@ -101,5 +101,11 @@ export type {
 // Re-export all functions from domain modules
 export * from "./api/client";
 export * from "./api/traces-api";
+export * from "./api/prompts-api";
+export * from "./api/feedback-api";
 export * from "./api/evals-api";
+export * from "./api/experiments-api";
+export * from "./api/evaluators-api";
+export * from "./api/datasets-api";
+export * from "./api/code-agent-api";
 export * from "./api/costs-api";

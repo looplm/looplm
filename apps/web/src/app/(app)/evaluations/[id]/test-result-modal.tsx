@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { EvalResultItem, EvalGraderResult, EvaluatorItem, ConversationTurn } from "@/lib/api";
-import { sortGraderEntries, sortGraderDetails, graderDisplayName } from "./eval-utils";
-import { ExpectedOutputDiff, ClampedText, Section, ExpandableBox, UrlDetails, CopyButton } from "./eval-components";
+import type { EvalResultItem, EvaluatorItem, ConversationTurn } from "@/lib/api";
+import { sortGraderEntries, sortGraderDetails } from "./eval-utils";
+import { ExpectedOutputDiff, Section, ExpandableBox, CopyButton } from "./eval-components";
+import { GraderResultCard } from "./grader-result-card";
 
 interface TestResultModalProps {
   result: EvalResultItem;
@@ -51,76 +52,6 @@ export function TestResultModal({
     if (showPassed) return true;
     return g.skipped || !g.pass;
   });
-
-  const getCardCopyText = (name: string, g: EvalGraderResult) => {
-    const displayName = graderDisplayName(name, evaluatorMap);
-    const status = g.skipped ? "SKIPPED" : g.pass ? "PASS" : "FAIL";
-    let body = "";
-    if (g.details && (g.details.found_urls || g.details.missing_urls)) {
-      const found = (g.details.found_urls ?? []) as string[];
-      const missing = (g.details.missing_urls ?? []) as string[];
-      if (found.length) body += `Found URLs:\n${found.join("\n")}\n`;
-      if (missing.length) body += `Missing URLs:\n${missing.join("\n")}`;
-    } else if (g.reason) {
-      body = g.reason;
-    }
-    return `${displayName}: ${status}\n${body}`.trim();
-  };
-
-  const renderCard = ([name, g]: [string, EvalGraderResult]) => {
-    const meta = evaluatorMap[name];
-    const isCriticalFail = !g.pass && !g.skipped && meta?.affects_pass;
-    return (
-      <div
-        key={name}
-        className={`p-3 rounded-lg border group/card relative ${
-          disabledGraders.has(name)
-            ? "border-gray-200 dark:border-slate-700 opacity-50"
-            : isCriticalFail
-            ? "border-red-400 dark:border-red-600 border-l-4"
-            : g.skipped
-            ? "border-gray-200 dark:border-slate-700"
-            : g.pass
-            ? "border-green-200 dark:border-green-800"
-            : "border-red-200 dark:border-red-800"
-        }`}
-      >
-        <div className="flex items-center justify-between mb-1">
-          <a
-            href={`/evaluators?highlight=${encodeURIComponent(name)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-medium hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors flex items-center gap-1 group/link"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {graderDisplayName(name, evaluatorMap)}
-            <ExternalLinkIcon className="opacity-0 group-hover/link:opacity-100 transition-opacity" />
-          </a>
-          <div className="flex items-center gap-2">
-            <CopyButton
-              getText={() => getCardCopyText(name, g)}
-              className="opacity-0 group-hover/card:opacity-100"
-            />
-            {g.skipped ? (
-              <span className="text-gray-400 dark:text-slate-500">SKIPPED</span>
-            ) : g.pass ? (
-              <span className="text-green-600 dark:text-green-400">PASS</span>
-            ) : (
-              <span className="text-red-600 dark:text-red-400">FAIL</span>
-            )}
-          </div>
-        </div>
-        {g.details && (g.details.found_urls || g.details.missing_urls) ? (
-          <UrlDetails
-            found={(g.details.found_urls ?? []) as string[]}
-            missing={(g.details.missing_urls ?? []) as string[]}
-          />
-        ) : (
-          g.reason ? <ClampedText text={g.reason} /> : null
-        )}
-      </div>
-    );
-  };
 
   const critical = visibleDetailEntries.filter(
     ([n, g]) => !g.pass && !g.skipped && evaluatorMap[n]?.affects_pass
@@ -417,7 +348,15 @@ export function TestResultModal({
                           Critical — affects pass/fail
                         </p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {critical.map(renderCard)}
+                          {critical.map(([name, g]) => (
+                            <GraderResultCard
+                              key={name}
+                              name={name}
+                              grader={g}
+                              evaluatorMap={evaluatorMap}
+                              disabledGraders={disabledGraders}
+                            />
+                          ))}
                         </div>
                       </div>
                     )}
@@ -429,7 +368,15 @@ export function TestResultModal({
                           </p>
                         )}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {other.map(renderCard)}
+                          {other.map(([name, g]) => (
+                            <GraderResultCard
+                              key={name}
+                              name={name}
+                              grader={g}
+                              evaluatorMap={evaluatorMap}
+                              disabledGraders={disabledGraders}
+                            />
+                          ))}
                         </div>
                       </div>
                     )}

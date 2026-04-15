@@ -18,7 +18,8 @@ import {
   type TestDatasetItem,
   type TestCaseCreateBody,
 } from "@/lib/api";
-import { evaluateFeedback, getFeedbackEvaluation, stopFeedbackEvaluation, getFeedbackEvaluatorConfig, updateFeedbackEvaluatorConfig, analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions } from "@/lib/api/evals-api";
+import { evaluateFeedback, getFeedbackEvaluation, stopFeedbackEvaluation, getFeedbackEvaluatorConfig, updateFeedbackEvaluatorConfig } from "@/lib/api/feedback-api";
+import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions } from "@/lib/api/evals-api";
 import type { TopQuestionsResponse } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";

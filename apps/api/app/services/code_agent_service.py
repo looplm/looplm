@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -18,160 +17,21 @@ from app.schemas.code_agent import (
     CodeSuggestionItem,
     OpenCodeAnalysisResponse,
 )
+from app.services.code_agent_helpers import (
+    _build_agent_prompt,
+    _parse_fallback_output,
+    _update_progress,
+)
+from app.services.code_agent_prompts import (
+    OPENCODE_SYSTEM_PROMPT,
+    OPENCODE_SYSTEM_PROMPT_NO_REPO,
+    OPENCODE_SYSTEM_PROMPT_QUICK,
+)
 
 logger = logging.getLogger(__name__)
 
-# ── System prompts ────────────────────────────────────────────
-
-OPENCODE_SYSTEM_PROMPT = """\
-You are an expert LLM application debugger. You are given a set of evaluation \
-test failures from an LLM-powered application. Your job is to:
-
-1. Analyze the failure patterns — identify common root causes, cluster similar failures.
-2. Explore the codebase to find the relevant source code (prompts, retrieval logic, \
-tool definitions, configuration files).
-3. Generate specific, actionable code suggestions with exact file paths, line numbers, \
-and before/after diffs that would fix or improve the failing tests.
-
-Focus on high-impact changes. Prioritize suggestions that would fix the most test failures. \
-Each suggestion should reference the specific test IDs it addresses.
-
-For each suggestion, classify its type:
-- prompt_change: modifications to system prompts, user prompts, or prompt templates
-- code_fix: bug fixes in application logic
-- config_change: configuration parameter adjustments
-- architecture_change: structural improvements to the LLM pipeline"""
-
-OPENCODE_SYSTEM_PROMPT_NO_REPO = """\
-You are an expert LLM application debugger. You are given a set of evaluation \
-test failures from an LLM-powered application. Your job is to:
-
-1. Analyze the failure patterns — identify common root causes, cluster similar failures.
-2. Generate actionable suggestions for improving the application based on the failures. \
-Since you do not have access to the codebase, provide general recommendations for \
-prompt changes, configuration adjustments, and architectural improvements.
-
-Focus on high-impact changes. Prioritize suggestions that would fix the most test failures. \
-Each suggestion should reference the specific test IDs it addresses.
-
-For each suggestion, classify its type:
-- prompt_change: modifications to system prompts, user prompts, or prompt templates
-- code_fix: bug fixes in application logic
-- config_change: configuration parameter adjustments
-- architecture_change: structural improvements to the LLM pipeline
-
-Since you cannot see the code, set file_path to null and diff to null for all suggestions."""
-
-OPENCODE_SYSTEM_PROMPT_QUICK = """\
-You are an expert LLM application debugger. You are given evaluation test failures \
-from an LLM-powered application. Provide a quick, high-level analysis:
-
-1. Briefly summarize the failure patterns (2-3 sentences).
-2. List the top 3-5 most impactful suggestions that would fix the most failures. \
-Keep each suggestion concise — title, short description, and impact level.
-
-Do NOT explore the codebase deeply. Focus on the most obvious and impactful fixes. \
-Each suggestion should reference the specific test IDs it addresses.
-
-For each suggestion, classify its type:
-- prompt_change: modifications to system prompts, user prompts, or prompt templates
-- code_fix: bug fixes in application logic
-- config_change: configuration parameter adjustments
-- architecture_change: structural improvements to the LLM pipeline
-
-Set file_path and diff to null unless you are certain of the exact file and change."""
-
-
-# ── Prompt building ───────────────────────────────────────────
-
-def _build_agent_prompt(
-    failed_results: list[EvalResult],
-    run: EvalRun,
-    extra_context: str = "",
-    file_patterns: list[str] | None = None,
-) -> str:
-    """Build the user prompt with eval failure context."""
-    lines = [
-        f"## Evaluation Run: {run.name}",
-        f"Total: {run.total} | Passed: {run.passed} | Failed: {run.failed}",
-        "",
-    ]
-
-    if run.grader_summary:
-        lines.append("### Grader Summary")
-        lines.append(json.dumps(run.grader_summary, indent=2, default=str))
-        lines.append("")
-
-    lines.append(f"### Failed Test Cases ({len(failed_results)} failures)")
-    lines.append("")
-
-    for result in failed_results[:50]:  # Cap to avoid excessive token usage
-        lines.append(f"#### Test: {result.test_id}")
-        if result.input:
-            lines.append(f"**Input:** {result.input[:1000]}")
-        if result.output:
-            lines.append(f"**Output:** {result.output[:1000]}")
-        if result.expected_output:
-            lines.append(f"**Expected:** {result.expected_output[:1000]}")
-        if result.reason:
-            lines.append(f"**Reason:** {result.reason[:500]}")
-        if result.graders:
-            lines.append(f"**Graders:** {json.dumps(result.graders, default=str)}")
-        lines.append("")
-
-    if len(failed_results) > 50:
-        lines.append(f"... and {len(failed_results) - 50} more failures (showing first 50)")
-        lines.append("")
-
-    if file_patterns:
-        lines.append("### Suggested file patterns to explore")
-        for pattern in file_patterns:
-            lines.append(f"- `{pattern}`")
-        lines.append("")
-
-    if extra_context:
-        lines.append("### Additional Context")
-        lines.append(extra_context)
-        lines.append("")
-
-    lines.append(
-        "Analyze these failures and provide your suggestions. "
-        "Be specific and actionable."
-    )
-
-    return "\n".join(lines)
-
 
 # ── Core analysis ─────────────────────────────────────────────
-
-async def _update_progress(
-    db: AsyncSession,
-    analysis: OpenCodeAnalysis,
-    *,
-    num_turns: int | None = None,
-    total_cost_usd: float | None = None,
-    progress_message: str | None = None,
-    log_entry: str | None = None,
-) -> None:
-    """Persist live progress fields so the polling frontend can display them."""
-    if num_turns is not None:
-        analysis.num_turns = num_turns
-    if total_cost_usd is not None:
-        analysis.total_cost_usd = total_cost_usd
-    if progress_message is not None:
-        analysis.progress_message = progress_message
-    if log_entry is not None:
-        from sqlalchemy.orm.attributes import flag_modified
-        log = list(analysis.progress_log or [])
-        log.append({
-            "t": datetime.now(timezone.utc).isoformat(),
-            "msg": log_entry,
-        })
-        # Keep last 50 entries to avoid bloat
-        analysis.progress_log = log[-50:]
-        flag_modified(analysis, "progress_log")
-    await db.commit()
-
 
 async def analyze_eval_run(
     project_id: UUID,
@@ -417,29 +277,6 @@ async def analyze_eval_run(
             analysis.completed_at = datetime.now(timezone.utc)
             analysis.progress_message = None
             await db.commit()
-
-
-def _parse_fallback_output(raw: str) -> AgentAnalysisOutput:
-    """Try to parse agent result text as JSON if structured output wasn't available."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
-    if text.startswith("json"):
-        text = text[4:].strip()
-
-    try:
-        data = json.loads(text)
-        return AgentAnalysisOutput.model_validate(data)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Could not parse agent fallback output, returning empty")
-        return AgentAnalysisOutput(
-            failure_summary="Analysis completed but output could not be parsed.",
-            suggestions=[],
-            files_analyzed=[],
-        )
 
 
 async def _persist_results(

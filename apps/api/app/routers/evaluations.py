@@ -167,9 +167,11 @@ async def list_eval_runs(
 
 from .eval_jobs import router as eval_jobs_router
 from .eval_reports_router import router as eval_reports_router
+from .eval_sessions import router as eval_sessions_router
 
 router.include_router(eval_jobs_router)
 router.include_router(eval_reports_router)
+router.include_router(eval_sessions_router)
 
 
 # ── Parameterized routes (/{run_id}) — must come last ────────

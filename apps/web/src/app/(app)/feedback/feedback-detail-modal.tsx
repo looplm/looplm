@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import type { FeedbackScoreItem } from "@/lib/api";
-import { evaluateSingleFeedback } from "@/lib/api/evals-api";
+import { evaluateSingleFeedback } from "@/lib/api/feedback-api";
 
 function extractFullText(data: unknown, role?: string): string {
   if (!data) return "\u2014";
