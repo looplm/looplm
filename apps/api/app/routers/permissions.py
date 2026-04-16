@@ -24,7 +24,7 @@ async def get_my_permissions(
 ):
     """Return the current user's role and allowed sections for the active project."""
     if project.owner_id == user.id:
-        return PermissionsResponse(role="owner", allowed_sections=list(ALL_SECTIONS))
+        return PermissionsResponse(role="owner", allowed_sections=list(ALL_SECTIONS), allowed_pages=None)
 
     result = await db.execute(
         select(ProjectMember).where(
@@ -34,9 +34,10 @@ async def get_my_permissions(
     )
     member = result.scalar_one_or_none()
     if not member:
-        return PermissionsResponse(role="member", allowed_sections=[])
+        return PermissionsResponse(role="member", allowed_sections=[], allowed_pages=[])
 
     return PermissionsResponse(
         role=member.role,
         allowed_sections=member.allowed_sections or [],
+        allowed_pages=member.allowed_pages,
     )

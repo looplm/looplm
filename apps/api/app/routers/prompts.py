@@ -28,7 +28,7 @@ from app.services.prompt_analysis import (
     sync_prompts,
 )
 
-router = APIRouter(prefix="/api/prompts", tags=["prompts"], dependencies=[require_section("improve")])
+router = APIRouter(prefix="/api/prompts", tags=["prompts"], dependencies=[require_section("improve", "prompts")])
 
 
 def _prompt_to_out(p) -> PromptOut:

@@ -31,7 +31,7 @@ from .dataset_helpers import _tc_to_item, build_suggestions
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/datasets", tags=["datasets"], dependencies=[require_section("evaluate")])
+router = APIRouter(prefix="/api/datasets", tags=["datasets"], dependencies=[require_section("evaluate", "datasets")])
 
 from .dataset_cases import router as dataset_cases_router
 router.include_router(dataset_cases_router)

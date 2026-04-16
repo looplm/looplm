@@ -14,7 +14,7 @@ from app.config import settings as app_settings
 from app.db import get_db
 from app.models.project import Project
 from app.models.project_invitation import ProjectInvitation
-from app.models.project_member import ALL_SECTIONS, ProjectMember
+from app.models.project_member import ALL_PAGES, ALL_SECTIONS, PAGE_TO_SECTION, ProjectMember
 from app.models.user import User
 from app.schemas.project_members import (
     InviteResponse,
@@ -28,6 +28,24 @@ from app.services.email_service import send_invitation_email
 router = APIRouter(prefix="/api/projects/{project_id}/members", tags=["members"])
 
 
+def _validate_pages(
+    allowed_pages: list[str] | None, allowed_sections: list[str]
+) -> None:
+    """Validate that pages are known and belong to allowed sections."""
+    if allowed_pages is None:
+        return
+    invalid = set(allowed_pages) - set(ALL_PAGES)
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Invalid pages: {', '.join(sorted(invalid))}")
+    for page in allowed_pages:
+        if PAGE_TO_SECTION[page] not in allowed_sections:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Page '{page}' belongs to section '{PAGE_TO_SECTION[page]}' "
+                f"which is not in allowed sections",
+            )
+
+
 def _member_response(member: ProjectMember, email: str) -> MemberResponse:
     return MemberResponse(
         id=member.id,
@@ -35,6 +53,7 @@ def _member_response(member: ProjectMember, email: str) -> MemberResponse:
         email=email,
         role=member.role,
         allowed_sections=member.allowed_sections or [],
+        allowed_pages=member.allowed_pages,
         status="active",
         created_at=member.created_at,
     )
@@ -47,6 +66,7 @@ def _invitation_response(inv: ProjectInvitation) -> MemberResponse:
         email=inv.email,
         role=inv.role,
         allowed_sections=inv.allowed_sections or [],
+        allowed_pages=inv.allowed_pages,
         status="pending",
         created_at=inv.created_at,
     )
@@ -98,6 +118,7 @@ async def invite_member(
     invalid = set(body.allowed_sections) - set(ALL_SECTIONS)
     if invalid:
         raise HTTPException(status_code=400, detail=f"Invalid sections: {', '.join(invalid)}")
+    _validate_pages(body.allowed_pages, body.allowed_sections)
 
     # Check if user already exists
     result = await db.execute(select(User).where(User.email == body.email))
@@ -122,6 +143,7 @@ async def invite_member(
             user_id=target_user.id,
             role=body.role,
             allowed_sections=body.allowed_sections,
+            allowed_pages=body.allowed_pages,
         )
         db.add(member)
         await db.flush()
@@ -131,6 +153,7 @@ async def invite_member(
             email=body.email,
             role=member.role,
             allowed_sections=member.allowed_sections or [],
+            allowed_pages=member.allowed_pages,
             status="active",
         )
 
@@ -155,6 +178,7 @@ async def invite_member(
         email=body.email,
         role=body.role,
         allowed_sections=body.allowed_sections,
+        allowed_pages=body.allowed_pages,
     )
     db.add(invitation)
     await db.flush()
@@ -173,6 +197,7 @@ async def invite_member(
         email=body.email,
         role=invitation.role,
         allowed_sections=invitation.allowed_sections or [],
+        allowed_pages=invitation.allowed_pages,
         status="pending",
         invite_link=invite_url,
         email_sent=email_sent,
@@ -205,6 +230,15 @@ async def update_member(
             if invalid:
                 raise HTTPException(status_code=400, detail=f"Invalid sections: {', '.join(invalid)}")
             member.allowed_sections = body.allowed_sections
+            # Remove orphaned pages when sections are narrowed
+            if member.allowed_pages is not None:
+                member.allowed_pages = [
+                    p for p in member.allowed_pages if PAGE_TO_SECTION.get(p) in body.allowed_sections
+                ] or None
+        if body.allowed_pages is not None:
+            sections = body.allowed_sections if body.allowed_sections is not None else (member.allowed_sections or [])
+            _validate_pages(body.allowed_pages, sections)
+            member.allowed_pages = body.allowed_pages or None
         await db.flush()
         await db.refresh(member)
         user_result = await db.execute(select(User.email).where(User.id == member.user_id))
@@ -227,6 +261,14 @@ async def update_member(
             if invalid:
                 raise HTTPException(status_code=400, detail=f"Invalid sections: {', '.join(invalid)}")
             inv.allowed_sections = body.allowed_sections
+            if inv.allowed_pages is not None:
+                inv.allowed_pages = [
+                    p for p in inv.allowed_pages if PAGE_TO_SECTION.get(p) in body.allowed_sections
+                ] or None
+        if body.allowed_pages is not None:
+            sections = body.allowed_sections if body.allowed_sections is not None else (inv.allowed_sections or [])
+            _validate_pages(body.allowed_pages, sections)
+            inv.allowed_pages = body.allowed_pages or None
         await db.flush()
         await db.refresh(inv)
         return _invitation_response(inv)

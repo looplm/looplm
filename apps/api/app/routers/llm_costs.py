@@ -22,7 +22,7 @@ from app.schemas.llm_costs import (
     ServiceCostBreakdown,
 )
 
-router = APIRouter(prefix="/api/llm-costs", tags=["llm-costs"], dependencies=[require_section("observe")])
+router = APIRouter(prefix="/api/llm-costs", tags=["llm-costs"], dependencies=[require_section("observe", "costs")])
 
 
 def _date_range(

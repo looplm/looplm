@@ -46,7 +46,7 @@ const NAV_GROUPS = [
 export default function Sidebar({ onNavigate, collapsed, onToggleCollapse }: { onNavigate?: () => void; collapsed?: boolean; onToggleCollapse?: () => void }) {
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
-  const { allowedSections } = usePermissions();
+  const { allowedSections, canAccessPage } = usePermissions();
   const [mounted, setMounted] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -192,37 +192,43 @@ export default function Sidebar({ onNavigate, collapsed, onToggleCollapse }: { o
       )}
 
       <nav className="flex flex-col gap-1">
-        {NAV_GROUPS.filter((g) => allowedSections.includes(g.label.toLowerCase())).map((group, groupIdx) => (
-          <div key={group.label}>
-            {groupIdx > 0 && (
-              <div className={`my-2 border-t border-gray-200 dark:border-slate-800 ${collapsed ? "" : "mx-3"}`} />
-            )}
-            {!collapsed && (
-              <div className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-widest text-gray-400 dark:text-slate-500 select-none">
-                {group.label}
-              </div>
-            )}
-            {collapsed && groupIdx > 0 && null}
-            {group.items.map((item) => {
-              const active = pathname.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={onNavigate}
-                  title={collapsed ? item.label : undefined}
-                  className={`flex items-center ${collapsed ? "justify-center" : "gap-3"} px-3 py-2 rounded-lg text-sm font-medium transition-colors ${active
-                      ? "bg-indigo-50 dark:bg-indigo-600/20 text-indigo-600 dark:text-indigo-300"
-                      : "text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800"
-                    }`}
-                >
-                  <span>{item.icon}</span>
-                  {!collapsed && item.label}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+        {NAV_GROUPS.filter((g) => allowedSections.includes(g.label.toLowerCase())).map((group, groupIdx) => {
+          const visibleItems = group.items.filter((item) =>
+            canAccessPage(item.href.slice(1)),
+          );
+          if (visibleItems.length === 0) return null;
+          return (
+            <div key={group.label}>
+              {groupIdx > 0 && (
+                <div className={`my-2 border-t border-gray-200 dark:border-slate-800 ${collapsed ? "" : "mx-3"}`} />
+              )}
+              {!collapsed && (
+                <div className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-widest text-gray-400 dark:text-slate-500 select-none">
+                  {group.label}
+                </div>
+              )}
+              {collapsed && groupIdx > 0 && null}
+              {visibleItems.map((item) => {
+                const active = pathname.startsWith(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onNavigate}
+                    title={collapsed ? item.label : undefined}
+                    className={`flex items-center ${collapsed ? "justify-center" : "gap-3"} px-3 py-2 rounded-lg text-sm font-medium transition-colors ${active
+                        ? "bg-indigo-50 dark:bg-indigo-600/20 text-indigo-600 dark:text-indigo-300"
+                        : "text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800"
+                      }`}
+                  >
+                    <span>{item.icon}</span>
+                    {!collapsed && item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          );
+        })}
       </nav>
       <div className="mt-auto pt-4 border-t border-gray-200 dark:border-slate-800 flex flex-col gap-1">
         <Link

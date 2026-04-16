@@ -11,7 +11,7 @@ from app.models.project import Project
 from app.schemas.route_analysis import BottleneckResponse, RouteAnalysisResponse
 from app.services.route_analysis import get_bottlenecks, get_route_analysis
 
-router = APIRouter(prefix="/api/route-analysis", tags=["route-analysis"], dependencies=[require_section("improve")])
+router = APIRouter(prefix="/api/route-analysis", tags=["route-analysis"], dependencies=[require_section("improve", "routes")])
 
 
 @router.get("/{integration_id}", response_model=RouteAnalysisResponse)

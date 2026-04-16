@@ -29,7 +29,7 @@ from app.schemas.dashboard import (
     TrendPoint,
 )
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[require_section("observe")])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[require_section("observe", "dashboard")])
 
 
 @router.get("/stats", response_model=DashboardStatsResponse)

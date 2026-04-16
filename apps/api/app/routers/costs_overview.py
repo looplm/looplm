@@ -24,7 +24,7 @@ from app.schemas.costs_overview import (
 )
 from app.services.llm_pricing import calculate_cost
 
-router = APIRouter(prefix="/api/costs", tags=["costs"], dependencies=[require_section("observe")])
+router = APIRouter(prefix="/api/costs", tags=["costs"], dependencies=[require_section("observe", "costs")])
 
 
 def _date_range(

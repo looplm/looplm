@@ -31,7 +31,7 @@ from .evaluator_helpers import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/evaluators", tags=["evaluators"], dependencies=[require_section("evaluate")])
+router = APIRouter(prefix="/api/evaluators", tags=["evaluators"], dependencies=[require_section("evaluate", "evaluators")])
 
 
 @router.get("", response_model=EvaluatorListResponse)

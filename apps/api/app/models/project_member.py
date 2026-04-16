@@ -10,6 +10,18 @@ from app.models.models import Base
 
 ALL_SECTIONS = ["observe", "evaluate", "improve"]
 
+SECTION_PAGES: dict[str, list[str]] = {
+    "observe": ["dashboard", "traces", "feedback", "costs"],
+    "evaluate": ["evaluations", "evaluators", "datasets"],
+    "improve": ["advisor", "routes", "prompts"],
+}
+
+ALL_PAGES = [page for pages in SECTION_PAGES.values() for page in pages]
+
+PAGE_TO_SECTION: dict[str, str] = {
+    page: section for section, pages in SECTION_PAGES.items() for page in pages
+}
+
 
 class ProjectMember(Base):
     __tablename__ = "project_members"
@@ -28,6 +40,7 @@ class ProjectMember(Base):
     allowed_sections = Column(
         JSONB, nullable=False, server_default=text("'[\"observe\",\"evaluate\",\"improve\"]'::jsonb")
     )
+    allowed_pages = Column(JSONB, nullable=True, server_default=text("null"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     project = relationship("Project", back_populates="members")

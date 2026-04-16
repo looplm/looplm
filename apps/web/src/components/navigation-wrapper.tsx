@@ -15,27 +15,57 @@ const SECTION_ROUTES: Record<string, string[]> = {
   improve: ["/advisor", "/routes", "/prompts"],
 };
 
+const ROUTE_TO_PAGE: Record<string, string> = {
+  "/dashboard": "dashboard",
+  "/traces": "traces",
+  "/feedback": "feedback",
+  "/costs": "costs",
+  "/evaluations": "evaluations",
+  "/evaluators": "evaluators",
+  "/datasets": "datasets",
+  "/advisor": "advisor",
+  "/routes": "routes",
+  "/prompts": "prompts",
+};
+
+function findFirstAccessibleRoute(
+  allowedSections: string[],
+  canAccessPage: (page: string) => boolean,
+): string | null {
+  for (const s of ["observe", "evaluate", "improve"]) {
+    if (!allowedSections.includes(s)) continue;
+    for (const route of SECTION_ROUTES[s]) {
+      const page = ROUTE_TO_PAGE[route];
+      if (!page || canAccessPage(page)) return route;
+    }
+  }
+  return null;
+}
+
 function SectionGuard({ children }: { children: React.ReactNode }) {
-  const { allowedSections, loading } = usePermissions();
+  const { allowedSections, canAccessPage, loading } = usePermissions();
   const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
     if (loading) return;
+
+    // Check section access
     for (const [section, routes] of Object.entries(SECTION_ROUTES)) {
       if (routes.some((r) => pathname.startsWith(r)) && !allowedSections.includes(section)) {
-        // Redirect to the first allowed section's first route
-        for (const s of ["observe", "evaluate", "improve"]) {
-          if (allowedSections.includes(s)) {
-            router.replace(SECTION_ROUTES[s][0]);
-            return;
-          }
-        }
-        router.replace("/settings");
+        router.replace(findFirstAccessibleRoute(allowedSections, canAccessPage) || "/settings");
         return;
       }
     }
-  }, [pathname, allowedSections, loading, router]);
+
+    // Check page access
+    for (const [route, page] of Object.entries(ROUTE_TO_PAGE)) {
+      if (pathname.startsWith(route) && !canAccessPage(page)) {
+        router.replace(findFirstAccessibleRoute(allowedSections, canAccessPage) || "/settings");
+        return;
+      }
+    }
+  }, [pathname, allowedSections, canAccessPage, loading, router]);
 
   return <>{children}</>;
 }

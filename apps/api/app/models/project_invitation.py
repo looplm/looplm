@@ -32,4 +32,5 @@ class ProjectInvitation(Base):
     allowed_sections = Column(
         JSONB, nullable=False, server_default=text("'[\"observe\",\"evaluate\",\"improve\"]'::jsonb")
     )
+    allowed_pages = Column(JSONB, nullable=True, server_default=text("null"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))

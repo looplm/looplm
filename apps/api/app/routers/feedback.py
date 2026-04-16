@@ -25,7 +25,7 @@ from app.schemas.feedback import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/feedback", tags=["feedback"], dependencies=[require_section("observe")])
+router = APIRouter(prefix="/api/feedback", tags=["feedback"], dependencies=[require_section("observe", "feedback")])
 
 # Include sub-routers
 from app.routers.feedback_analytics import router as analytics_router

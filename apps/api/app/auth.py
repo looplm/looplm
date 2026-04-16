@@ -142,11 +142,13 @@ async def get_current_project(
     return project
 
 
-def require_section(section: str):
-    """Factory that returns a FastAPI dependency enforcing section access.
+def require_section(section: str, page: str | None = None):
+    """Factory that returns a FastAPI dependency enforcing section and page access.
 
     Project owners bypass the check (full access). Members must have the
-    section listed in their ``allowed_sections``.
+    section listed in their ``allowed_sections``. When *page* is given and
+    the member has an explicit ``allowed_pages`` list, the page must appear
+    in that list as well.
     """
 
     async def _check_section(
@@ -169,6 +171,14 @@ def require_section(section: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"You do not have access to the {section} section",
             )
+        # Page-level check: only enforced when the router specifies a page
+        # AND the member has explicit page restrictions (non-null list).
+        if page is not None and member.allowed_pages is not None:
+            if page not in member.allowed_pages:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"You do not have access to the {page} page",
+                )
 
     return Depends(_check_section)
 

@@ -12,7 +12,7 @@ from app.models.user import User
 from app.schemas.advisor import AdvisorAnalyzeRequest, AdvisorResponse
 from app.services.architecture_advisor import analyze_architecture, get_latest_suggestions
 
-router = APIRouter(prefix="/api/advisor", tags=["advisor"], dependencies=[require_section("improve")])
+router = APIRouter(prefix="/api/advisor", tags=["advisor"], dependencies=[require_section("improve", "advisor")])
 
 
 @router.post("/{integration_id}/analyze", response_model=AdvisorResponse)

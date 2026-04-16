@@ -23,7 +23,7 @@ from app.services.analysis_service import analyze_trace
 
 from .trace_helpers import _build_span_tree, _build_trace_tree
 
-router = APIRouter(prefix="/api/traces", tags=["traces"], dependencies=[require_section("observe")])
+router = APIRouter(prefix="/api/traces", tags=["traces"], dependencies=[require_section("observe", "traces")])
 logger = logging.getLogger(__name__)
 
 _analysis_tasks: dict[UUID, asyncio.Task] = {}

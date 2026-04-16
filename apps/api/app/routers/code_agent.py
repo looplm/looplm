@@ -31,7 +31,7 @@ from app.services.code_agent_service import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/code-agent", tags=["code-agent"], dependencies=[require_section("improve")])
+router = APIRouter(prefix="/api/code-agent", tags=["code-agent"], dependencies=[require_section("improve", "routes")])
 
 _code_agent_tasks: dict[UUID, asyncio.Task] = {}
 

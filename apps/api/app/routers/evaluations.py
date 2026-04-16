@@ -62,7 +62,7 @@ from .eval_helpers import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/evals", tags=["evaluations"], dependencies=[require_section("evaluate")])
+router = APIRouter(prefix="/api/evals", tags=["evaluations"], dependencies=[require_section("evaluate", "evaluations")])
 
 
 # ── Fixed-path routes (must come before /{run_id} parameterized routes) ──

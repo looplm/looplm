@@ -23,7 +23,7 @@ from app.schemas.experiments import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/experiments", tags=["experiments"], dependencies=[require_section("evaluate")])
+router = APIRouter(prefix="/api/experiments", tags=["experiments"], dependencies=[require_section("evaluate", "datasets")])
 
 
 @router.get("", response_model=ExperimentListResponse)

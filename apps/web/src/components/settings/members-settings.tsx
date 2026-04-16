@@ -12,6 +12,12 @@ import {
 
 const ALL_SECTIONS = ["observe", "evaluate", "improve"] as const;
 
+const SECTION_PAGES: Record<string, string[]> = {
+  observe: ["dashboard", "traces", "feedback", "costs"],
+  evaluate: ["evaluations", "evaluators", "datasets"],
+  improve: ["advisor", "routes", "prompts"],
+};
+
 export default function MembersSettings({ projectId }: { projectId: string | null }) {
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +29,12 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
   const [email, setEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("member");
   const [inviteSections, setInviteSections] = useState<string[]>([...ALL_SECTIONS]);
+  const [invitePages, setInvitePages] = useState<string[] | null>(null);
+  const [showPageDetail, setShowPageDetail] = useState(false);
   const [inviting, setInviting] = useState(false);
+
+  // Expanded rows for page-level editing
+  const [expandedMembers, setExpandedMembers] = useState<Set<string>>(new Set());
 
   async function loadMembers() {
     if (!projectId) return;
@@ -43,6 +54,14 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
     loadMembers();
   }, [projectId]);
 
+  function resetInviteForm() {
+    setEmail("");
+    setInviteRole("member");
+    setInviteSections([...ALL_SECTIONS]);
+    setInvitePages(null);
+    setShowPageDetail(false);
+  }
+
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
     if (!projectId || !email.trim()) return;
@@ -54,13 +73,12 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
         email: email.trim(),
         role: inviteRole,
         allowed_sections: inviteSections,
+        allowed_pages: invitePages,
       });
       if (result.status === "pending") {
         setLastInvite(result);
       }
-      setEmail("");
-      setInviteRole("member");
-      setInviteSections([...ALL_SECTIONS]);
+      resetInviteForm();
       await loadMembers();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to invite member");
@@ -76,18 +94,89 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
     setTimeout(() => setCopied(false), 2000);
   }
 
+  function handleInviteSectionToggle(section: string) {
+    setInviteSections((prev) => {
+      const next = prev.includes(section)
+        ? prev.filter((s) => s !== section)
+        : [...prev, section];
+      // Remove orphaned pages when a section is unchecked
+      if (invitePages !== null && !next.includes(section)) {
+        const sectionPages = SECTION_PAGES[section] || [];
+        const cleaned = invitePages.filter((p) => !sectionPages.includes(p));
+        setInvitePages(cleaned.length > 0 ? cleaned : null);
+      }
+      return next;
+    });
+  }
+
+  function handleInvitePageToggle(page: string) {
+    if (invitePages === null) {
+      // Currently all pages — toggling one off means explicit list minus this page
+      const allPagesForSections = inviteSections.flatMap((s) => SECTION_PAGES[s] || []);
+      setInvitePages(allPagesForSections.filter((p) => p !== page));
+    } else {
+      const next = invitePages.includes(page)
+        ? invitePages.filter((p) => p !== page)
+        : [...invitePages, page];
+      // Collapse back to null if all pages of all sections are selected
+      const allPagesForSections = inviteSections.flatMap((s) => SECTION_PAGES[s] || []);
+      if (allPagesForSections.every((p) => next.includes(p))) {
+        setInvitePages(null);
+      } else {
+        setInvitePages(next);
+      }
+    }
+  }
+
+  function isInvitePageChecked(page: string): boolean {
+    if (invitePages === null) return true;
+    return invitePages.includes(page);
+  }
+
   async function handleToggleSection(member: ProjectMember, section: string) {
     if (!projectId) return;
     const current = member.allowed_sections;
     const updated = current.includes(section)
       ? current.filter((s) => s !== section)
       : [...current, section];
+    // When removing a section, let the backend auto-clean orphaned pages
     try {
       await updateProjectMember(projectId, member.id, { allowed_sections: updated });
       await loadMembers();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to update member");
     }
+  }
+
+  async function handleTogglePage(member: ProjectMember, page: string) {
+    if (!projectId) return;
+    const currentPages = member.allowed_pages;
+    let updatedPages: string[] | null;
+
+    if (currentPages === null) {
+      // Currently all pages — toggling one off means explicit list minus this page
+      const allPagesForSections = member.allowed_sections.flatMap((s) => SECTION_PAGES[s] || []);
+      updatedPages = allPagesForSections.filter((p) => p !== page);
+    } else {
+      const next = currentPages.includes(page)
+        ? currentPages.filter((p) => p !== page)
+        : [...currentPages, page];
+      // Collapse to null if all pages selected
+      const allPagesForSections = member.allowed_sections.flatMap((s) => SECTION_PAGES[s] || []);
+      updatedPages = allPagesForSections.every((p) => next.includes(p)) ? null : next;
+    }
+
+    try {
+      await updateProjectMember(projectId, member.id, { allowed_pages: updatedPages });
+      await loadMembers();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to update member");
+    }
+  }
+
+  function isMemberPageChecked(member: ProjectMember, page: string): boolean {
+    if (member.allowed_pages === null) return true;
+    return member.allowed_pages.includes(page);
   }
 
   async function handleRoleChange(member: ProjectMember, role: string) {
@@ -110,6 +199,15 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to remove member");
     }
+  }
+
+  function toggleExpanded(memberId: string) {
+    setExpandedMembers((prev) => {
+      const next = new Set(prev);
+      if (next.has(memberId)) next.delete(memberId);
+      else next.add(memberId);
+      return next;
+    });
   }
 
   if (!projectId) {
@@ -153,16 +251,46 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
                 <input
                   type="checkbox"
                   checked={inviteSections.includes(section)}
-                  onChange={() =>
-                    setInviteSections((prev) =>
-                      prev.includes(section) ? prev.filter((s) => s !== section) : [...prev, section],
-                    )
-                  }
+                  onChange={() => handleInviteSectionToggle(section)}
                   className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
                 />
                 <span className="capitalize text-gray-700 dark:text-slate-300">{section}</span>
               </label>
             ))}
+          </div>
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowPageDetail(!showPageDetail);
+                if (showPageDetail) setInvitePages(null);
+              }}
+              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              {showPageDetail ? "Hide page-level access" : "Customize page-level access"}
+            </button>
+            {showPageDetail && (
+              <div className="mt-2 space-y-2 pl-1">
+                {ALL_SECTIONS.filter((s) => inviteSections.includes(s)).map((section) => (
+                  <div key={section}>
+                    <span className="text-xs font-medium text-gray-500 dark:text-slate-400 capitalize">{section}:</span>
+                    <div className="flex items-center gap-3 mt-1 ml-2">
+                      {(SECTION_PAGES[section] || []).map((page) => (
+                        <label key={page} className="flex items-center gap-1 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={isInvitePageChecked(page)}
+                            onChange={() => handleInvitePageToggle(page)}
+                            className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
+                          />
+                          <span className="capitalize text-gray-600 dark:text-slate-300">{page}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <button
             type="submit"
@@ -224,53 +352,80 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
               </tr>
             </thead>
             <tbody>
-              {members.map((member) => (
-                <tr
-                  key={member.id}
-                  className="border-b border-gray-100 dark:border-slate-800/50 last:border-0"
-                >
-                  <td className="px-6 py-3 text-gray-900 dark:text-white">{member.email}</td>
-                  <td className="px-6 py-3">
-                    {member.status === "pending" ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                        Pending
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                        Active
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-3">
-                    <select
-                      value={member.role}
-                      onChange={(e) => handleRoleChange(member, e.target.value)}
-                      className="px-2 py-1 rounded border border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white text-xs"
-                    >
-                      <option value="member">Member</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </td>
-                  {ALL_SECTIONS.map((section) => (
-                    <td key={section} className="px-4 py-3 text-center">
-                      <input
-                        type="checkbox"
-                        checked={member.allowed_sections.includes(section)}
-                        onChange={() => handleToggleSection(member, section)}
-                        className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
-                      />
+              {members.map((member) => {
+                const isExpanded = expandedMembers.has(member.id);
+                const hasPageRestrictions = member.allowed_pages !== null;
+                return (
+                  <tr
+                    key={member.id}
+                    className="border-b border-gray-100 dark:border-slate-800/50 last:border-0 align-top"
+                  >
+                    <td className="px-6 py-3 text-gray-900 dark:text-white">
+                      <div>{member.email}</div>
+                      <button
+                        onClick={() => toggleExpanded(member.id)}
+                        className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline mt-0.5"
+                      >
+                        {isExpanded ? "Hide pages" : hasPageRestrictions ? "Edit pages (restricted)" : "Edit pages"}
+                      </button>
                     </td>
-                  ))}
-                  <td className="px-6 py-3 text-right">
-                    <button
-                      onClick={() => handleRemove(member)}
-                      className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-xs font-medium"
-                    >
-                      {member.status === "pending" ? "Cancel" : "Remove"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    <td className="px-6 py-3">
+                      {member.status === "pending" ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                          Pending
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+                          Active
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-3">
+                      <select
+                        value={member.role}
+                        onChange={(e) => handleRoleChange(member, e.target.value)}
+                        className="px-2 py-1 rounded border border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white text-xs"
+                      >
+                        <option value="member">Member</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </td>
+                    {ALL_SECTIONS.map((section) => (
+                      <td key={section} className="px-4 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={member.allowed_sections.includes(section)}
+                          onChange={() => handleToggleSection(member, section)}
+                          className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        {isExpanded && member.allowed_sections.includes(section) && (
+                          <div className="mt-1.5 space-y-0.5 text-left">
+                            {(SECTION_PAGES[section] || []).map((page) => (
+                              <label key={page} className="flex items-center gap-1 text-[11px]">
+                                <input
+                                  type="checkbox"
+                                  checked={isMemberPageChecked(member, page)}
+                                  onChange={() => handleTogglePage(member, page)}
+                                  className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                                />
+                                <span className="capitalize text-gray-500 dark:text-slate-400">{page}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-6 py-3 text-right">
+                      <button
+                        onClick={() => handleRemove(member)}
+                        className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-xs font-medium"
+                      >
+                        {member.status === "pending" ? "Cancel" : "Remove"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

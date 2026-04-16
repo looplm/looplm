@@ -75,6 +75,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
             user_id=user.id,
             role=inv.role,
             allowed_sections=inv.allowed_sections,
+            allowed_pages=inv.allowed_pages,
         )
         db.add(member)
         await db.delete(inv)

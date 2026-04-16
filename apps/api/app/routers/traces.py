@@ -25,7 +25,7 @@ from .trace_helpers import _multi_filter, _parse_multi
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/traces", tags=["traces"], dependencies=[require_section("observe")])
+router = APIRouter(prefix="/api/traces", tags=["traces"], dependencies=[require_section("observe", "traces")])
 
 from .trace_threads import router as trace_threads_router
 router.include_router(trace_threads_router)

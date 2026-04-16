@@ -14,11 +14,13 @@ class MemberInvite(BaseModel):
     email: EmailStr
     role: str = Field("member", pattern="^(admin|member)$")
     allowed_sections: list[str] = Field(default_factory=lambda: list(ALL_SECTIONS))
+    allowed_pages: list[str] | None = None
 
 
 class MemberUpdate(BaseModel):
     role: str | None = Field(None, pattern="^(admin|member)$")
     allowed_sections: list[str] | None = None
+    allowed_pages: list[str] | None = Field(None)
 
 
 class MemberResponse(BaseModel):
@@ -27,6 +29,7 @@ class MemberResponse(BaseModel):
     email: str
     role: str
     allowed_sections: list[str]
+    allowed_pages: list[str] | None = None
     status: str = "active"
     created_at: datetime
 
@@ -37,6 +40,7 @@ class InviteResponse(BaseModel):
     email: str
     role: str
     allowed_sections: list[str]
+    allowed_pages: list[str] | None = None
     status: str  # "active" or "pending"
     invite_link: str | None = None
     email_sent: bool = False
@@ -49,3 +53,4 @@ class MemberListResponse(BaseModel):
 class PermissionsResponse(BaseModel):
     role: str
     allowed_sections: list[str]
+    allowed_pages: list[str] | None = None
