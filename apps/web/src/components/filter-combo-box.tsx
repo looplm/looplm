@@ -13,6 +13,9 @@ interface FilterComboBoxProps {
   mode: FilterMode;
   onModeChange: (mode: FilterMode) => void;
   allowFreeText?: boolean;
+  hideModeToggle?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 export default function FilterComboBox({
@@ -24,6 +27,9 @@ export default function FilterComboBox({
   mode,
   onModeChange,
   allowFreeText = true,
+  hideModeToggle = false,
+  disabled = false,
+  disabledReason,
 }: FilterComboBoxProps) {
   const [inputValue, setInputValue] = useState("");
   const [isOpen, setIsOpen] = useState(false);
@@ -79,27 +85,30 @@ export default function FilterComboBox({
   return (
     <div className="flex flex-col gap-1" ref={containerRef}>
       <div className="flex items-center gap-2">
-        <label className="text-xs text-gray-500 dark:text-slate-400 font-medium">
+        <label className="text-xs text-gray-500 dark:text-slate-400 font-medium" title={disabled ? disabledReason : undefined}>
           {label}
         </label>
-        <button
-          type="button"
-          onClick={() => onModeChange(mode === "include" ? "exclude" : "include")}
-          className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full border transition-colors ${
-            mode === "include"
-              ? "bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800"
-              : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800"
-          }`}
-        >
-          {mode === "include" ? "IN" : "NOT"}
-        </button>
+        {!hideModeToggle && (
+          <button
+            type="button"
+            onClick={() => onModeChange(mode === "include" ? "exclude" : "include")}
+            className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full border transition-colors ${
+              mode === "include"
+                ? "bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800"
+                : "bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800"
+            }`}
+          >
+            {mode === "include" ? "IN" : "NOT"}
+          </button>
+        )}
       </div>
 
       <div className="relative">
         {/* Chips + input rendered inline inside a single styled container */}
         <div
-          className="flex flex-wrap items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg min-w-[200px] focus-within:border-indigo-500 cursor-text"
-          onClick={() => inputRef.current?.focus()}
+          className={`flex flex-wrap items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg min-w-[200px] focus-within:border-indigo-500 ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-text"}`}
+          title={disabled ? disabledReason : undefined}
+          onClick={() => { if (!disabled) inputRef.current?.focus(); }}
         >
           {selected.map((val) => {
             const isWildcard = val.includes("*");
@@ -114,13 +123,15 @@ export default function FilterComboBox({
               } ${isWildcard ? "border border-dashed border-current" : ""}`}
             >
               <span className="truncate">{val}</span>
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); removeValue(val); }}
-                className="hover:opacity-70 transition-opacity flex-shrink-0 ml-0.5"
-              >
-                &times;
-              </button>
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); removeValue(val); }}
+                  className="hover:opacity-70 transition-opacity flex-shrink-0 ml-0.5"
+                >
+                  &times;
+                </button>
+              )}
             </span>
             );
           })}
@@ -135,12 +146,13 @@ export default function FilterComboBox({
             }}
             onFocus={() => setIsOpen(true)}
             onKeyDown={handleKeyDown}
-            className="flex-1 min-w-[60px] bg-transparent text-sm text-gray-700 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none py-0.5"
+            disabled={disabled}
+            className="flex-1 min-w-[60px] bg-transparent text-sm text-gray-700 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none py-0.5 disabled:cursor-not-allowed"
           />
         </div>
 
         {/* Dropdown */}
-        {isOpen && (filtered.length > 0 || inputValue.trim()) && (
+        {!disabled && isOpen && (filtered.length > 0 || inputValue.trim()) && (
           <div className="absolute z-50 mt-1 w-full max-h-48 overflow-auto bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg">
             {filtered.slice(0, 20).map((option) => (
               <button

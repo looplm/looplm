@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Integration, Trace
 from app.models.project import Project
+from app.services.observe_filter import get_observe_trace_names
 from app.auth import get_current_project
 from app.db import get_db
 from app.schemas.traces import (
@@ -57,6 +58,11 @@ async def list_threads(
     conditions = [Trace.integration_id.in_(project_integration_ids)]
     if integration_id:
         conditions.append(Trace.integration_id == integration_id)
+
+    # Project-level Observe trace-name scope
+    observe_names = get_observe_trace_names(project)
+    if observe_names:
+        conditions.append(Trace.name.in_(observe_names))
 
     status_vals = _parse_multi(status)
     if status_vals:

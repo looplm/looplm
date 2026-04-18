@@ -66,6 +66,12 @@ export default function GlobalFilterHeader() {
     setDateRange,
     resetFilters,
     hasActiveFilters,
+    traceNames,
+    traceNameOptions,
+    canEditTraceNames,
+    traceNamesSaving,
+    traceNamesError,
+    setTraceNames,
   } = useGlobalFilters();
 
   const [environments, setEnvironments] = useState<string[]>([]);
@@ -74,6 +80,9 @@ export default function GlobalFilterHeader() {
   const [userSearch, setUserSearch] = useState("");
   const userDropdownRef = useRef<HTMLDivElement>(null);
   const userInputRef = useRef<HTMLInputElement>(null);
+  const [showTraceDropdown, setShowTraceDropdown] = useState(false);
+  const [traceSearch, setTraceSearch] = useState("");
+  const traceDropdownRef = useRef<HTMLDivElement>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [showCustom, setShowCustom] = useState(() => {
     const detected = detectQuickRange(startDate, endDate);
@@ -85,6 +94,9 @@ export default function GlobalFilterHeader() {
     const handler = (e: MouseEvent) => {
       if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
         setShowUserDropdown(false);
+      }
+      if (traceDropdownRef.current && !traceDropdownRef.current.contains(e.target as Node)) {
+        setShowTraceDropdown(false);
       }
     };
     document.addEventListener("mousedown", handler);
@@ -125,7 +137,7 @@ export default function GlobalFilterHeader() {
     }`;
 
   return (
-    <div className="flex flex-wrap items-center gap-3 mb-6 px-4 py-2.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border border-gray-200/60 dark:border-slate-700/60 rounded-xl shadow-sm">
+    <div className="relative z-40 flex flex-wrap items-center gap-3 mb-6 px-4 py-2.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border border-gray-200/60 dark:border-slate-700/60 rounded-xl shadow-sm">
       {/* Date range icon + pills */}
       <div className="flex items-center gap-1.5">
         <svg className="w-4 h-4 text-gray-400 dark:text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -222,7 +234,7 @@ export default function GlobalFilterHeader() {
               : "Filter Users"}
           </button>
           {showUserDropdown && (
-            <div className="absolute right-0 top-full mt-1 z-20 w-80 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
+            <div className="absolute right-0 top-full mt-1 z-50 w-80 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
               {/* Mode toggle */}
               <div className="flex border-b border-gray-100 dark:border-slate-700">
                 {(["include", "exclude"] as const).map((mode) => (
@@ -339,6 +351,98 @@ export default function GlobalFilterHeader() {
                 >
                   Clear all
                 </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Trace-type filter (persisted to project.settings, owner-only) */}
+      {traceNameOptions.length > 0 && (
+        <div className="relative" ref={traceDropdownRef}>
+          <button
+            onClick={() => {
+              if (!canEditTraceNames) return;
+              setShowTraceDropdown((v) => !v);
+            }}
+            disabled={!canEditTraceNames}
+            title={
+              !canEditTraceNames
+                ? "Only the project owner can change which trace types are included"
+                : "Scope every Observe page to a subset of trace types"
+            }
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
+              traceNames.length > 0
+                ? "bg-indigo-50 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/30"
+                : "bg-gray-50 dark:bg-slate-800 text-gray-600 dark:text-slate-300 border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700"
+            } ${!canEditTraceNames ? "opacity-60 cursor-not-allowed" : ""}`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            </svg>
+            {traceNames.length > 0
+              ? `${traceNames.length} trace type${traceNames.length === 1 ? "" : "s"}`
+              : "All trace types"}
+            {traceNamesSaving && <span className="ml-1 text-[10px] opacity-70">(saving…)</span>}
+          </button>
+          {showTraceDropdown && canEditTraceNames && (
+            <div className="absolute right-0 top-full mt-1 z-50 w-80 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
+              <div className="px-3 py-2 text-[11px] text-gray-500 dark:text-slate-400 border-b border-gray-100 dark:border-slate-700">
+                Scopes every number on Dashboard, Traces, Feedback and Costs. Empty = all trace types.
+              </div>
+              <div className="p-2 border-b border-gray-100 dark:border-slate-700">
+                <input
+                  type="text"
+                  value={traceSearch}
+                  onChange={(e) => setTraceSearch(e.target.value)}
+                  placeholder="Search trace types..."
+                  className="w-full px-2.5 py-1.5 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-md text-xs text-gray-700 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="max-h-60 overflow-y-auto py-1">
+                {traceNameOptions
+                  .filter((n) => !traceSearch || n.toLowerCase().includes(traceSearch.toLowerCase()))
+                  .map((n) => {
+                    const isSelected = traceNames.includes(n);
+                    return (
+                      <button
+                        key={n}
+                        onClick={() => {
+                          const next = isSelected
+                            ? traceNames.filter((x) => x !== n)
+                            : [...traceNames, n];
+                          setTraceNames(next);
+                        }}
+                        className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors ${
+                          isSelected ? "bg-gray-50 dark:bg-slate-700/50" : ""
+                        }`}
+                      >
+                        <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                          isSelected
+                            ? "bg-indigo-500 border-indigo-500 text-white"
+                            : "border-gray-300 dark:border-slate-600"
+                        }`}>
+                          {isSelected && (
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          )}
+                        </span>
+                        <span className="truncate text-gray-700 dark:text-slate-200">{n}</span>
+                      </button>
+                    );
+                  })}
+              </div>
+              {traceNames.length > 0 && (
+                <button
+                  onClick={() => setTraceNames([])}
+                  className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-400/10 border-t border-gray-100 dark:border-slate-700 transition-colors"
+                >
+                  Clear (include all types)
+                </button>
+              )}
+              {traceNamesError && (
+                <p className="px-3 py-2 text-[11px] text-red-500 border-t border-gray-100 dark:border-slate-700">{traceNamesError}</p>
               )}
             </div>
           )}

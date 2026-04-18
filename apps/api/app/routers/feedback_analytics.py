@@ -15,6 +15,7 @@ from app.db import get_db
 from app.models.models import FeedbackScore, Integration, Trace
 from app.models.project import Project
 from app.models.user import User
+from app.services.observe_filter import get_observe_trace_names
 from app.schemas.datasets import TestCaseSuggestion
 from app.schemas.feedback import (
     FeedbackStatsResponse,
@@ -61,7 +62,8 @@ async def feedback_stats(
 
     _inc_uids = [v.strip() for v in (include_user_ids or "").split(",") if v.strip()]
     _exc_uids = [v.strip() for v in (exclude_user_ids or "").split(",") if v.strip()]
-    _needs_trace_join = bool(environment or _inc_uids or _exc_uids)
+    observe_names = get_observe_trace_names(project)
+    _needs_trace_join = bool(environment or _inc_uids or _exc_uids or observe_names)
     fb_count_query = select(func.count(FeedbackScore.id)).where(*fb_filter)
     fb_positive_query = select(func.count(FeedbackScore.id)).where(*fb_filter, FeedbackScore.value == 1)
     if _needs_trace_join:
@@ -76,6 +78,9 @@ async def feedback_stats(
         if _exc_uids:
             fb_count_query = fb_count_query.where(~Trace.user_id.in_(_exc_uids))
             fb_positive_query = fb_positive_query.where(~Trace.user_id.in_(_exc_uids))
+        if observe_names:
+            fb_count_query = fb_count_query.where(Trace.name.in_(observe_names))
+            fb_positive_query = fb_positive_query.where(Trace.name.in_(observe_names))
 
     total_fb = (await db.execute(fb_count_query)).scalar() or 0
     positive = (await db.execute(fb_positive_query)).scalar() or 0
@@ -92,6 +97,8 @@ async def feedback_stats(
         trace_filter.append(Trace.user_id.in_(_inc_uids))
     if _exc_uids:
         trace_filter.append(~Trace.user_id.in_(_exc_uids))
+    if observe_names:
+        trace_filter.append(Trace.name.in_(observe_names))
 
     total_traces = (await db.execute(select(func.count(Trace.id)).where(*trace_filter))).scalar() or 0
 
@@ -107,6 +114,8 @@ async def feedback_stats(
             fb_with_trace_query = fb_with_trace_query.where(Trace.user_id.in_(_inc_uids))
         if _exc_uids:
             fb_with_trace_query = fb_with_trace_query.where(~Trace.user_id.in_(_exc_uids))
+        if observe_names:
+            fb_with_trace_query = fb_with_trace_query.where(Trace.name.in_(observe_names))
     traces_with_fb = (await db.execute(fb_with_trace_query)).scalar() or 0
     no_feedback = total_traces - traces_with_fb
 
@@ -127,6 +136,8 @@ async def feedback_stats(
             trend_query = trend_query.where(Trace.user_id.in_(_inc_uids))
         if _exc_uids:
             trend_query = trend_query.where(~Trace.user_id.in_(_exc_uids))
+        if observe_names:
+            trend_query = trend_query.where(Trace.name.in_(observe_names))
     trend_query = trend_query.group_by(cast(FeedbackScore.scored_at, Date)).order_by(cast(FeedbackScore.scored_at, Date))
     trend_result = await db.execute(trend_query)
     trends = [
@@ -160,6 +171,8 @@ async def feedback_stats(
             grader_query = grader_query.where(Trace.user_id.in_(_inc_uids))
         if _exc_uids:
             grader_query = grader_query.where(~Trace.user_id.in_(_exc_uids))
+        if observe_names:
+            grader_query = grader_query.where(Trace.name.in_(observe_names))
     grader_result = await db.execute(grader_query)
     grader_stats = [
         GraderStats(
@@ -191,6 +204,8 @@ async def feedback_stats(
             grader_trend_query = grader_trend_query.where(Trace.user_id.in_(_inc_uids))
         if _exc_uids:
             grader_trend_query = grader_trend_query.where(~Trace.user_id.in_(_exc_uids))
+        if observe_names:
+            grader_trend_query = grader_trend_query.where(Trace.name.in_(observe_names))
     grader_trend_query = grader_trend_query.group_by(
         FeedbackScore.score_name, cast(FeedbackScore.scored_at, Date)
     ).order_by(FeedbackScore.score_name, cast(FeedbackScore.scored_at, Date))

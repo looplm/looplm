@@ -131,7 +131,7 @@ export default function TracesPage() {
 
   useEffect(() => { localStorage.setItem("traces-view-mode", viewMode); }, [viewMode]);
 
-  useEffect(() => { load(); }, [page, viewMode, filters, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers]);
+  useEffect(() => { load(); }, [page, viewMode, filters, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
 
   const isEmpty = viewMode === "threads"
     ? !threadData || (threadData.data.length === 0 && threadData.standalone_traces.length === 0)

@@ -15,6 +15,7 @@ from app.db import get_db
 from app.models.integrations import Integration, Span, SpanType, Trace
 from app.models.llm_usage import LlmUsageRecord
 from app.models.project import Project
+from app.services.observe_filter import get_observe_trace_names
 from app.schemas.costs_overview import (
     CostOverviewTrendPoint,
     CostsOverviewResponse,
@@ -76,6 +77,10 @@ async def get_costs_overview(
         span_filters.append(~Trace.user_id.in_(_exc_uids))
     if integration_id:
         span_filters.append(Trace.integration_id == integration_id)
+
+    observe_names = get_observe_trace_names(project)
+    if observe_names:
+        span_filters.append(Trace.name.in_(observe_names))
 
     # Group by date + model for trend and breakdown
     app_q = await db.execute(

@@ -5,14 +5,20 @@
 
 // --- Projects ---
 
+export interface ProjectSettings {
+  observe_trace_names?: string[];
+  [key: string]: unknown;
+}
+
 export interface Project {
   id: string;
   owner_id: string;
   name: string;
   description: string | null;
-  settings: Record<string, unknown>;
+  settings: ProjectSettings;
   created_at: string;
   updated_at: string;
+  role?: string;
 }
 
 // --- Dashboard ---

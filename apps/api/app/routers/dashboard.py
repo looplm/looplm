@@ -19,6 +19,7 @@ from app.models.models import (
     TraceStatus,
 )
 from app.models.project import Project
+from app.services.observe_filter import get_observe_trace_names
 from app.schemas.dashboard import (
     DashboardPeriod,
     DashboardStatsResponse,
@@ -56,6 +57,9 @@ async def get_dashboard_stats(
     # Scope to project's integrations
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
 
+    # Project-level trace-name filter (empty/missing = all traces)
+    trace_names = get_observe_trace_names(project)
+
     # Base filter
     base_filter = [Trace.start_time >= start, Trace.start_time <= now, Trace.integration_id.in_(project_integration_ids)]
     if integration_id:
@@ -66,6 +70,8 @@ async def get_dashboard_stats(
         base_filter.append(Trace.user_id.in_(include_user_ids))
     if exclude_user_ids:
         base_filter.append(~Trace.user_id.in_(exclude_user_ids))
+    if trace_names:
+        base_filter.append(Trace.name.in_(trace_names))
 
     # Totals (including unique users/threads)
     totals_q = select(
@@ -143,7 +149,7 @@ async def get_dashboard_stats(
         )
         .where(*fb_base_filter)
     )
-    fb_needs_join = bool(environment or include_user_ids or exclude_user_ids)
+    fb_needs_join = bool(environment or include_user_ids or exclude_user_ids or trace_names)
     if fb_needs_join:
         fb_daily_q = fb_daily_q.join(Trace, FeedbackScore.trace_id == Trace.id)
         if environment:
@@ -152,6 +158,8 @@ async def get_dashboard_stats(
             fb_daily_q = fb_daily_q.where(Trace.user_id.in_(include_user_ids))
         if exclude_user_ids:
             fb_daily_q = fb_daily_q.where(~Trace.user_id.in_(exclude_user_ids))
+        if trace_names:
+            fb_daily_q = fb_daily_q.where(Trace.name.in_(trace_names))
     fb_daily_q = fb_daily_q.group_by(cast(FeedbackScore.scored_at, Date))
     fb_daily_rows = (await db.execute(fb_daily_q)).all()
     fb_by_date = {str(r.date): (int(r.positive or 0), int(r.negative or 0)) for r in fb_daily_rows}
@@ -172,6 +180,8 @@ async def get_dashboard_stats(
             fb_traces_q = fb_traces_q.where(Trace.user_id.in_(include_user_ids))
         if exclude_user_ids:
             fb_traces_q = fb_traces_q.where(~Trace.user_id.in_(exclude_user_ids))
+        if trace_names:
+            fb_traces_q = fb_traces_q.where(Trace.name.in_(trace_names))
     fb_traces_q = fb_traces_q.group_by(cast(FeedbackScore.scored_at, Date))
     fb_traces_rows = (await db.execute(fb_traces_q)).all()
     fb_traces_by_date = {str(r.date): int(r.traces_with_fb or 0) for r in fb_traces_rows}
@@ -214,6 +224,10 @@ async def get_dashboard_stats(
             fb_summary_total_q = fb_summary_total_q.where(~Trace.user_id.in_(exclude_user_ids))
             fb_summary_pos_q = fb_summary_pos_q.where(~Trace.user_id.in_(exclude_user_ids))
             fb_summary_traces_q = fb_summary_traces_q.where(~Trace.user_id.in_(exclude_user_ids))
+        if trace_names:
+            fb_summary_total_q = fb_summary_total_q.where(Trace.name.in_(trace_names))
+            fb_summary_pos_q = fb_summary_pos_q.where(Trace.name.in_(trace_names))
+            fb_summary_traces_q = fb_summary_traces_q.where(Trace.name.in_(trace_names))
 
     total_fb = (await db.execute(fb_summary_total_q)).scalar() or 0
     positive_fb = (await db.execute(fb_summary_pos_q)).scalar() or 0

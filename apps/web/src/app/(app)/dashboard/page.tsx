@@ -30,7 +30,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const { startDate, endDate, environment, userFilterMode, filteredUsers } = useGlobalFilters();
+  const { startDate, endDate, environment, userFilterMode, filteredUsers, traceNames } = useGlobalFilters();
 
   useEffect(() => {
     setStats(null);
@@ -45,7 +45,7 @@ export default function DashboardPage() {
       else params.include_user_ids = filteredUsers;
     }
     getDashboardStats(params).then(setStats).catch((e) => setError(e.message));
-  }, [startDate, endDate, environment, userFilterMode, filteredUsers]);
+  }, [startDate, endDate, environment, userFilterMode, filteredUsers, traceNames]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
