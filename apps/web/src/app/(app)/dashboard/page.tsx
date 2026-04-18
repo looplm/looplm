@@ -1,9 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getDashboardStats, type DashboardStats } from "@/lib/api";
+import {
+  getDashboardStats,
+  getProjects,
+  getSelectedProjectId,
+  getTraceNames,
+  updateProject,
+  type DashboardStats,
+  type Project,
+} from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import Tooltip from "@/components/tooltip";
+import FilterComboBox from "@/components/filter-combo-box";
 import { UsageTrendChart } from "./usage-trend-chart";
 
 function InfoIcon() {
@@ -32,6 +41,50 @@ export default function DashboardPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const { startDate, endDate, environment, userFilterMode, filteredUsers } = useGlobalFilters();
 
+  const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const [traceNameOptions, setTraceNameOptions] = useState<string[]>([]);
+  const [selectedTraceNames, setSelectedTraceNames] = useState<string[]>([]);
+  const [traceNameSaving, setTraceNameSaving] = useState(false);
+  const [traceNameError, setTraceNameError] = useState<string | null>(null);
+  const [statsRefreshTick, setStatsRefreshTick] = useState(0);
+
+  useEffect(() => {
+    getProjects()
+      .then(({ data }) => {
+        const storedId = getSelectedProjectId();
+        const project = data.find((p) => p.id === storedId) ?? data[0] ?? null;
+        setCurrentProject(project);
+        const names = project?.settings?.dashboard_trace_names;
+        if (Array.isArray(names)) setSelectedTraceNames(names);
+      })
+      .catch(() => {});
+    getTraceNames().then(setTraceNameOptions).catch(() => {});
+  }, []);
+
+  const isOwner = currentProject?.role === "owner";
+
+  async function handleTraceNamesChange(next: string[]) {
+    if (!currentProject || !isOwner) return;
+    const prev = selectedTraceNames;
+    setSelectedTraceNames(next);
+    setTraceNameSaving(true);
+    setTraceNameError(null);
+    try {
+      await updateProject(currentProject.id, {
+        settings: { dashboard_trace_names: next },
+      });
+      setCurrentProject((p) =>
+        p ? { ...p, settings: { ...(p.settings || {}), dashboard_trace_names: next } } : p,
+      );
+      setStatsRefreshTick((t) => t + 1);
+    } catch (e: unknown) {
+      setSelectedTraceNames(prev);
+      setTraceNameError(e instanceof Error ? e.message : "Failed to save trace filter");
+    } finally {
+      setTraceNameSaving(false);
+    }
+  }
+
   useEffect(() => {
     setStats(null);
     setError(null);
@@ -45,7 +98,7 @@ export default function DashboardPage() {
       else params.include_user_ids = filteredUsers;
     }
     getDashboardStats(params).then(setStats).catch((e) => setError(e.message));
-  }, [startDate, endDate, environment, userFilterMode, filteredUsers]);
+  }, [startDate, endDate, environment, userFilterMode, filteredUsers, statsRefreshTick]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -105,7 +158,36 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
+      <h1 className="text-3xl font-bold mb-6">Dashboard</h1>
+
+      {/* Trace-name scope selector (persisted per project) */}
+      <div className="mb-6 flex flex-wrap items-end gap-3">
+        <div className="min-w-[260px] max-w-[520px]">
+          <FilterComboBox
+            label={`Included trace types${traceNameSaving ? " (saving…)" : ""}`}
+            placeholder={selectedTraceNames.length === 0 ? "All trace types" : "Add a trace type…"}
+            options={traceNameOptions}
+            selected={selectedTraceNames}
+            onSelectedChange={handleTraceNamesChange}
+            mode="include"
+            onModeChange={() => {}}
+            hideModeToggle
+            allowFreeText={false}
+            disabled={!isOwner}
+            disabledReason={
+              currentProject && !isOwner
+                ? "Only the project owner can change which trace types contribute to dashboard metrics"
+                : undefined
+            }
+          />
+          <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+            Scopes every number on this dashboard. Empty = all trace types.
+          </p>
+          {traceNameError && (
+            <p className="mt-1 text-xs text-red-500">{traceNameError}</p>
+          )}
+        </div>
+      </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
