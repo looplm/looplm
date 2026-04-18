@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case, cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user
+from app.auth import get_current_project, get_current_user, require_write
 from app.db import get_db
 from app.models.models import FeedbackScore, Integration, Trace
 from app.models.project import Project
@@ -218,7 +218,11 @@ async def feedback_stats(
     )
 
 
-@router.post("/generate-suggestions", response_model=list[TestCaseSuggestion])
+@router.post(
+    "/generate-suggestions",
+    response_model=list[TestCaseSuggestion],
+    dependencies=[require_write("observe", "feedback")],
+)
 async def generate_suggestions(
     feedback_type: str = Query("all", pattern="^(positive|negative|all)$"),
     limit: int = Query(20, ge=1, le=100),

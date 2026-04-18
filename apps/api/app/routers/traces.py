@@ -10,7 +10,7 @@ from sqlalchemy import func, select, Text, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.auth import get_current_project, require_section
+from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
 from app.models.models import Integration, IntegrationType, JsonImport, SyncStatus, Trace, TraceStatus
 from app.models.project import Project
@@ -31,7 +31,7 @@ from .trace_threads import router as trace_threads_router
 router.include_router(trace_threads_router)
 
 
-@router.post("/import", status_code=201)
+@router.post("/import", status_code=201, dependencies=[require_write("observe", "traces")])
 async def import_traces(
     body: TraceImportRequest,
     db: AsyncSession = Depends(get_db),

@@ -268,6 +268,7 @@ export interface ProjectPermissions {
   role: "owner" | "admin" | "member";
   allowed_sections: string[];
   allowed_pages: string[] | null;
+  write_pages: string[] | null;
 }
 
 export const getMyPermissions = () =>
@@ -282,6 +283,7 @@ export interface ProjectMember {
   role: string;
   allowed_sections: string[];
   allowed_pages: string[] | null;
+  write_pages: string[] | null;
   status: "active" | "pending";
   created_at: string;
 }
@@ -292,6 +294,7 @@ export interface InviteResponse {
   role: string;
   allowed_sections: string[];
   allowed_pages: string[] | null;
+  write_pages: string[] | null;
   status: "active" | "pending";
   invite_link: string | null;
   email_sent: boolean;
@@ -302,7 +305,13 @@ export const getProjectMembers = (projectId: string) =>
 
 export const inviteProjectMember = (
   projectId: string,
-  body: { email: string; role?: string; allowed_sections?: string[]; allowed_pages?: string[] | null },
+  body: {
+    email: string;
+    role?: string;
+    allowed_sections?: string[];
+    allowed_pages?: string[] | null;
+    write_pages?: string[] | null;
+  },
 ) =>
   request<InviteResponse>(`/api/projects/${projectId}/members`, {
     method: "POST",
@@ -312,7 +321,12 @@ export const inviteProjectMember = (
 export const updateProjectMember = (
   projectId: string,
   memberId: string,
-  body: { role?: string; allowed_sections?: string[]; allowed_pages?: string[] | null },
+  body: {
+    role?: string;
+    allowed_sections?: string[];
+    allowed_pages?: string[] | null;
+    write_pages?: string[] | null;
+  },
 ) =>
   request<ProjectMember>(`/api/projects/${projectId}/members/${memberId}`, {
     method: "PATCH",

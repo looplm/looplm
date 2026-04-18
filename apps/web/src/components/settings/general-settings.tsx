@@ -47,22 +47,6 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
 
   const currentProject = projects.find((p) => p.id === currentProjectId);
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  useEffect(() => {
-    if (currentProject) {
-      const s = currentProject.settings || {};
-      setCodeAgentProvider((s.code_agent_provider as string) || "anthropic");
-      setCodeAgentModel((s.code_agent_model as string) || "");
-      setCodeAgentApiKey("");
-      setCodeAgentApiKeyMask((s.code_agent_api_key as string) || "");
-      setCodeAgentFoundryResource((s.code_agent_foundry_resource as string) || "");
-    }
-    setCodeAgentMessage("");
-  }, [currentProjectId]);
-
   async function loadSettings() {
     try {
       const data = await getUserSettings();
@@ -80,6 +64,22 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  useEffect(() => {
+    if (currentProject) {
+      const s = currentProject.settings || {};
+      setCodeAgentProvider((s.code_agent_provider as string) || "anthropic");
+      setCodeAgentModel((s.code_agent_model as string) || "");
+      setCodeAgentApiKey("");
+      setCodeAgentApiKeyMask((s.code_agent_api_key as string) || "");
+      setCodeAgentFoundryResource((s.code_agent_foundry_resource as string) || "");
+    }
+    setCodeAgentMessage("");
+  }, [currentProjectId]);
 
   async function handleSave() {
     setSaving(true);

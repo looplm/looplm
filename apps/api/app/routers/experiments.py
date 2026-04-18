@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, require_section
+from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
 from app.models.models import Experiment
 from app.models.project import Project
@@ -43,7 +43,12 @@ async def list_experiments(
     )
 
 
-@router.post("", response_model=ExperimentResponse, status_code=201)
+@router.post(
+    "",
+    response_model=ExperimentResponse,
+    status_code=201,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def create_experiment(
     body: ExperimentCreate,
     db: AsyncSession = Depends(get_db),
@@ -97,7 +102,11 @@ async def get_experiment(
     return ExperimentResponse.model_validate(experiment)
 
 
-@router.put("/{experiment_id}", response_model=ExperimentResponse)
+@router.put(
+    "/{experiment_id}",
+    response_model=ExperimentResponse,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def update_experiment(
     experiment_id: UUID,
     body: ExperimentUpdate,
@@ -144,7 +153,11 @@ async def update_experiment(
     return ExperimentResponse.model_validate(experiment)
 
 
-@router.delete("/{experiment_id}", status_code=204)
+@router.delete(
+    "/{experiment_id}",
+    status_code=204,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def delete_experiment(
     experiment_id: UUID,
     db: AsyncSession = Depends(get_db),

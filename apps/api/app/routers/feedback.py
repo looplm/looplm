@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, require_section
+from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
 from app.models.models import FeedbackScore, Integration, IntegrationType, JsonImport, SyncStatus, Trace
 from app.models.project import Project
@@ -51,7 +51,7 @@ class FeedbackImportRequest(BaseModel):
     filename: str = "import.json"
 
 
-@router.post("/import", status_code=201)
+@router.post("/import", status_code=201, dependencies=[require_write("observe", "feedback")])
 async def import_feedback(
     body: FeedbackImportRequest,
     db: AsyncSession = Depends(get_db),

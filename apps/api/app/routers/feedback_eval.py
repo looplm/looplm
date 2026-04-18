@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user
+from app.auth import get_current_project, get_current_user, require_write
 from app.db import async_session, get_db
 from app.models.models import FeedbackScore, Integration, Trace
 from app.models.project import Project
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["feedback"])
 
 
-@router.post("/evaluate-single/{feedback_id}")
+@router.post("/evaluate-single/{feedback_id}", dependencies=[require_write("observe", "feedback")])
 async def evaluate_single_feedback(
     feedback_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -164,7 +164,7 @@ async def evaluate_single_feedback(
     }
 
 
-@router.post("/evaluate", status_code=202)
+@router.post("/evaluate", status_code=202, dependencies=[require_write("observe", "feedback")])
 async def evaluate_feedback(
     body: FeedbackEvaluateRequest,
     db: AsyncSession = Depends(get_db),
@@ -270,7 +270,7 @@ async def evaluate_feedback(
     return {"evaluation_id": str(evaluation.id), "status": "pending"}
 
 
-@router.post("/evaluate/{evaluation_id}/stop")
+@router.post("/evaluate/{evaluation_id}/stop", dependencies=[require_write("observe", "feedback")])
 async def stop_feedback_evaluation(
     evaluation_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -395,7 +395,11 @@ async def get_feedback_evaluator_config(
     return config
 
 
-@router.put("/evaluator/config", response_model=FeedbackEvaluatorConfigResponse)
+@router.put(
+    "/evaluator/config",
+    response_model=FeedbackEvaluatorConfigResponse,
+    dependencies=[require_write("observe", "feedback")],
+)
 async def update_feedback_evaluator_config(
     body: FeedbackEvaluatorConfigUpdate,
     db: AsyncSession = Depends(get_db),

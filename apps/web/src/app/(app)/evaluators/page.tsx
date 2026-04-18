@@ -13,10 +13,15 @@ import { EvaluatorModal, type EvaluatorFormData } from "./evaluator-modal";
 import { EvaluatorTableBody, type SortKey, type SortDir, type SortEntry } from "./evaluator-table";
 import { useEvaluatorActions } from "./evaluator-actions";
 import Tooltip from "@/components/tooltip";
+import { usePermissions } from "@/components/permissions-context";
 
 const RELEVANCE_ORDER: Record<string, number> = { core: 0, important: 1, minor: 2 };
 
+const READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
+
 export default function EvaluatorsPage() {
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("evaluators");
   const searchParams = useSearchParams();
   const highlightName = searchParams.get("highlight") || undefined;
   const [resp, setResp] = useState<EvaluatorListResponse | null>(null);
@@ -193,11 +198,11 @@ export default function EvaluatorsPage() {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
             </button>
           </Tooltip>
-          <Tooltip content="Import evaluators from JSON file">
+          <Tooltip content={canEdit ? "Import evaluators from JSON file" : READ_ONLY_TITLE}>
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={importing}
-              className="p-2 rounded-lg bg-gray-600 text-white hover:bg-gray-500 disabled:opacity-50 transition-colors"
+              disabled={importing || !canEdit}
+              className="p-2 rounded-lg bg-gray-600 text-white hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               aria-label="Import JSON"
             >
               {importing ? (
@@ -207,11 +212,11 @@ export default function EvaluatorsPage() {
               )}
             </button>
           </Tooltip>
-          <Tooltip content="Sync evaluators from evaluation results">
+          <Tooltip content={canEdit ? "Sync evaluators from evaluation results" : READ_ONLY_TITLE}>
             <button
               onClick={handleSync}
-              disabled={syncing}
-              className="p-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 transition-colors"
+              disabled={syncing || !canEdit}
+              className="p-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               aria-label="Sync from Results"
             >
               {syncing ? (
@@ -221,13 +226,14 @@ export default function EvaluatorsPage() {
               )}
             </button>
           </Tooltip>
-          <Tooltip content="Create a new evaluator">
+          <Tooltip content={canEdit ? "Create a new evaluator" : READ_ONLY_TITLE}>
             <button
               onClick={() => {
                 setEditingEvaluator(null);
                 setShowModal(true);
               }}
-              className="p-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+              disabled={!canEdit}
+              className="p-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               aria-label="New Evaluator"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
@@ -262,7 +268,9 @@ export default function EvaluatorsPage() {
           </span>
           <button
             onClick={handleBulkDelete}
-            className="px-3 py-1 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 transition-colors"
+            disabled={!canEdit}
+            title={!canEdit ? READ_ONLY_TITLE : undefined}
+            className="px-3 py-1 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Delete
           </button>

@@ -13,8 +13,13 @@ import {
 import { StatCard } from "@/components/eval-shared";
 import { ConfirmModal } from "@/components/confirm-modal";
 import Tooltip from "@/components/tooltip";
+import { usePermissions } from "@/components/permissions-context";
+
+const READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
 
 export default function DatasetsPage() {
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("datasets");
   const [resp, setResp] = useState<TestDatasetListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -144,11 +149,11 @@ export default function DatasetsPage() {
             className="hidden"
             onChange={handleImport}
           />
-          <Tooltip content="Import dataset from JSON file">
+          <Tooltip content={canEdit ? "Import dataset from JSON file" : READ_ONLY_TITLE}>
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={!!importing}
-              className="p-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+              disabled={!!importing || !canEdit}
+              className="p-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Import JSON"
             >
               {importing ? (
@@ -176,7 +181,9 @@ export default function DatasetsPage() {
           </span>
           <button
             onClick={handleBulkDelete}
-            className="px-3 py-1 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 transition-colors"
+            disabled={!canEdit}
+            title={!canEdit ? READ_ONLY_TITLE : undefined}
+            className="px-3 py-1 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Delete
           </button>
@@ -275,8 +282,9 @@ export default function DatasetsPage() {
                         </button>
                         <button
                           onClick={() => handleDeleteClick(ds.id)}
-                          className="p-1.5 rounded-md text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
-                          title="Delete"
+                          disabled={!canEdit}
+                          className="p-1.5 rounded-md text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          title={canEdit ? "Delete" : READ_ONLY_TITLE}
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="3 6 5 6 21 6" />

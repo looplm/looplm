@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, require_section
+from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
 from app.models.models import FeedbackScore, Integration, JsonImport, TestCase, TestDataset, Trace
 from app.models.project import Project
@@ -84,7 +84,12 @@ async def list_datasets(
     )
 
 
-@router.post("", response_model=TestDatasetItem, status_code=201)
+@router.post(
+    "",
+    response_model=TestDatasetItem,
+    status_code=201,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def create_dataset(
     body: TestDatasetCreate,
     db: AsyncSession = Depends(get_db),
@@ -142,7 +147,12 @@ async def get_suggestions(
     return build_suggestions(rows)
 
 
-@router.post("/import", response_model=TestDatasetItem, status_code=201)
+@router.post(
+    "/import",
+    response_model=TestDatasetItem,
+    status_code=201,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def import_dataset(
     body: ImportRequest,
     db: AsyncSession = Depends(get_db),
@@ -236,7 +246,11 @@ async def get_dataset(
     )
 
 
-@router.patch("/{dataset_id}", response_model=TestDatasetItem)
+@router.patch(
+    "/{dataset_id}",
+    response_model=TestDatasetItem,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def update_dataset(
     dataset_id: UUID,
     body: TestDatasetUpdate,
@@ -275,7 +289,11 @@ async def update_dataset(
     )
 
 
-@router.delete("/{dataset_id}", status_code=204)
+@router.delete(
+    "/{dataset_id}",
+    status_code=204,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def delete_dataset(
     dataset_id: UUID,
     db: AsyncSession = Depends(get_db),

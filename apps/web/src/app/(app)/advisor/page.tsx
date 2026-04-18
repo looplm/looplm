@@ -9,6 +9,7 @@ import {
   type Suggestion,
   type AdvisorResponse,
 } from "@/lib/api";
+import { usePermissions } from "@/components/permissions-context";
 
 const CATEGORY_LABELS: Record<string, string> = {
   time_to_value: "⚡ Time to Value",
@@ -64,6 +65,8 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
 }
 
 export default function AdvisorPage() {
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("advisor");
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [selectedIntegration, setSelectedIntegration] = useState("");
   const [advisorData, setAdvisorData] = useState<AdvisorResponse | null>(null);
@@ -113,8 +116,9 @@ export default function AdvisorPage() {
         <h1 className="text-3xl font-bold">Architecture Advisor</h1>
         <button
           onClick={handleAnalyze}
-          disabled={analyzing || !selectedIntegration}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          disabled={analyzing || !selectedIntegration || !canEdit}
+          title={!canEdit ? "Read-only access. Ask an admin to grant write permission." : undefined}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
         >
           {analyzing ? "Analyzing..." : "Run Analysis"}
         </button>

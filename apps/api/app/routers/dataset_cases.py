@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project
+from app.auth import get_current_project, require_write
 from app.db import get_db
 from app.models.models import TestCase, TestDataset
 from app.models.project import Project
@@ -19,7 +19,12 @@ from .dataset_helpers import _tc_to_item
 router = APIRouter(tags=["datasets"])
 
 
-@router.post("/{dataset_id}/cases", response_model=TestCaseItem, status_code=201)
+@router.post(
+    "/{dataset_id}/cases",
+    response_model=TestCaseItem,
+    status_code=201,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def create_test_case(
     dataset_id: UUID,
     body: TestCaseCreate,
@@ -60,7 +65,12 @@ async def create_test_case(
     return _tc_to_item(tc)
 
 
-@router.post("/{dataset_id}/cases/from-suggestion", response_model=TestCaseItem, status_code=201)
+@router.post(
+    "/{dataset_id}/cases/from-suggestion",
+    response_model=TestCaseItem,
+    status_code=201,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def create_from_suggestion(
     dataset_id: UUID,
     body: TestCaseCreate,
@@ -71,7 +81,11 @@ async def create_from_suggestion(
     return await create_test_case(dataset_id, body, db, project)
 
 
-@router.patch("/{dataset_id}/cases/{case_id}", response_model=TestCaseItem)
+@router.patch(
+    "/{dataset_id}/cases/{case_id}",
+    response_model=TestCaseItem,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def update_test_case(
     dataset_id: UUID,
     case_id: UUID,
@@ -105,7 +119,11 @@ async def update_test_case(
     return _tc_to_item(tc)
 
 
-@router.delete("/{dataset_id}/cases/{case_id}", status_code=204)
+@router.delete(
+    "/{dataset_id}/cases/{case_id}",
+    status_code=204,
+    dependencies=[require_write("evaluate", "datasets")],
+)
 async def delete_test_case(
     dataset_id: UUID,
     case_id: UUID,

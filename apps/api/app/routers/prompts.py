@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user, require_section
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
 from app.models.models import JsonImport
 from app.models.project import Project
@@ -59,7 +59,11 @@ async def list_all_prompts(
     return PromptListResponse(data=items, total=len(items))
 
 
-@router.post("/import", response_model=PromptSyncResponse)
+@router.post(
+    "/import",
+    response_model=PromptSyncResponse,
+    dependencies=[require_write("improve", "prompts")],
+)
 async def import_json_prompts(
     body: PromptImportRequest,
     db: AsyncSession = Depends(get_db),
@@ -82,7 +86,11 @@ async def import_json_prompts(
     return PromptSyncResponse(synced=count, message=f"Imported {count} prompts")
 
 
-@router.post("/sync/{integration_id}", response_model=PromptSyncResponse)
+@router.post(
+    "/sync/{integration_id}",
+    response_model=PromptSyncResponse,
+    dependencies=[require_write("improve", "prompts")],
+)
 async def sync_integration_prompts(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -150,7 +158,11 @@ async def get_prompt_versions(
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.post("/{prompt_id}/review", response_model=PromptReviewResult)
+@router.post(
+    "/{prompt_id}/review",
+    response_model=PromptReviewResult,
+    dependencies=[require_write("improve", "prompts")],
+)
 async def trigger_review(
     prompt_id: UUID,
     db: AsyncSession = Depends(get_db),

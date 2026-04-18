@@ -46,6 +46,21 @@ def _validate_pages(
             )
 
 
+def _validate_write_pages(
+    write_pages: list[str] | None, allowed_pages: list[str] | None
+) -> None:
+    """Ensure write_pages is a subset of allowed_pages (when both non-null)."""
+    if write_pages is None or allowed_pages is None:
+        return
+    orphans = set(write_pages) - set(allowed_pages)
+    if orphans:
+        raise HTTPException(
+            status_code=400,
+            detail=f"write_pages must be a subset of allowed_pages; "
+            f"unknown entries: {', '.join(sorted(orphans))}",
+        )
+
+
 def _member_response(member: ProjectMember, email: str) -> MemberResponse:
     return MemberResponse(
         id=member.id,
@@ -54,6 +69,7 @@ def _member_response(member: ProjectMember, email: str) -> MemberResponse:
         role=member.role,
         allowed_sections=member.allowed_sections or [],
         allowed_pages=member.allowed_pages,
+        write_pages=member.write_pages,
         status="active",
         created_at=member.created_at,
     )
@@ -67,6 +83,7 @@ def _invitation_response(inv: ProjectInvitation) -> MemberResponse:
         role=inv.role,
         allowed_sections=inv.allowed_sections or [],
         allowed_pages=inv.allowed_pages,
+        write_pages=inv.write_pages,
         status="pending",
         created_at=inv.created_at,
     )
@@ -119,6 +136,11 @@ async def invite_member(
     if invalid:
         raise HTTPException(status_code=400, detail=f"Invalid sections: {', '.join(invalid)}")
     _validate_pages(body.allowed_pages, body.allowed_sections)
+    _validate_write_pages(body.write_pages, body.allowed_pages)
+
+    # New invites default to read-only (empty write_pages) when caller omits the field.
+    # Admin role bypasses write checks regardless, so this is harmless for admins.
+    write_pages = body.write_pages if body.write_pages is not None else []
 
     # Check if user already exists
     result = await db.execute(select(User).where(User.email == body.email))
@@ -144,6 +166,7 @@ async def invite_member(
             role=body.role,
             allowed_sections=body.allowed_sections,
             allowed_pages=body.allowed_pages,
+            write_pages=write_pages,
         )
         db.add(member)
         await db.flush()
@@ -154,6 +177,7 @@ async def invite_member(
             role=member.role,
             allowed_sections=member.allowed_sections or [],
             allowed_pages=member.allowed_pages,
+            write_pages=member.write_pages,
             status="active",
         )
 
@@ -179,6 +203,7 @@ async def invite_member(
         role=body.role,
         allowed_sections=body.allowed_sections,
         allowed_pages=body.allowed_pages,
+        write_pages=write_pages,
     )
     db.add(invitation)
     await db.flush()
@@ -198,10 +223,42 @@ async def invite_member(
         role=invitation.role,
         allowed_sections=invitation.allowed_sections or [],
         allowed_pages=invitation.allowed_pages,
+        write_pages=invitation.write_pages,
         status="pending",
         invite_link=invite_url,
         email_sent=email_sent,
     )
+
+
+def _apply_update(
+    target: ProjectMember | ProjectInvitation, body: MemberUpdate
+) -> None:
+    """Apply PATCH body fields to a member or invitation, with cascading cleanup."""
+    if body.role is not None:
+        target.role = body.role
+    if body.allowed_sections is not None:
+        invalid = set(body.allowed_sections) - set(ALL_SECTIONS)
+        if invalid:
+            raise HTTPException(status_code=400, detail=f"Invalid sections: {', '.join(invalid)}")
+        target.allowed_sections = body.allowed_sections
+        # Prune allowed_pages that are now outside the new section set.
+        if target.allowed_pages is not None:
+            target.allowed_pages = [
+                p for p in target.allowed_pages
+                if PAGE_TO_SECTION.get(p) in body.allowed_sections
+            ] or None
+    if body.allowed_pages is not None:
+        sections = body.allowed_sections if body.allowed_sections is not None else (target.allowed_sections or [])
+        _validate_pages(body.allowed_pages, sections)
+        target.allowed_pages = body.allowed_pages or None
+    if body.write_pages is not None:
+        _validate_write_pages(body.write_pages, target.allowed_pages)
+        target.write_pages = body.write_pages
+    # Prune write_pages that are no longer in allowed_pages (after any narrowing above).
+    if target.write_pages is not None and target.allowed_pages is not None:
+        pruned = [p for p in target.write_pages if p in target.allowed_pages]
+        if pruned != target.write_pages:
+            target.write_pages = pruned
 
 
 @router.patch("/{member_id}", response_model=MemberResponse)
@@ -223,22 +280,7 @@ async def update_member(
     )
     member = result.scalar_one_or_none()
     if member:
-        if body.role is not None:
-            member.role = body.role
-        if body.allowed_sections is not None:
-            invalid = set(body.allowed_sections) - set(ALL_SECTIONS)
-            if invalid:
-                raise HTTPException(status_code=400, detail=f"Invalid sections: {', '.join(invalid)}")
-            member.allowed_sections = body.allowed_sections
-            # Remove orphaned pages when sections are narrowed
-            if member.allowed_pages is not None:
-                member.allowed_pages = [
-                    p for p in member.allowed_pages if PAGE_TO_SECTION.get(p) in body.allowed_sections
-                ] or None
-        if body.allowed_pages is not None:
-            sections = body.allowed_sections if body.allowed_sections is not None else (member.allowed_sections or [])
-            _validate_pages(body.allowed_pages, sections)
-            member.allowed_pages = body.allowed_pages or None
+        _apply_update(member, body)
         await db.flush()
         await db.refresh(member)
         user_result = await db.execute(select(User.email).where(User.id == member.user_id))
@@ -254,21 +296,7 @@ async def update_member(
     )
     inv = result.scalar_one_or_none()
     if inv:
-        if body.role is not None:
-            inv.role = body.role
-        if body.allowed_sections is not None:
-            invalid = set(body.allowed_sections) - set(ALL_SECTIONS)
-            if invalid:
-                raise HTTPException(status_code=400, detail=f"Invalid sections: {', '.join(invalid)}")
-            inv.allowed_sections = body.allowed_sections
-            if inv.allowed_pages is not None:
-                inv.allowed_pages = [
-                    p for p in inv.allowed_pages if PAGE_TO_SECTION.get(p) in body.allowed_sections
-                ] or None
-        if body.allowed_pages is not None:
-            sections = body.allowed_sections if body.allowed_sections is not None else (inv.allowed_sections or [])
-            _validate_pages(body.allowed_pages, sections)
-            inv.allowed_pages = body.allowed_pages or None
+        _apply_update(inv, body)
         await db.flush()
         await db.refresh(inv)
         return _invitation_response(inv)

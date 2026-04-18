@@ -13,6 +13,9 @@ import {
   type Experiment,
 } from "@/lib/api";
 import Tooltip from "@/components/tooltip";
+import { usePermissions } from "@/components/permissions-context";
+
+const EVAL_READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
 
 const tabs = [
   { label: "Runs", href: "/evaluations" },
@@ -22,6 +25,8 @@ const tabs = [
 ];
 
 export default function EvaluationsLayout({ children }: { children: React.ReactNode }) {
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("evaluations");
   const pathname = usePathname();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -164,10 +169,11 @@ export default function EvaluationsLayout({ children }: { children: React.ReactN
         <div className="flex items-center gap-2">
           {/* Run Eval button */}
           <div className="relative">
-            <Tooltip content="Run evaluation on selected datasets">
+            <Tooltip content={canEdit ? "Run evaluation on selected datasets" : EVAL_READ_ONLY_TITLE}>
               <button
                 onClick={handleOpenTriggerMenu}
-                className="p-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors"
+                disabled={!canEdit}
+                className="p-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 aria-label="Run Eval"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
@@ -359,11 +365,11 @@ export default function EvaluationsLayout({ children }: { children: React.ReactN
             onChange={handleImport}
             className="hidden"
           />
-          <Tooltip content="Import results JSON, or both results + test-cases JSON files">
+          <Tooltip content={canEdit ? "Import results JSON, or both results + test-cases JSON files" : EVAL_READ_ONLY_TITLE}>
             <button
               onClick={() => fileInputRef.current?.click()}
-              disabled={importing}
-              className="p-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+              disabled={importing || !canEdit}
+              className="p-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               aria-label="Import JSON"
             >
               {importing ? (

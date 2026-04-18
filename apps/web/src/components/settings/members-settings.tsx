@@ -18,6 +18,12 @@ const SECTION_PAGES: Record<string, string[]> = {
   improve: ["advisor", "routes", "prompts"],
 };
 
+const ALL_PAGES = Object.values(SECTION_PAGES).flat();
+
+function pagesForSections(sections: string[]): string[] {
+  return sections.flatMap((s) => SECTION_PAGES[s] || []);
+}
+
 export default function MembersSettings({ projectId }: { projectId: string | null }) {
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +36,7 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
   const [inviteRole, setInviteRole] = useState("member");
   const [inviteSections, setInviteSections] = useState<string[]>([...ALL_SECTIONS]);
   const [invitePages, setInvitePages] = useState<string[] | null>(null);
+  const [inviteWritePages, setInviteWritePages] = useState<string[]>([]);
   const [showPageDetail, setShowPageDetail] = useState(false);
   const [inviting, setInviting] = useState(false);
 
@@ -59,6 +66,7 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
     setInviteRole("member");
     setInviteSections([...ALL_SECTIONS]);
     setInvitePages(null);
+    setInviteWritePages([]);
     setShowPageDetail(false);
   }
 
@@ -69,11 +77,16 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
     setError(null);
     setLastInvite(null);
     try {
+      // Clamp write_pages to allowed pages before sending
+      const effectiveAllowedPages =
+        invitePages !== null ? invitePages : pagesForSections(inviteSections);
+      const writes = inviteWritePages.filter((p) => effectiveAllowedPages.includes(p));
       const result = await inviteProjectMember(projectId, {
         email: email.trim(),
         role: inviteRole,
         allowed_sections: inviteSections,
         allowed_pages: invitePages,
+        write_pages: writes,
       });
       if (result.status === "pending") {
         setLastInvite(result);
@@ -99,38 +112,57 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
       const next = prev.includes(section)
         ? prev.filter((s) => s !== section)
         : [...prev, section];
-      // Remove orphaned pages when a section is unchecked
-      if (invitePages !== null && !next.includes(section)) {
-        const sectionPages = SECTION_PAGES[section] || [];
-        const cleaned = invitePages.filter((p) => !sectionPages.includes(p));
-        setInvitePages(cleaned.length > 0 ? cleaned : null);
+      const sectionPages = SECTION_PAGES[section] || [];
+      if (!next.includes(section)) {
+        if (invitePages !== null) {
+          const cleaned = invitePages.filter((p) => !sectionPages.includes(p));
+          setInvitePages(cleaned.length > 0 ? cleaned : null);
+        }
+        setInviteWritePages((w) => w.filter((p) => !sectionPages.includes(p)));
       }
       return next;
     });
   }
 
   function handleInvitePageToggle(page: string) {
+    const section = ALL_PAGES.includes(page) ? Object.keys(SECTION_PAGES).find((s) => SECTION_PAGES[s].includes(page)) : undefined;
+    if (!section) return;
+    let nextPages: string[] | null;
     if (invitePages === null) {
-      // Currently all pages — toggling one off means explicit list minus this page
-      const allPagesForSections = inviteSections.flatMap((s) => SECTION_PAGES[s] || []);
-      setInvitePages(allPagesForSections.filter((p) => p !== page));
+      // Currently all pages — unchecking one collapses to an explicit list minus that page
+      const all = pagesForSections(inviteSections);
+      nextPages = all.filter((p) => p !== page);
     } else {
-      const next = invitePages.includes(page)
+      const toggled = invitePages.includes(page)
         ? invitePages.filter((p) => p !== page)
         : [...invitePages, page];
-      // Collapse back to null if all pages of all sections are selected
-      const allPagesForSections = inviteSections.flatMap((s) => SECTION_PAGES[s] || []);
-      if (allPagesForSections.every((p) => next.includes(p))) {
-        setInvitePages(null);
-      } else {
-        setInvitePages(next);
-      }
+      const all = pagesForSections(inviteSections);
+      nextPages = all.every((p) => toggled.includes(p)) ? null : toggled;
     }
+    setInvitePages(nextPages);
+    // If page is no longer allowed, remove from write_pages
+    const effective = nextPages === null ? pagesForSections(inviteSections) : nextPages;
+    setInviteWritePages((w) => w.filter((p) => effective.includes(p)));
+  }
+
+  function handleInviteWriteToggle(page: string) {
+    setInviteWritePages((prev) => {
+      if (prev.includes(page)) return prev.filter((p) => p !== page);
+      // Enabling write implies page must be readable
+      if (invitePages !== null && !invitePages.includes(page)) {
+        setInvitePages([...invitePages, page]);
+      }
+      return [...prev, page];
+    });
   }
 
   function isInvitePageChecked(page: string): boolean {
     if (invitePages === null) return true;
     return invitePages.includes(page);
+  }
+
+  function isInviteWriteChecked(page: string): boolean {
+    return inviteWritePages.includes(page);
   }
 
   async function handleToggleSection(member: ProjectMember, section: string) {
@@ -139,7 +171,6 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
     const updated = current.includes(section)
       ? current.filter((s) => s !== section)
       : [...current, section];
-    // When removing a section, let the backend auto-clean orphaned pages
     try {
       await updateProjectMember(projectId, member.id, { allowed_sections: updated });
       await loadMembers();
@@ -154,16 +185,14 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
     let updatedPages: string[] | null;
 
     if (currentPages === null) {
-      // Currently all pages — toggling one off means explicit list minus this page
-      const allPagesForSections = member.allowed_sections.flatMap((s) => SECTION_PAGES[s] || []);
-      updatedPages = allPagesForSections.filter((p) => p !== page);
+      const all = pagesForSections(member.allowed_sections);
+      updatedPages = all.filter((p) => p !== page);
     } else {
       const next = currentPages.includes(page)
         ? currentPages.filter((p) => p !== page)
         : [...currentPages, page];
-      // Collapse to null if all pages selected
-      const allPagesForSections = member.allowed_sections.flatMap((s) => SECTION_PAGES[s] || []);
-      updatedPages = allPagesForSections.every((p) => next.includes(p)) ? null : next;
+      const all = pagesForSections(member.allowed_sections);
+      updatedPages = all.every((p) => next.includes(p)) ? null : next;
     }
 
     try {
@@ -174,9 +203,56 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
     }
   }
 
+  async function handleToggleMemberWrite(member: ProjectMember, page: string) {
+    if (!projectId) return;
+    const currentWrite = member.write_pages;
+    const currentAllowed =
+      member.allowed_pages ?? pagesForSections(member.allowed_sections);
+
+    let nextWrite: string[];
+    if (currentWrite === null) {
+      // Legacy full-write: materialize the list and toggle
+      nextWrite = currentAllowed.filter((p) => p !== page);
+    } else if (currentWrite.includes(page)) {
+      nextWrite = currentWrite.filter((p) => p !== page);
+    } else {
+      nextWrite = [...currentWrite, page];
+    }
+
+    // If granting write on a page that isn't in allowed_pages, add it to allowed_pages too.
+    const patch: {
+      write_pages: string[];
+      allowed_pages?: string[] | null;
+    } = { write_pages: nextWrite };
+    if (
+      member.allowed_pages !== null &&
+      nextWrite.includes(page) &&
+      !member.allowed_pages.includes(page)
+    ) {
+      patch.allowed_pages = [...member.allowed_pages, page];
+    }
+
+    try {
+      await updateProjectMember(projectId, member.id, patch);
+      await loadMembers();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to update member");
+    }
+  }
+
   function isMemberPageChecked(member: ProjectMember, page: string): boolean {
     if (member.allowed_pages === null) return true;
     return member.allowed_pages.includes(page);
+  }
+
+  function isMemberWriteChecked(member: ProjectMember, page: string): boolean {
+    // Admins bypass write checks entirely.
+    if (member.role === "admin") return true;
+    if (member.write_pages === null) {
+      // Legacy: write implicitly granted on all allowed pages
+      return isMemberPageChecked(member, page);
+    }
+    return member.write_pages.includes(page);
   }
 
   async function handleRoleChange(member: ProjectMember, role: string) {
@@ -263,29 +339,52 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
               type="button"
               onClick={() => {
                 setShowPageDetail(!showPageDetail);
-                if (showPageDetail) setInvitePages(null);
+                if (showPageDetail) {
+                  setInvitePages(null);
+                  setInviteWritePages([]);
+                }
               }}
               className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
             >
               {showPageDetail ? "Hide page-level access" : "Customize page-level access"}
             </button>
             {showPageDetail && (
-              <div className="mt-2 space-y-2 pl-1">
+              <div className="mt-2 space-y-3 pl-1">
+                <p className="text-xs text-gray-500 dark:text-slate-400">
+                  {inviteRole === "admin"
+                    ? "Admins have write access everywhere — write toggles are cosmetic."
+                    : "New members default to read-only. Check Write to grant mutation access per page."}
+                </p>
                 {ALL_SECTIONS.filter((s) => inviteSections.includes(s)).map((section) => (
                   <div key={section}>
-                    <span className="text-xs font-medium text-gray-500 dark:text-slate-400 capitalize">{section}:</span>
-                    <div className="flex items-center gap-3 mt-1 ml-2">
-                      {(SECTION_PAGES[section] || []).map((page) => (
-                        <label key={page} className="flex items-center gap-1 text-xs">
-                          <input
-                            type="checkbox"
-                            checked={isInvitePageChecked(page)}
-                            onChange={() => handleInvitePageToggle(page)}
-                            className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
-                          />
-                          <span className="capitalize text-gray-600 dark:text-slate-300">{page}</span>
-                        </label>
-                      ))}
+                    <span className="text-xs font-medium text-gray-500 dark:text-slate-400 capitalize">{section}</span>
+                    <div className="mt-1 ml-2 space-y-0.5">
+                      {(SECTION_PAGES[section] || []).map((page) => {
+                        const readable = isInvitePageChecked(page);
+                        return (
+                          <div key={page} className="flex items-center gap-4 text-xs">
+                            <label className="flex items-center gap-1 min-w-[120px]">
+                              <input
+                                type="checkbox"
+                                checked={readable}
+                                onChange={() => handleInvitePageToggle(page)}
+                                className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
+                              />
+                              <span className="capitalize text-gray-600 dark:text-slate-300">{page}</span>
+                            </label>
+                            <label className="flex items-center gap-1 text-gray-500 dark:text-slate-400">
+                              <input
+                                type="checkbox"
+                                checked={isInviteWriteChecked(page)}
+                                disabled={!readable && !isInviteWriteChecked(page)}
+                                onChange={() => handleInviteWriteToggle(page)}
+                                className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 disabled:opacity-40"
+                              />
+                              <span>Write</span>
+                            </label>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -355,6 +454,8 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
               {members.map((member) => {
                 const isExpanded = expandedMembers.has(member.id);
                 const hasPageRestrictions = member.allowed_pages !== null;
+                const hasWriteRestrictions =
+                  member.role !== "admin" && member.write_pages !== null;
                 return (
                   <tr
                     key={member.id}
@@ -366,7 +467,11 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
                         onClick={() => toggleExpanded(member.id)}
                         className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline mt-0.5"
                       >
-                        {isExpanded ? "Hide pages" : hasPageRestrictions ? "Edit pages (restricted)" : "Edit pages"}
+                        {isExpanded
+                          ? "Hide pages"
+                          : hasPageRestrictions || hasWriteRestrictions
+                            ? "Edit pages (restricted)"
+                            : "Edit pages"}
                       </button>
                     </td>
                     <td className="px-6 py-3">
@@ -399,18 +504,33 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
                           className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
                         />
                         {isExpanded && member.allowed_sections.includes(section) && (
-                          <div className="mt-1.5 space-y-0.5 text-left">
-                            {(SECTION_PAGES[section] || []).map((page) => (
-                              <label key={page} className="flex items-center gap-1 text-[11px]">
-                                <input
-                                  type="checkbox"
-                                  checked={isMemberPageChecked(member, page)}
-                                  onChange={() => handleTogglePage(member, page)}
-                                  className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 h-3 w-3"
-                                />
-                                <span className="capitalize text-gray-500 dark:text-slate-400">{page}</span>
-                              </label>
-                            ))}
+                          <div className="mt-1.5 space-y-1 text-left">
+                            {(SECTION_PAGES[section] || []).map((page) => {
+                              const readable = isMemberPageChecked(member, page);
+                              return (
+                                <div key={page} className="flex items-center gap-2 text-[11px]">
+                                  <label className="flex items-center gap-1 min-w-[90px]">
+                                    <input
+                                      type="checkbox"
+                                      checked={readable}
+                                      onChange={() => handleTogglePage(member, page)}
+                                      className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                                    />
+                                    <span className="capitalize text-gray-500 dark:text-slate-400">{page}</span>
+                                  </label>
+                                  <label className="flex items-center gap-1 text-gray-400 dark:text-slate-500">
+                                    <input
+                                      type="checkbox"
+                                      checked={isMemberWriteChecked(member, page)}
+                                      disabled={member.role === "admin" || (!readable && !isMemberWriteChecked(member, page))}
+                                      onChange={() => handleToggleMemberWrite(member, page)}
+                                      className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 h-3 w-3 disabled:opacity-40"
+                                    />
+                                    <span>W</span>
+                                  </label>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </td>
