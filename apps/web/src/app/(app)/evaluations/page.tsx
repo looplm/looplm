@@ -14,8 +14,12 @@ import { StatCard } from "@/components/eval-shared";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { RelevanceFilterDropdown } from "@/components/relevance-filter-dropdown";
 import { CompareRunsModal } from "@/components/compare-runs-modal";
+import { usePermissions } from "@/components/permissions-context";
 
 export default function EvaluationsPage() {
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("evaluations");
+  const readOnlyTitle = "Read-only access. Ask an admin to grant write permission.";
   const [resp, setResp] = useState<EvalRunListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -180,6 +184,8 @@ export default function EvaluationsPage() {
           <RelevanceFilterDropdown
             onGenerate={handleGenerateReport}
             loading={reportLoading}
+            disabled={!canEdit}
+            disabledTitle={readOnlyTitle}
             buttonClassName="px-3 py-1 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 transition-colors"
           />
           {selectedIds.size >= 2 && (
@@ -192,7 +198,9 @@ export default function EvaluationsPage() {
           )}
           <button
             onClick={handleBulkDelete}
-            className="px-3 py-1 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 transition-colors"
+            disabled={!canEdit}
+            title={!canEdit ? readOnlyTitle : undefined}
+            className="px-3 py-1 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Delete
           </button>
@@ -305,8 +313,9 @@ export default function EvaluationsPage() {
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => handleDeleteClick(run.id)}
-                        className="p-1.5 rounded-md text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
-                        title="Delete"
+                        disabled={!canEdit}
+                        className="p-1.5 rounded-md text-gray-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title={canEdit ? "Delete" : readOnlyTitle}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="3 6 5 6 21 6" />

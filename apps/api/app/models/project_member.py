@@ -41,6 +41,7 @@ class ProjectMember(Base):
         JSONB, nullable=False, server_default=text("'[\"observe\",\"evaluate\",\"improve\"]'::jsonb")
     )
     allowed_pages = Column(JSONB, nullable=True, server_default=text("null"))
+    write_pages = Column(JSONB, nullable=True, server_default=text("null"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     project = relationship("Project", back_populates="members")

@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_project, require_section
+from app.auth import get_current_project, require_section, require_write
 from app.db import async_session, get_db
 from app.models.models import Analysis, FeedbackScore, Integration, Trace
 from app.models.project import Project
@@ -173,7 +173,12 @@ async def get_trace_analysis(trace_id: UUID, db: AsyncSession = Depends(get_db),
     return TraceAnalysisResponse(analysis=analysis, fix_suggestions=analysis.fix_suggestions)
 
 
-@router.post("/{trace_id}/analyze", response_model=AnalyzeResponse, status_code=202)
+@router.post(
+    "/{trace_id}/analyze",
+    response_model=AnalyzeResponse,
+    status_code=202,
+    dependencies=[require_write("observe", "traces")],
+)
 async def trigger_analysis(trace_id: UUID, db: AsyncSession = Depends(get_db), project: Project = Depends(get_current_project)):
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
     result = await db.execute(select(Trace).where(Trace.id == trace_id, Trace.integration_id.in_(project_integration_ids)))

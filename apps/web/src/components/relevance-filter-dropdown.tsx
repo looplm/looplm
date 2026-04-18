@@ -14,12 +14,16 @@ interface RelevanceFilterDropdownProps {
   onGenerate: (relevanceFilter: RelevanceLevel[] | undefined) => void;
   loading?: boolean;
   buttonClassName?: string;
+  disabled?: boolean;
+  disabledTitle?: string;
 }
 
 export function RelevanceFilterDropdown({
   onGenerate,
   loading,
   buttonClassName,
+  disabled,
+  disabledTitle,
 }: RelevanceFilterDropdownProps) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Set<RelevanceLevel>>(
@@ -65,7 +69,8 @@ export function RelevanceFilterDropdown({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        disabled={loading}
+        disabled={loading || disabled}
+        title={disabled ? disabledTitle : undefined}
         className={
           buttonClassName ??
           "px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"

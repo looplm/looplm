@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.config import settings
 from app.db import get_db
 from app.models.models import EvalJob, EvalJobStatus, TestDataset
@@ -32,7 +32,10 @@ from .eval_helpers import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["evaluations"])
+router = APIRouter(
+    tags=["evaluations"],
+    dependencies=[require_section("evaluate", "evaluations")],
+)
 
 _eval_tasks: dict[UUID, asyncio.Task] = {}
 
@@ -63,7 +66,12 @@ async def list_datasets_for_trigger(
     )
 
 
-@router.post("/trigger", response_model=TriggerEvalResponse, status_code=202)
+@router.post(
+    "/trigger",
+    response_model=TriggerEvalResponse,
+    status_code=202,
+    dependencies=[require_write("evaluate", "evaluations")],
+)
 async def trigger_eval(
     body: TriggerEvalRequest,
     db: AsyncSession = Depends(get_db),
@@ -125,7 +133,7 @@ async def trigger_eval(
     return TriggerEvalResponse(job_id=job.id, status="pending")
 
 
-@router.post("/trigger/test-connection")
+@router.post("/trigger/test-connection", dependencies=[require_write("evaluate", "evaluations")])
 async def test_connection(
     request: Request,
     project: Project = Depends(get_current_project),
@@ -162,7 +170,7 @@ async def list_eval_jobs(
     )
 
 
-@router.post("/jobs/{job_id}/stop", status_code=200)
+@router.post("/jobs/{job_id}/stop", status_code=200, dependencies=[require_write("evaluate", "evaluations")])
 async def stop_eval_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -214,7 +222,12 @@ async def stop_eval_job(
     return {"message": "Job cancelled", "job_id": str(job_id)}
 
 
-@router.post("/jobs/{job_id}/restart", response_model=TriggerEvalResponse, status_code=202)
+@router.post(
+    "/jobs/{job_id}/restart",
+    response_model=TriggerEvalResponse,
+    status_code=202,
+    dependencies=[require_write("evaluate", "evaluations")],
+)
 async def restart_eval_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, require_section
+from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
 from app.models.models import Evaluator
 from app.models.project import Project
@@ -72,7 +72,12 @@ async def get_evaluator(
     return enriched[0]
 
 
-@router.post("", response_model=EvaluatorResponse, status_code=201)
+@router.post(
+    "",
+    response_model=EvaluatorResponse,
+    status_code=201,
+    dependencies=[require_write("evaluate", "evaluators")],
+)
 async def create_evaluator(
     body: EvaluatorCreate,
     db: AsyncSession = Depends(get_db),
@@ -110,7 +115,11 @@ async def create_evaluator(
     return enriched[0]
 
 
-@router.patch("/{evaluator_id}", response_model=EvaluatorResponse)
+@router.patch(
+    "/{evaluator_id}",
+    response_model=EvaluatorResponse,
+    dependencies=[require_write("evaluate", "evaluators")],
+)
 async def update_evaluator(
     evaluator_id: UUID,
     body: EvaluatorUpdate,
@@ -140,7 +149,11 @@ async def update_evaluator(
     return enriched[0]
 
 
-@router.delete("/{evaluator_id}", status_code=204)
+@router.delete(
+    "/{evaluator_id}",
+    status_code=204,
+    dependencies=[require_write("evaluate", "evaluators")],
+)
 async def delete_evaluator(
     evaluator_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -159,7 +172,12 @@ async def delete_evaluator(
     await db.delete(ev)
 
 
-@router.post("/import", response_model=EvaluatorImportResponse, status_code=201)
+@router.post(
+    "/import",
+    response_model=EvaluatorImportResponse,
+    status_code=201,
+    dependencies=[require_write("evaluate", "evaluators")],
+)
 async def import_evaluators(
     body: EvaluatorImport,
     db: AsyncSession = Depends(get_db),
@@ -206,7 +224,11 @@ async def import_evaluators(
     return EvaluatorImportResponse(created=created, skipped=skipped, total=len(body.evaluators), data=data)
 
 
-@router.post("/sync", response_model=EvaluatorListResponse)
+@router.post(
+    "/sync",
+    response_model=EvaluatorListResponse,
+    dependencies=[require_write("evaluate", "evaluators")],
+)
 async def sync_evaluators(
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),

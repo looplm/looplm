@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user, require_section
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
 from app.models.project import Project
 from app.models.user import User
@@ -15,7 +15,11 @@ from app.services.architecture_advisor import analyze_architecture, get_latest_s
 router = APIRouter(prefix="/api/advisor", tags=["advisor"], dependencies=[require_section("improve", "advisor")])
 
 
-@router.post("/{integration_id}/analyze", response_model=AdvisorResponse)
+@router.post(
+    "/{integration_id}/analyze",
+    response_model=AdvisorResponse,
+    dependencies=[require_write("improve", "advisor")],
+)
 async def trigger_analysis(
     integration_id: UUID,
     body: AdvisorAnalyzeRequest | None = None,

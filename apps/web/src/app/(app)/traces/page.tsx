@@ -17,10 +17,13 @@ import TraceFilters, {
 import { useGlobalFilters } from "@/components/global-filters-context";
 import ResizableHeader from "@/components/resizable-header";
 import { TraceRow, ThreadGroup, RunTreeGroup } from "./trace-table-rows";
+import { usePermissions } from "@/components/permissions-context";
 
 type ViewMode = "flat" | "runs" | "threads";
 
 export default function TracesPage() {
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("traces");
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("traces-view-mode");
@@ -148,7 +151,9 @@ export default function TracesPage() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-800 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+            disabled={!canEdit}
+            title={!canEdit ? "Read-only access. Ask an admin to grant write permission." : undefined}
+            className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-800 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Import JSON
           </button>

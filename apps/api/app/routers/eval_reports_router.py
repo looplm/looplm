@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.config import settings
 from app.db import get_db
 from app.models.models import EvalJob, EvalJobStatus, EvalReport, EvalResult, EvalRun, Evaluator, TestDataset
@@ -35,13 +35,20 @@ from .eval_jobs import _eval_tasks
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["evaluations"])
+router = APIRouter(
+    tags=["evaluations"],
+    dependencies=[require_section("evaluate", "evaluations")],
+)
 
 
 # ── Report Endpoints (before /{run_id}) ───────────────────────
 
 
-@router.post("/report", response_model=MultiRunReportResponse)
+@router.post(
+    "/report",
+    response_model=MultiRunReportResponse,
+    dependencies=[require_write("evaluate", "evaluations")],
+)
 async def generate_multi_run_report(
     body: MultiRunReportRequest,
     db: AsyncSession = Depends(get_db),
@@ -197,7 +204,7 @@ async def get_eval_report_by_id(
     return EvalReportDetail.model_validate(report)
 
 
-@router.delete("/reports/{report_id}", status_code=204)
+@router.delete("/reports/{report_id}", status_code=204, dependencies=[require_write("evaluate", "evaluations")])
 async def delete_eval_report(
     report_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -270,7 +277,12 @@ async def get_eval_report(
 # ── Rerun Endpoint (before /{run_id}) ─────────────────────────
 
 
-@router.post("/{run_id}/rerun", response_model=TriggerEvalResponse, status_code=202)
+@router.post(
+    "/{run_id}/rerun",
+    response_model=TriggerEvalResponse,
+    status_code=202,
+    dependencies=[require_write("evaluate", "evaluations")],
+)
 async def rerun_eval(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),

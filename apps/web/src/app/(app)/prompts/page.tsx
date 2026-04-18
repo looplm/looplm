@@ -14,6 +14,9 @@ import {
   type PromptReviewResult,
 } from "@/lib/api";
 import { PromptReviewTab, sortBySeverity } from "./prompt-review-tab";
+import { usePermissions } from "@/components/permissions-context";
+
+const PROMPTS_READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
 
 const SOURCE_BADGES: Record<string, string> = {
   langfuse: "bg-purple-500/20 text-purple-300 border-purple-500/30",
@@ -34,6 +37,8 @@ function simpleDiff(a: string, b: string): { left: string[]; right: string[] } {
 }
 
 export default function PromptsPage() {
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("prompts");
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [prompts, setPrompts] = useState<PromptItem[]>([]);
   const [selectedPrompt, setSelectedPrompt] = useState<PromptItem | null>(null);
@@ -157,8 +162,9 @@ export default function PromptsPage() {
             <button
               key={i.id}
               onClick={() => handleSync(i.id)}
-              disabled={syncing}
-              className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-sm rounded-lg disabled:opacity-50"
+              disabled={syncing || !canEdit}
+              title={!canEdit ? PROMPTS_READ_ONLY_TITLE : undefined}
+              className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {syncing ? "Syncing..." : `Sync ${i.name}`}
             </button>
@@ -172,8 +178,9 @@ export default function PromptsPage() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm rounded-lg"
+            disabled={importing || !canEdit}
+            title={!canEdit ? PROMPTS_READ_ONLY_TITLE : undefined}
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg"
           >
             {importing ? "Importing..." : "Import JSON"}
           </button>
@@ -225,8 +232,9 @@ export default function PromptsPage() {
                 </div>
                 <button
                   onClick={() => handleReview(selectedPrompt.id)}
-                  disabled={reviewing}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm rounded-lg"
+                  disabled={reviewing || !canEdit}
+                  title={!canEdit ? PROMPTS_READ_ONLY_TITLE : undefined}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg"
                 >
                   {reviewing ? "Reviewing..." : "Review"}
                 </button>

@@ -142,8 +142,38 @@ async def get_current_project(
     return project
 
 
+async def _load_member(
+    user: User, project: Project, db: AsyncSession
+) -> ProjectMember | None:
+    """Load the ProjectMember row for (user, project) or None."""
+    result = await db.execute(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == user.id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+def _assert_read_access(
+    member: ProjectMember | None, section: str, page: str | None
+) -> None:
+    """Raise 403 if member cannot read the given section/page."""
+    if not member or section not in (member.allowed_sections or []):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"You do not have access to the {section} section",
+        )
+    if page is not None and member.allowed_pages is not None:
+        if page not in member.allowed_pages:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"You do not have access to the {page} page",
+            )
+
+
 def require_section(section: str, page: str | None = None):
-    """Factory that returns a FastAPI dependency enforcing section and page access.
+    """Factory that returns a FastAPI dependency enforcing section and page read access.
 
     Project owners bypass the check (full access). Members must have the
     section listed in their ``allowed_sections``. When *page* is given and
@@ -156,31 +186,42 @@ def require_section(section: str, page: str | None = None):
         project: Project = Depends(get_current_project),
         db: AsyncSession = Depends(get_db),
     ) -> None:
-        # Owner always has full access
         if project.owner_id == user.id:
             return
-        result = await db.execute(
-            select(ProjectMember).where(
-                ProjectMember.project_id == project.id,
-                ProjectMember.user_id == user.id,
-            )
-        )
-        member = result.scalar_one_or_none()
-        if not member or section not in (member.allowed_sections or []):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"You do not have access to the {section} section",
-            )
-        # Page-level check: only enforced when the router specifies a page
-        # AND the member has explicit page restrictions (non-null list).
-        if page is not None and member.allowed_pages is not None:
-            if page not in member.allowed_pages:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"You do not have access to the {page} page",
-                )
+        member = await _load_member(user, project, db)
+        _assert_read_access(member, section, page)
 
     return Depends(_check_section)
+
+
+def require_write(section: str, page: str):
+    """Factory that returns a FastAPI dependency enforcing write access on a page.
+
+    Project owners and admin members always pass. For regular members,
+    ``write_pages`` null means legacy full-write on all allowed pages; a
+    list restricts writes to the listed pages. Read access (section + page)
+    is also checked — you cannot write what you cannot read.
+    """
+
+    async def _check_write(
+        user: User = Depends(get_current_user),
+        project: Project = Depends(get_current_project),
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        if project.owner_id == user.id:
+            return
+        member = await _load_member(user, project, db)
+        _assert_read_access(member, section, page)
+        assert member is not None  # guaranteed by _assert_read_access
+        if member.role == "admin":
+            return
+        if member.write_pages is not None and page not in member.write_pages:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Read-only access to the {page} page; write permission required",
+            )
+
+    return Depends(_check_write)
 
 
 async def require_project_admin(

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user, require_section
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import async_session, get_db
 from app.models.evaluations import EvalRun
 from app.models.code_agent import OpenCodeAnalysis
@@ -36,7 +36,11 @@ router = APIRouter(prefix="/api/code-agent", tags=["code-agent"], dependencies=[
 _code_agent_tasks: dict[UUID, asyncio.Task] = {}
 
 
-@router.post("/{eval_run_id}/analyze", status_code=202)
+@router.post(
+    "/{eval_run_id}/analyze",
+    status_code=202,
+    dependencies=[require_write("improve", "routes")],
+)
 async def trigger_code_agent_analysis(
     eval_run_id: UUID,
     body: TriggerOpenCodeRequest | None = None,
@@ -135,7 +139,7 @@ async def get_code_agent_analysis(
     return result
 
 
-@router.post("/{eval_run_id}/cancel")
+@router.post("/{eval_run_id}/cancel", dependencies=[require_write("improve", "routes")])
 async def cancel_code_agent_analysis(
     eval_run_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -181,7 +185,11 @@ async def cancel_code_agent_analysis(
     return {"status": "cancelled", "analysis_id": str(analysis.id)}
 
 
-@router.patch("/suggestions/{suggestion_id}", response_model=CodeSuggestionItem)
+@router.patch(
+    "/suggestions/{suggestion_id}",
+    response_model=CodeSuggestionItem,
+    dependencies=[require_write("improve", "routes")],
+)
 async def patch_suggestion_status(
     suggestion_id: UUID,
     body: CodeSuggestionStatusUpdate,

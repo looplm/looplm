@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.config import settings
 from app.db import async_session, get_db
 from app.models.models import EvalJobStatus, EvalRun, EvalSession, Experiment
@@ -28,7 +28,10 @@ from app.schemas.eval_trigger import (
 
 from .eval_helpers import _get_eval_endpoint
 
-router = APIRouter(tags=["evaluations"])
+router = APIRouter(
+    tags=["evaluations"],
+    dependencies=[require_section("evaluate", "evaluations")],
+)
 
 
 # ── Session Endpoints ─────────────────────────────────────────
@@ -36,7 +39,12 @@ router = APIRouter(tags=["evaluations"])
 _session_tasks: dict[UUID, asyncio.Task] = {}
 
 
-@router.post("/trigger/session", response_model=TriggerSessionResponse, status_code=202)
+@router.post(
+    "/trigger/session",
+    response_model=TriggerSessionResponse,
+    status_code=202,
+    dependencies=[require_write("evaluate", "evaluations")],
+)
 async def trigger_session(
     body: TriggerSessionRequest,
     db: AsyncSession = Depends(get_db),
@@ -173,7 +181,7 @@ async def get_session(
     return resp
 
 
-@router.post("/sessions/{session_id}/stop", status_code=200)
+@router.post("/sessions/{session_id}/stop", status_code=200, dependencies=[require_write("evaluate", "evaluations")])
 async def stop_session(
     session_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -212,7 +220,7 @@ async def stop_session(
 
 # ── Auto-Grade Endpoints ──────────────────────────────────────
 
-@router.post("/auto-grade/{integration_id}/start", status_code=202)
+@router.post("/auto-grade/{integration_id}/start", status_code=202, dependencies=[require_write("evaluate", "evaluations")])
 async def start_auto_grade(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -225,7 +233,7 @@ async def start_auto_grade(
     return {"message": "Auto-grade started", "integration_id": str(integration_id)}
 
 
-@router.post("/auto-grade/{integration_id}/stop", status_code=200)
+@router.post("/auto-grade/{integration_id}/stop", status_code=200, dependencies=[require_write("evaluate", "evaluations")])
 async def stop_auto_grade(
     integration_id: UUID,
     project: Project = Depends(get_current_project),

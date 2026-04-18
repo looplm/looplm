@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, require_section
+from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
 from app.models.models import EvalResult, EvalRun
 from app.models.project import Project
@@ -68,7 +68,7 @@ router = APIRouter(prefix="/api/evals", tags=["evaluations"], dependencies=[requ
 # ── Fixed-path routes (must come before /{run_id} parameterized routes) ──
 
 
-@router.post("/import", response_model=EvalRunListItem)
+@router.post("/import", response_model=EvalRunListItem, dependencies=[require_write("evaluate", "evaluations")])
 async def import_eval_run(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -281,7 +281,7 @@ async def get_eval_run_stats(
     )
 
 
-@router.delete("/{run_id}", status_code=204)
+@router.delete("/{run_id}", status_code=204, dependencies=[require_write("evaluate", "evaluations")])
 async def delete_eval_run(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),

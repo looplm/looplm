@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user
+from app.auth import get_current_project, get_current_user, require_write
 from app.db import async_session, get_db
 from app.models.models import FeedbackScore, Integration, Trace
 from app.models.project import Project
@@ -62,7 +62,7 @@ def _extract_user_question(trace_input) -> str | None:
     return None
 
 
-@router.post("/top-questions", status_code=202)
+@router.post("/top-questions", status_code=202, dependencies=[require_write("observe", "feedback")])
 async def analyze_top_questions(
     body: TopQuestionsRequest,
     db: AsyncSession = Depends(get_db),

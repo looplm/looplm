@@ -7,10 +7,12 @@ interface PermissionsContextValue {
   role: ProjectPermissions["role"];
   allowedSections: string[];
   allowedPages: string[] | null;
+  writePages: string[] | null;
   isAdmin: boolean;
   loading: boolean;
   canAccess: (section: string) => boolean;
   canAccessPage: (page: string) => boolean;
+  canWrite: (page: string) => boolean;
   refresh: () => void;
 }
 
@@ -18,10 +20,12 @@ const PermissionsContext = createContext<PermissionsContextValue>({
   role: "owner",
   allowedSections: ["observe", "evaluate", "improve"],
   allowedPages: null,
+  writePages: null,
   isAdmin: true,
   loading: true,
   canAccess: () => true,
   canAccessPage: () => true,
+  canWrite: () => true,
   refresh: () => {},
 });
 
@@ -33,6 +37,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
     "improve",
   ]);
   const [allowedPages, setAllowedPages] = useState<string[] | null>(null);
+  const [writePages, setWritePages] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchPermissions = useCallback(() => {
@@ -41,12 +46,14 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
         setRole(data.role);
         setAllowedSections(data.allowed_sections);
         setAllowedPages(data.allowed_pages);
+        setWritePages(data.write_pages);
       })
       .catch(() => {
         // On error, default to full access (existing owner-only behavior)
         setRole("owner");
         setAllowedSections(["observe", "evaluate", "improve"]);
         setAllowedPages(null);
+        setWritePages(null);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -84,10 +91,30 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
     },
     [allowedPages],
   );
+  const canWrite = useCallback(
+    (page: string) => {
+      if (role === "owner" || role === "admin") return true;
+      if (allowedPages !== null && !allowedPages.includes(page)) return false;
+      if (writePages === null) return true; // legacy: null = full write on allowed pages
+      return writePages.includes(page);
+    },
+    [role, allowedPages, writePages],
+  );
 
   return (
     <PermissionsContext.Provider
-      value={{ role, allowedSections, allowedPages, isAdmin, loading, canAccess, canAccessPage, refresh: fetchPermissions }}
+      value={{
+        role,
+        allowedSections,
+        allowedPages,
+        writePages,
+        isAdmin,
+        loading,
+        canAccess,
+        canAccessPage,
+        canWrite,
+        refresh: fetchPermissions,
+      }}
     >
       {children}
     </PermissionsContext.Provider>
