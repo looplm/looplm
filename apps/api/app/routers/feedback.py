@@ -16,6 +16,7 @@ from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
 from app.models.models import FeedbackScore, Integration, IntegrationType, JsonImport, SyncStatus, Trace
 from app.models.project import Project
+from app.services.observe_filter import get_observe_trace_names
 from app.schemas.feedback import (
     FeedbackListResponse,
     FeedbackScoreDetail,
@@ -178,11 +179,18 @@ async def list_feedback(
     if integration_id:
         query = query.where(FeedbackScore.integration_id == integration_id)
         count_query = count_query.where(FeedbackScore.integration_id == integration_id)
+    observe_names = get_observe_trace_names(project)
     if environment:
         env_filter = Trace.trace_metadata["environment"].astext == environment
         query = query.where(env_filter)
         count_query = count_query.outerjoin(Trace, FeedbackScore.trace_id == Trace.id).where(env_filter)
     _count_has_trace_join = bool(environment)
+    if observe_names:
+        query = query.where(Trace.name.in_(observe_names))
+        if not _count_has_trace_join:
+            count_query = count_query.outerjoin(Trace, FeedbackScore.trace_id == Trace.id)
+            _count_has_trace_join = True
+        count_query = count_query.where(Trace.name.in_(observe_names))
     _inc_uids = [v.strip() for v in (include_user_ids or "").split(",") if v.strip()]
     _exc_uids = [v.strip() for v in (exclude_user_ids or "").split(",") if v.strip()]
     if _inc_uids:

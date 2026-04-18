@@ -10,6 +10,13 @@ import {
   type ReactNode,
 } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import {
+  getProjects,
+  getSelectedProjectId,
+  getTraceNames,
+  updateProject,
+  type Project,
+} from "@/lib/api";
 
 export type UserFilterMode = "exclude" | "include";
 
@@ -19,6 +26,7 @@ export interface GlobalFilters {
   environment: string;
   userFilterMode: UserFilterMode;
   filteredUsers: string[];
+  traceNames: string[];
 }
 
 interface GlobalFiltersContextValue extends GlobalFilters {
@@ -30,6 +38,12 @@ interface GlobalFiltersContextValue extends GlobalFilters {
   setDateRange: (start: string, end: string) => void;
   resetFilters: () => void;
   hasActiveFilters: boolean;
+  // Persistent trace-name scope (project setting)
+  traceNameOptions: string[];
+  canEditTraceNames: boolean;
+  traceNamesSaving: boolean;
+  traceNamesError: string | null;
+  setTraceNames: (names: string[]) => Promise<void>;
 }
 
 const GlobalFiltersContext = createContext<GlobalFiltersContextValue | null>(null);
@@ -55,6 +69,53 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
     const val = searchParams.get("ufl");
     return val ? val.split(",") : [];
   });
+
+  const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const [traceNames, setTraceNamesState] = useState<string[]>([]);
+  const [traceNameOptions, setTraceNameOptions] = useState<string[]>([]);
+  const [traceNamesSaving, setTraceNamesSaving] = useState(false);
+  const [traceNamesError, setTraceNamesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProjects()
+      .then(({ data }) => {
+        if (cancelled) return;
+        const storedId = getSelectedProjectId();
+        const project = data.find((p) => p.id === storedId) ?? data[0] ?? null;
+        setCurrentProject(project);
+        const names = project?.settings?.observe_trace_names;
+        if (Array.isArray(names)) setTraceNamesState(names);
+      })
+      .catch(() => {});
+    getTraceNames()
+      .then((names) => { if (!cancelled) setTraceNameOptions(names); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const canEditTraceNames = currentProject?.role === "owner";
+
+  const setTraceNames = useCallback(async (next: string[]) => {
+    if (!currentProject || currentProject.role !== "owner") return;
+    const prev = traceNames;
+    setTraceNamesState(next);
+    setTraceNamesSaving(true);
+    setTraceNamesError(null);
+    try {
+      await updateProject(currentProject.id, {
+        settings: { observe_trace_names: next },
+      });
+      setCurrentProject((p) =>
+        p ? { ...p, settings: { ...(p.settings || {}), observe_trace_names: next } } : p,
+      );
+    } catch (e: unknown) {
+      setTraceNamesState(prev);
+      setTraceNamesError(e instanceof Error ? e.message : "Failed to save trace filter");
+    } finally {
+      setTraceNamesSaving(false);
+    }
+  }, [currentProject, traceNames]);
 
   const setDateRange = useCallback((start: string, end: string) => {
     setStartDate(start);
@@ -120,6 +181,12 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
         setDateRange,
         resetFilters,
         hasActiveFilters,
+        traceNames,
+        traceNameOptions,
+        canEditTraceNames,
+        traceNamesSaving,
+        traceNamesError,
+        setTraceNames,
       }}
     >
       {children}

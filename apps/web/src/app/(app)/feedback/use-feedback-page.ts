@@ -273,7 +273,7 @@ export function useFeedbackPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, filterValue, filterVerdict, filterName, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, tab, evalCompleted]);
+  }, [page, filterValue, filterVerdict, filterName, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames, tab, evalCompleted]);
 
   const loadSuggestions = useCallback(async () => {
     setSugLoading(true);
@@ -316,7 +316,7 @@ export function useFeedbackPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [tab, filterValue, filterVerdict, filterName, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers]);
+  }, [tab, filterValue, filterVerdict, filterName, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
 
   useEffect(() => {
     localStorage.setItem("feedback-tab", tab);

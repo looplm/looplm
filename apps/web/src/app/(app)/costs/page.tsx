@@ -25,7 +25,7 @@ export default function CostsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [costView, setCostView] = useState<CostView>("all");
-  const { startDate, endDate, environment, userFilterMode, filteredUsers } = useGlobalFilters();
+  const { startDate, endDate, environment, userFilterMode, filteredUsers, traceNames } = useGlobalFilters();
 
   useEffect(() => {
     setLoading(true);
@@ -44,7 +44,7 @@ export default function CostsPage() {
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [startDate, endDate, environment, userFilterMode, filteredUsers]);
+  }, [startDate, endDate, environment, userFilterMode, filteredUsers, traceNames]);
 
   const showApp = costView === "all" || costView === "application";
   const showPlatform = costView === "all" || costView === "platform";

@@ -14,6 +14,7 @@ from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
 from app.models.models import Integration, IntegrationType, JsonImport, SyncStatus, Trace, TraceStatus
 from app.models.project import Project
+from app.services.observe_filter import get_observe_trace_names
 from app.schemas.traces import (
     PaginationInfo,
     TraceImportRequest,
@@ -248,6 +249,12 @@ async def list_traces(
     if integration_id:
         query = query.where(Trace.integration_id == integration_id)
         count_query = count_query.where(Trace.integration_id == integration_id)
+
+    # Project-level Observe trace-name scope (applied in addition to any per-request name filter)
+    observe_names = get_observe_trace_names(project)
+    if observe_names:
+        query = query.where(Trace.name.in_(observe_names))
+        count_query = count_query.where(Trace.name.in_(observe_names))
 
     # Multi-value filters with include/exclude
     status_vals = _parse_multi(status)

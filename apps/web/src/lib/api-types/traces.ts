@@ -6,7 +6,7 @@
 // --- Projects ---
 
 export interface ProjectSettings {
-  dashboard_trace_names?: string[];
+  observe_trace_names?: string[];
   [key: string]: unknown;
 }
 

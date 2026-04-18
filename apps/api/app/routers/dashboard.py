@@ -19,6 +19,7 @@ from app.models.models import (
     TraceStatus,
 )
 from app.models.project import Project
+from app.services.observe_filter import get_observe_trace_names
 from app.schemas.dashboard import (
     DashboardPeriod,
     DashboardStatsResponse,
@@ -57,8 +58,7 @@ async def get_dashboard_stats(
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
 
     # Project-level trace-name filter (empty/missing = all traces)
-    raw_trace_names = (project.settings or {}).get("dashboard_trace_names")
-    trace_names = [n for n in raw_trace_names if isinstance(n, str) and n] if isinstance(raw_trace_names, list) else []
+    trace_names = get_observe_trace_names(project)
 
     # Base filter
     base_filter = [Trace.start_time >= start, Trace.start_time <= now, Trace.integration_id.in_(project_integration_ids)]
