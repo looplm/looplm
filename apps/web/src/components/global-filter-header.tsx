@@ -234,7 +234,7 @@ export default function GlobalFilterHeader() {
               : "Filter Users"}
           </button>
           {showUserDropdown && (
-            <div className="absolute right-0 top-full mt-1 z-20 w-80 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
+            <div className="absolute right-0 top-full mt-1 z-50 w-80 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
               {/* Mode toggle */}
               <div className="flex border-b border-gray-100 dark:border-slate-700">
                 {(["include", "exclude"] as const).map((mode) => (
@@ -386,7 +386,7 @@ export default function GlobalFilterHeader() {
             {traceNamesSaving && <span className="ml-1 text-[10px] opacity-70">(saving…)</span>}
           </button>
           {showTraceDropdown && canEditTraceNames && (
-            <div className="absolute right-0 top-full mt-1 z-20 w-80 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
+            <div className="absolute right-0 top-full mt-1 z-50 w-80 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
               <div className="px-3 py-2 text-[11px] text-gray-500 dark:text-slate-400 border-b border-gray-100 dark:border-slate-700">
                 Scopes every number on Dashboard, Traces, Feedback and Costs. Empty = all trace types.
               </div>
