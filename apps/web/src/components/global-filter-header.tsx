@@ -137,7 +137,7 @@ export default function GlobalFilterHeader() {
     }`;
 
   return (
-    <div className="flex flex-wrap items-center gap-3 mb-6 px-4 py-2.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border border-gray-200/60 dark:border-slate-700/60 rounded-xl shadow-sm">
+    <div className="relative z-40 flex flex-wrap items-center gap-3 mb-6 px-4 py-2.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border border-gray-200/60 dark:border-slate-700/60 rounded-xl shadow-sm">
       {/* Date range icon + pills */}
       <div className="flex items-center gap-1.5">
         <svg className="w-4 h-4 text-gray-400 dark:text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
