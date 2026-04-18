@@ -56,11 +56,6 @@ export default function PromptsPage() {
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    getIntegrations().then((r) => setIntegrations(r.data)).catch((e) => setError(e.message));
-    loadPrompts();
-  }, []);
-
   const loadPrompts = () => {
     setLoading(true);
     getPrompts()
@@ -68,6 +63,11 @@ export default function PromptsPage() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
+
+  useEffect(() => {
+    getIntegrations().then((r) => setIntegrations(r.data)).catch((e) => setError(e.message));
+    loadPrompts();
+  }, []);
 
   const selectPrompt = async (p: PromptItem) => {
     setSelectedPrompt(p);
