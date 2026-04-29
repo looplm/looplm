@@ -4,15 +4,41 @@
 [![Node](https://img.shields.io/badge/node-20%2B-339933)](https://nodejs.org)
 [![Python](https://img.shields.io/badge/python-3.12%2B-3776AB)](https://www.python.org)
 
-**LLM debugging and evaluation platform** for self-hosted teams. LoopLM connects to your existing observability stack, imports traces and prompts, runs evaluations, and helps you move from failures to concrete fixes.
+**From traces to fixes.** LoopLM is an open-source LLMOps layer that connects to your existing observability stack, finds where your LLM application is failing, and helps you get from a failure to a concrete fix.
 
-## What It Does
+![LoopLM landing page](.github/images/landing.png)
 
-- Browse traces, spans, and threads from platforms such as Langfuse and LangSmith
-- Detect failures and inspect root causes
-- Run evaluations against datasets and compare runs over time
-- Manage evaluators, prompts, feedback, and experiments
-- Generate fix suggestions and code-analysis follow-ups
+## Why
+
+Most LLMOps tools today are built for engineers debugging systems. They expose traces, spans, and tokens at a level of detail that makes sense to the person who shipped the code, and almost no sense to the people who own whether the AI feature is actually doing its job: product managers, domain experts, customer success, compliance.
+
+In practice, this means evaluation tends to fall back to engineers running ad-hoc scripts when something visibly breaks, while the people closest to the use case have no agency in defining what "good" looks like or maintaining the test datasets that decide it. Drift goes unnoticed until a customer complains.
+
+LoopLM is built around a different assumption: evaluation should be a cross-functional workflow. Product people generate and curate test datasets, define quality criteria in domain terms, and review failures alongside engineers. Engineers get the deeper trace and root-cause tooling they need. Both views look at the same underlying data.
+
+## How it works
+
+LoopLM connects to the observability stack you already have. Pre-built connectors ingest traces, spans, and threads from Langfuse and LangSmith without requiring any change to your application code or instrumentation. From there, LoopLM analyzes failure patterns, surfaces root causes, and suggests concrete fixes.
+
+**Architecture Advisor** identifies bottlenecks and recommends specific changes with confidence scoring and reasoning.
+
+![Architecture Advisor recommendations](.github/images/architecture-advisor.png)
+
+**Feedback and Graders** combines human feedback signals with automated graders, designed for cross-functional review rather than engineer-only workflows.
+
+![Feedback and Graders dashboard](.github/images/feedback-graders.png)
+
+**Evaluators** support deterministic checks, LLM-as-judge graders, and hybrid evaluators, with first-class support for RAGAS metrics alongside custom criteria defined per use case.
+
+![Evaluators list view](.github/images/evaluators.png)
+
+## Coming soon
+
+**Suggested test cases.** Traces with feedback become candidate test cases automatically. A reviewer — PM, domain expert, or engineer — approves or edits each one before it's added to an existing dataset. This closes the loop from "this output was bad" to "we'll catch this in the next eval run," without leaving dataset curation to whoever happens to be on call.
+
+---
+
+Self-hosted by default, because the teams I'm building this for can't send prompts to a third party.
 
 ## Architecture
 
