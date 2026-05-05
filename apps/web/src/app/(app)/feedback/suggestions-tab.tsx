@@ -113,7 +113,18 @@ export function SuggestionsTab({
                   )}
                   <SuggestionConditions data={sug} />
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 flex-shrink-0 items-start">
+                  {sug.trace_id && (
+                    <a
+                      href={`/traces/${sug.trace_id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-800 text-xs text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700"
+                    >
+                      View trace
+                    </a>
+                  )}
                   <button
                     onClick={(e) => { e.stopPropagation(); setSelectedSuggestion(sug); }}
                     className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-500"
