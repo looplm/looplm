@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import type { TestCaseSuggestion, TestDatasetItem } from "@/lib/api";
+import { createDataset, regenerateSuggestionExpectedAnswer } from "@/lib/api";
 import { ConfigEditor } from "@/components/config-editor";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
+
+const CREATE_NEW_DATASET = "__create__";
 
 function formFromSuggestion(sug: TestCaseSuggestion): TestCaseFormData {
   const config: Record<string, unknown> = {};
@@ -37,22 +41,68 @@ export function SuggestionReviewModal({
   saving: boolean;
 }) {
   const [form, setForm] = useState<TestCaseFormData>(() => formFromSuggestion(suggestion));
-  const [selectedDatasetId, setSelectedDatasetId] = useState<string>(() => {
-    // Pre-select the suggested dataset, or the first one
+  const initialDatasetId = (): string => {
     if (suggestion.suggested_dataset_id) return suggestion.suggested_dataset_id;
-    return datasets[0]?.id ?? "";
-  });
+    return datasets[0]?.id ?? CREATE_NEW_DATASET;
+  };
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string>(initialDatasetId);
+  const [newDatasetName, setNewDatasetName] = useState("");
+  const [creatingDataset, setCreatingDataset] = useState(false);
   const [configValid, setConfigValid] = useState(true);
+  const [regenerating, setRegenerating] = useState(false);
 
   useEffect(() => {
     setForm(formFromSuggestion(suggestion));
     setConfigValid(true);
     setSelectedDatasetId(
-      suggestion.suggested_dataset_id || datasets[0]?.id || ""
+      suggestion.suggested_dataset_id || datasets[0]?.id || CREATE_NEW_DATASET
     );
+    setNewDatasetName("");
   }, [suggestion, datasets]);
 
-  const canSave = form.test_id.trim() && form.prompt.trim() && selectedDatasetId && configValid;
+  const isCreatingNew = selectedDatasetId === CREATE_NEW_DATASET;
+  const canSave =
+    form.test_id.trim() &&
+    form.prompt.trim() &&
+    configValid &&
+    (isCreatingNew ? newDatasetName.trim().length > 0 : Boolean(selectedDatasetId));
+
+  async function handleSave() {
+    if (isCreatingNew) {
+      setCreatingDataset(true);
+      try {
+        const ds = await createDataset({ name: newDatasetName.trim() });
+        onAccept(ds.id, form);
+      } catch (err: any) {
+        toast.error("Failed to create dataset", { description: err.message });
+      } finally {
+        setCreatingDataset(false);
+      }
+      return;
+    }
+    onAccept(selectedDatasetId, form);
+  }
+
+  const traceHref = suggestion.trace_id ? `/traces/${suggestion.trace_id}` : null;
+
+  async function handleRegenerate() {
+    setRegenerating(true);
+    try {
+      const { expected_answer } = await regenerateSuggestionExpectedAnswer(
+        String(suggestion.feedback_id),
+      );
+      if (expected_answer) {
+        setForm((f) => ({ ...f, expected_answer }));
+        toast.success("Criteria regenerated");
+      } else {
+        toast.error("LLM returned an empty result");
+      }
+    } catch (err: any) {
+      toast.error("Failed to regenerate", { description: err.message });
+    } finally {
+      setRegenerating(false);
+    }
+  }
 
   return (
     <>
@@ -99,32 +149,46 @@ export function SuggestionReviewModal({
                   &ldquo;{suggestion.comment}&rdquo;
                 </p>
               )}
+              {traceHref && (
+                <a
+                  href={traceHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                  View raw trace
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                  </svg>
+                </a>
+              )}
             </div>
 
             {/* Dataset selector */}
             <div>
               <label className="block text-sm font-medium mb-1">Add to Dataset</label>
-              {datasets.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-slate-400">
-                  No datasets available.{" "}
-                  <a href="/datasets" className="text-indigo-600 dark:text-indigo-400 hover:underline">
-                    Create one first
-                  </a>
-                  .
-                </p>
-              ) : (
-                <select
-                  value={selectedDatasetId}
-                  onChange={(e) => setSelectedDatasetId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm"
-                >
-                  {datasets.map((ds) => (
-                    <option key={ds.id} value={ds.id}>
-                      {ds.name} ({ds.test_count} cases)
-                      {ds.id === suggestion.suggested_dataset_id ? " — Suggested" : ""}
-                    </option>
-                  ))}
-                </select>
+              <select
+                value={selectedDatasetId}
+                onChange={(e) => setSelectedDatasetId(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm"
+              >
+                {datasets.map((ds) => (
+                  <option key={ds.id} value={ds.id}>
+                    {ds.name} ({ds.test_count} cases)
+                    {ds.id === suggestion.suggested_dataset_id ? " — Suggested" : ""}
+                  </option>
+                ))}
+                <option value={CREATE_NEW_DATASET}>+ Create new dataset…</option>
+              </select>
+              {isCreatingNew && (
+                <input
+                  type="text"
+                  value={newDatasetName}
+                  onChange={(e) => setNewDatasetName(e.target.value)}
+                  placeholder="New dataset name"
+                  autoFocus
+                  className="mt-2 w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm"
+                />
               )}
             </div>
 
@@ -153,12 +217,30 @@ export function SuggestionReviewModal({
 
             {/* Expected Answer */}
             <div>
-              <label className="block text-sm font-medium mb-1">
-                Expected Answer
-                {suggestion.feedback_value === 0 && suggestion.suggested_expected_answer && (
-                  <span className="ml-2 text-xs font-normal text-indigo-500">AI-generated</span>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium">
+                  Expected Answer
+                  {suggestion.feedback_value === 0 && suggestion.suggested_expected_answer && (
+                    <span className="ml-2 text-xs font-normal text-indigo-500">AI-drafted criteria</span>
+                  )}
+                </label>
+                {suggestion.feedback_value === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleRegenerate}
+                    disabled={regenerating}
+                    className="text-xs px-2 py-1 rounded-md text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 disabled:opacity-50"
+                  >
+                    {regenerating ? "Regenerating..." : "Regenerate criteria"}
+                  </button>
                 )}
-              </label>
+              </div>
+              {suggestion.feedback_value === 0 && suggestion.suggested_expected_answer && (
+                <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">
+                  These are acceptance criteria, not a verified answer. Edit or replace them
+                  with the real expected response if you have one.
+                </p>
+              )}
               <textarea
                 value={form.expected_answer}
                 onChange={(e) => setForm({ ...form, expected_answer: e.target.value })}
@@ -187,11 +269,17 @@ export function SuggestionReviewModal({
               Cancel
             </button>
             <button
-              onClick={() => onAccept(selectedDatasetId, form)}
-              disabled={saving || !canSave}
+              onClick={handleSave}
+              disabled={saving || creatingDataset || !canSave}
               className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50 transition-colors"
             >
-              {saving ? "Adding..." : "Add to Dataset"}
+              {creatingDataset
+                ? "Creating dataset..."
+                : saving
+                  ? "Adding..."
+                  : isCreatingNew
+                    ? "Create & Add"
+                    : "Add to Dataset"}
             </button>
           </div>
         </div>

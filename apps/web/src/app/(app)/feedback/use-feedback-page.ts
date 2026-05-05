@@ -48,6 +48,7 @@ export function useFeedbackPage() {
   // Suggestions state
   const [suggestions, setSuggestions] = useState<TestCaseSuggestion[]>([]);
   const [sugLoading, setSugLoading] = useState(false);
+  const [sugGenerated, setSugGenerated] = useState(false);
   const [sugFilter, setSugFilter] = useState<"all" | "positive" | "negative">("all");
   const [datasets, setDatasets] = useState<TestDatasetItem[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState<TestCaseSuggestion | null>(null);
@@ -278,18 +279,32 @@ export function useFeedbackPage() {
   const loadSuggestions = useCallback(async () => {
     setSugLoading(true);
     try {
+      const params: Record<string, string> = {
+        feedback_type: sugFilter,
+        limit: "20",
+      };
+      if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
+      if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
+      if (globalFilters.environment && globalFilters.environment !== "all") {
+        params.environment = globalFilters.environment;
+      }
+      if (globalFilters.filteredUsers.length > 0) {
+        const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
+        params[key] = globalFilters.filteredUsers.join(",");
+      }
       const [sugData, dsData] = await Promise.all([
-        generateSuggestions({ feedback_type: sugFilter, limit: "20" }),
+        generateSuggestions(params),
         getDatasets(),
       ]);
       setSuggestions(sugData);
       setDatasets(dsData.data);
-    } catch {
-      // ignore
+      setSugGenerated(true);
+    } catch (err: any) {
+      toast.error("Failed to generate suggestions", { description: err.message });
     } finally {
       setSugLoading(false);
     }
-  }, [sugFilter]);
+  }, [sugFilter, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers]);
 
   const loadTopQuestions = useCallback(async () => {
     setTopQuestionsLoading(true);
@@ -306,13 +321,22 @@ export function useFeedbackPage() {
 
   useEffect(() => {
     if (tab === "suggestions") {
-      loadSuggestions();
-    } else if (tab === "top-questions") {
+      // Suggestions are generated on demand via the toolbar button.
+      return;
+    }
+    if (tab === "top-questions") {
       loadTopQuestions();
     } else {
       loadFeedback();
     }
-  }, [tab, loadFeedback, loadSuggestions, loadTopQuestions]);
+  }, [tab, loadFeedback, loadTopQuestions]);
+
+  // Reset generated state when filters or feedback type change so the empty
+  // state nudges the user to re-run with the current scope.
+  useEffect(() => {
+    setSugGenerated(false);
+    setSuggestions([]);
+  }, [sugFilter, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
 
   useEffect(() => {
     setPage(1);
@@ -414,6 +438,7 @@ export function useFeedbackPage() {
     fileInputRef,
     suggestions,
     sugLoading,
+    sugGenerated,
     sugFilter, setSugFilter,
     datasets,
     selectedSuggestion, setSelectedSuggestion,
@@ -441,5 +466,6 @@ export function useFeedbackPage() {
     handleEvaluate,
     handleAcceptSuggestion,
     handleAnalyzeTopQuestions,
+    handleGenerateSuggestions: loadSuggestions,
   };
 }

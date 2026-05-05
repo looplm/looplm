@@ -8,6 +8,7 @@ import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
 interface SuggestionsTabProps {
   suggestions: TestCaseSuggestion[];
   sugLoading: boolean;
+  sugGenerated: boolean;
   sugFilter: "all" | "positive" | "negative";
   setSugFilter: (f: "all" | "positive" | "negative") => void;
   datasets: TestDatasetItem[];
@@ -15,11 +16,14 @@ interface SuggestionsTabProps {
   setSelectedSuggestion: (s: TestCaseSuggestion | null) => void;
   saving: boolean;
   onAccept: (datasetId: string, form: TestCaseFormData) => void;
+  onGenerate: () => void;
+  canEdit: boolean;
 }
 
 export function SuggestionsTab({
   suggestions,
   sugLoading,
+  sugGenerated,
   sugFilter,
   setSugFilter,
   datasets,
@@ -27,6 +31,8 @@ export function SuggestionsTab({
   setSelectedSuggestion,
   saving,
   onAccept,
+  onGenerate,
+  canEdit,
 }: SuggestionsTabProps) {
   return (
     <div>
@@ -47,10 +53,21 @@ export function SuggestionsTab({
       </div>
 
       {sugLoading ? (
-        <p className="text-gray-500 dark:text-slate-400">Loading suggestions...</p>
+        <p className="text-gray-500 dark:text-slate-400">Generating suggestions...</p>
       ) : suggestions.length === 0 ? (
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
-          No suggestions available. Feedback from your integration will appear here as test case suggestions.
+        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400 space-y-3">
+          <p>
+            {sugGenerated
+              ? "No test cases could be built from feedback in the current filter range. Try widening the date range or changing trace types."
+              : "Click “Generate Test Cases” to turn user feedback in the current filter range into test case suggestions."}
+          </p>
+          <button
+            onClick={onGenerate}
+            disabled={!canEdit}
+            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {sugGenerated ? "Regenerate" : "Generate Test Cases"}
+          </button>
         </div>
       ) : (
         <div className="space-y-3">
@@ -73,7 +90,12 @@ export function SuggestionsTab({
                       {sug.scored_at && ` — ${new Date(sug.scored_at).toLocaleDateString("de-DE")}`}
                     </span>
                     {sug.suggested_expected_answer && sug.feedback_value === 0 && (
-                      <span className="text-xs text-indigo-500 dark:text-indigo-400">AI-generated answer</span>
+                      <span
+                        className="text-xs text-indigo-500 dark:text-indigo-400"
+                        title="Criteria describing what a correct answer must cover, derived from the user feedback. Not a ground-truth answer."
+                      >
+                        AI-drafted criteria
+                      </span>
                     )}
                   </div>
                   <p className="text-sm font-medium mb-2">{sug.prompt}</p>
@@ -96,7 +118,18 @@ export function SuggestionsTab({
                   )}
                   <SuggestionConditions data={sug} />
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 flex-shrink-0 items-start">
+                  {sug.trace_id && (
+                    <a
+                      href={`/traces/${sug.trace_id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-800 text-xs text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700"
+                    >
+                      View trace
+                    </a>
+                  )}
                   <button
                     onClick={(e) => { e.stopPropagation(); setSelectedSuggestion(sug); }}
                     className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-500"
