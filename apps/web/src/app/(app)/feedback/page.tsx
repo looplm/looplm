@@ -30,6 +30,7 @@ export default function FeedbackPage() {
     fileInputRef,
     suggestions,
     sugLoading,
+    sugGenerated,
     sugFilter, setSugFilter,
     datasets,
     selectedSuggestion, setSelectedSuggestion,
@@ -55,6 +56,7 @@ export default function FeedbackPage() {
     handleEvaluate,
     handleAcceptSuggestion,
     handleAnalyzeTopQuestions,
+    handleGenerateSuggestions,
   } = useFeedbackPage();
 
   return (
@@ -69,6 +71,16 @@ export default function FeedbackPage() {
             className="hidden"
             onChange={handleImport}
           />
+          {tab === "suggestions" && (
+            <button
+              onClick={handleGenerateSuggestions}
+              disabled={sugLoading || !canEdit}
+              title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {sugLoading ? "Generating..." : sugGenerated ? "Regenerate" : "Generate Test Cases"}
+            </button>
+          )}
           {tab === "top-questions" && !topQuestionsRunning && (
             <>
               <button
@@ -166,6 +178,7 @@ export default function FeedbackPage() {
         <SuggestionsTab
           suggestions={suggestions}
           sugLoading={sugLoading}
+          sugGenerated={sugGenerated}
           sugFilter={sugFilter}
           setSugFilter={setSugFilter}
           datasets={datasets}
@@ -173,6 +186,8 @@ export default function FeedbackPage() {
           setSelectedSuggestion={setSelectedSuggestion}
           saving={saving}
           onAccept={handleAcceptSuggestion}
+          onGenerate={handleGenerateSuggestions}
+          canEdit={canEdit}
         />
       ) : (
         <>

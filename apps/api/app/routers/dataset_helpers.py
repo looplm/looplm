@@ -39,22 +39,57 @@ def _tc_to_item(tc: TestCase) -> TestCaseItem:
 
 
 def _extract_user_prompt(trace_input: Any) -> str | None:
-    """Extract last user message from trace input."""
+    """Extract last user message from trace input.
+
+    Handles plain strings, top-level message arrays, and the common dict
+    shapes produced by Langfuse, LangSmith, Vercel AI SDK, and OpenAI-style
+    payloads.
+    """
     if not trace_input:
         return None
-    # Vercel AI SDK format: { messages: [...] }
+
+    if isinstance(trace_input, str):
+        text = trace_input.strip()
+        return text or None
+
+    def _from_messages(messages: Any) -> str | None:
+        if not isinstance(messages, list):
+            return None
+        for msg in reversed(messages):
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("role") and msg["role"] != "user":
+                continue
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text = part.get("text", "")
+                        if isinstance(text, str) and text.strip():
+                            return text
+            text = msg.get("text") or msg.get("input") or msg.get("prompt")
+            if isinstance(text, str) and text.strip():
+                return text
+        return None
+
+    if isinstance(trace_input, list):
+        return _from_messages(trace_input)
+
     if isinstance(trace_input, dict):
-        messages = trace_input.get("messages", [])
-        if isinstance(messages, list):
-            for msg in reversed(messages):
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    content = msg.get("content", "")
-                    if isinstance(content, str):
-                        return content
-                    if isinstance(content, list):
-                        for part in content:
-                            if isinstance(part, dict) and part.get("type") == "text":
-                                return part.get("text", "")
+        from_messages = _from_messages(trace_input.get("messages"))
+        if from_messages:
+            return from_messages
+        for key in ("prompt", "question", "query", "text", "input"):
+            value = trace_input.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+            if isinstance(value, (dict, list)):
+                nested = _extract_user_prompt(value)
+                if nested:
+                    return nested
+
     return None
 
 
