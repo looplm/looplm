@@ -6,7 +6,8 @@ import logging
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import case, cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -366,3 +367,64 @@ async def generate_suggestions(
             sug.suggested_dataset_id = best_id
 
     return suggestions
+
+
+class RegenerateExpectedAnswerResponse(BaseModel):
+    expected_answer: str | None
+
+
+@router.post(
+    "/suggestions/{feedback_id}/regenerate-expected-answer",
+    response_model=RegenerateExpectedAnswerResponse,
+    dependencies=[require_write("observe", "feedback")],
+)
+async def regenerate_expected_answer(
+    feedback_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    _user: User = Depends(get_current_user),
+):
+    """Re-run the LLM to draft criteria for an existing suggestion.
+
+    Scoped to feedback the caller's project owns. Uses the same prompt as
+    initial enrichment so reviewers can re-roll a draft they don't like.
+    """
+    from app.routers.dataset_helpers import _extract_user_prompt, _extract_answer, generate_expected_answer
+
+    project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
+
+    row_result = await db.execute(
+        select(FeedbackScore, Trace)
+        .join(Trace, FeedbackScore.trace_id == Trace.id)
+        .where(
+            FeedbackScore.id == feedback_id,
+            FeedbackScore.integration_id.in_(project_integration_ids),
+        )
+    )
+    row = row_result.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+
+    feedback, trace = row
+    prompt = _extract_user_prompt(trace.input)
+    if not prompt:
+        raise HTTPException(status_code=422, detail="Trace input has no extractable user prompt")
+
+    actual_answer = _extract_answer(trace.output)
+
+    try:
+        from app.services.analysis_llm import AnalysisLlmService
+
+        llm_service = AnalysisLlmService(user_settings=_user.settings)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="LLM is not configured for this user") from exc
+
+    answer = await generate_expected_answer(
+        llm_service,
+        prompt,
+        actual_answer,
+        feedback.comment,
+        db=db,
+        project_id=project.id,
+    )
+    return RegenerateExpectedAnswerResponse(expected_answer=answer)

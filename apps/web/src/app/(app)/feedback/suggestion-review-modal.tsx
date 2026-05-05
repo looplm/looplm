@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { TestCaseSuggestion, TestDatasetItem } from "@/lib/api";
-import { createDataset } from "@/lib/api";
+import { createDataset, regenerateSuggestionExpectedAnswer } from "@/lib/api";
 import { ConfigEditor } from "@/components/config-editor";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
 
@@ -49,6 +49,7 @@ export function SuggestionReviewModal({
   const [newDatasetName, setNewDatasetName] = useState("");
   const [creatingDataset, setCreatingDataset] = useState(false);
   const [configValid, setConfigValid] = useState(true);
+  const [regenerating, setRegenerating] = useState(false);
 
   useEffect(() => {
     setForm(formFromSuggestion(suggestion));
@@ -83,6 +84,25 @@ export function SuggestionReviewModal({
   }
 
   const traceHref = suggestion.trace_id ? `/traces/${suggestion.trace_id}` : null;
+
+  async function handleRegenerate() {
+    setRegenerating(true);
+    try {
+      const { expected_answer } = await regenerateSuggestionExpectedAnswer(
+        String(suggestion.feedback_id),
+      );
+      if (expected_answer) {
+        setForm((f) => ({ ...f, expected_answer }));
+        toast.success("Criteria regenerated");
+      } else {
+        toast.error("LLM returned an empty result");
+      }
+    } catch (err: any) {
+      toast.error("Failed to regenerate", { description: err.message });
+    } finally {
+      setRegenerating(false);
+    }
+  }
 
   return (
     <>
@@ -197,12 +217,24 @@ export function SuggestionReviewModal({
 
             {/* Expected Answer */}
             <div>
-              <label className="block text-sm font-medium mb-1">
-                Expected Answer
-                {suggestion.feedback_value === 0 && suggestion.suggested_expected_answer && (
-                  <span className="ml-2 text-xs font-normal text-indigo-500">AI-drafted criteria</span>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium">
+                  Expected Answer
+                  {suggestion.feedback_value === 0 && suggestion.suggested_expected_answer && (
+                    <span className="ml-2 text-xs font-normal text-indigo-500">AI-drafted criteria</span>
+                  )}
+                </label>
+                {suggestion.feedback_value === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleRegenerate}
+                    disabled={regenerating}
+                    className="text-xs px-2 py-1 rounded-md text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 disabled:opacity-50"
+                  >
+                    {regenerating ? "Regenerating..." : "Regenerate criteria"}
+                  </button>
                 )}
-              </label>
+              </div>
               {suggestion.feedback_value === 0 && suggestion.suggested_expected_answer && (
                 <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">
                   These are acceptance criteria, not a verified answer. Edit or replace them

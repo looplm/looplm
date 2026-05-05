@@ -182,6 +182,12 @@ export const acceptSuggestion = (datasetId: string, body: TestCaseCreateBody) =>
     body: JSON.stringify(body),
   });
 
+export const regenerateSuggestionExpectedAnswer = (feedbackId: string) =>
+  request<{ expected_answer: string | null }>(
+    `/api/feedback/suggestions/${feedbackId}/regenerate-expected-answer`,
+    { method: "POST" },
+  );
+
 // --- Traces Import ---
 
 export const importTraces = (body: { traces: unknown[]; filename?: string }) =>
