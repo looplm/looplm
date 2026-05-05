@@ -200,9 +200,15 @@ export function SuggestionReviewModal({
               <label className="block text-sm font-medium mb-1">
                 Expected Answer
                 {suggestion.feedback_value === 0 && suggestion.suggested_expected_answer && (
-                  <span className="ml-2 text-xs font-normal text-indigo-500">AI-generated</span>
+                  <span className="ml-2 text-xs font-normal text-indigo-500">AI-drafted criteria</span>
                 )}
               </label>
+              {suggestion.feedback_value === 0 && suggestion.suggested_expected_answer && (
+                <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">
+                  These are acceptance criteria, not a verified answer. Edit or replace them
+                  with the real expected response if you have one.
+                </p>
+              )}
               <textarea
                 value={form.expected_answer}
                 onChange={(e) => setForm({ ...form, expected_answer: e.target.value })}

@@ -90,7 +90,12 @@ export function SuggestionsTab({
                       {sug.scored_at && ` — ${new Date(sug.scored_at).toLocaleDateString("de-DE")}`}
                     </span>
                     {sug.suggested_expected_answer && sug.feedback_value === 0 && (
-                      <span className="text-xs text-indigo-500 dark:text-indigo-400">AI-generated answer</span>
+                      <span
+                        className="text-xs text-indigo-500 dark:text-indigo-400"
+                        title="Criteria describing what a correct answer must cover, derived from the user feedback. Not a ground-truth answer."
+                      >
+                        AI-drafted criteria
+                      </span>
                     )}
                   </div>
                   <p className="text-sm font-medium mb-2">{sug.prompt}</p>

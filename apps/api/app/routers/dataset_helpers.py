@@ -175,12 +175,18 @@ async def generate_expected_answer(
     db: Any = None,
     project_id: Any = None,
 ) -> str | None:
-    """Use LLM to generate what the expected answer should have been."""
+    """Use the LLM to draft acceptance criteria for the test case.
+
+    The user feedback rarely contains a verbatim correct answer, so we ask
+    the model for *criteria* describing what a correct response must
+    cover, plus a non-negotiable fallback rule: if the assistant lacks
+    grounded information, it must say so rather than fabricate.
+    """
     parts = [f"User question:\n{prompt}"]
     if actual_answer:
-        parts.append(f"Incorrect response that was given:\n{actual_answer[:2000]}")
+        parts.append(f"Response that the user marked as incorrect:\n{actual_answer[:2000]}")
     if comment:
-        parts.append(f"User feedback on why this was wrong:\n{comment}")
+        parts.append(f"User feedback / correction:\n{comment}")
 
     user_content = "\n\n".join(parts)
 
@@ -190,16 +196,27 @@ async def generate_expected_answer(
                 {
                     "role": "system",
                     "content": (
-                        "You are a QA specialist creating test case expected answers. "
-                        "Given a user question and an incorrect response (with optional feedback), "
-                        "write a concise, correct expected answer. "
-                        "Focus on what the correct answer should contain. "
-                        "Write only the expected answer, no meta-commentary."
+                        "You are a QA specialist authoring acceptance criteria for a test case. "
+                        "You will receive a user question, the response the user marked as wrong, "
+                        "and (optionally) the user's feedback. Write CRITERIA describing what a "
+                        "correct response must contain — NOT a fabricated answer.\n\n"
+                        "Hard rules:\n"
+                        "1. Do NOT invent factual content or specific procedures. You almost "
+                        "certainly do not know the ground truth.\n"
+                        "2. State the topic, scope, and intent the answer must address, derived "
+                        "only from what the user question and feedback reveal.\n"
+                        "3. If the feedback explicitly contains a correction or required fact, "
+                        "capture that as a required element. Otherwise, do not assert specifics.\n"
+                        "4. Always include this fallback rule explicitly: if the assistant cannot "
+                        "find the information in its sources, it must say so plainly and must not "
+                        "guess or produce a plausible-sounding answer.\n"
+                        "5. Output 2–5 short bullet points starting with '- ', in the same "
+                        "language as the user question. No preamble or meta-commentary."
                     ),
                 },
                 {"role": "user", "content": user_content},
             ],
-            temperature=0.3,
+            temperature=0.2,
         )
 
         if db and project_id:
