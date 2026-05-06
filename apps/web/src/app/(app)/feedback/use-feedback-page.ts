@@ -7,6 +7,7 @@ import {
   getFeedbackStats,
   importFeedback,
   generateSuggestions,
+  getLatestSuggestions,
   acceptSuggestion,
   getDatasets,
   type FeedbackScoreItem,
@@ -19,8 +20,8 @@ import {
   type TestCaseCreateBody,
 } from "@/lib/api";
 import { evaluateFeedback, getFeedbackEvaluation, stopFeedbackEvaluation, getFeedbackEvaluatorConfig, updateFeedbackEvaluatorConfig } from "@/lib/api/feedback-api";
-import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions } from "@/lib/api/evals-api";
-import type { TopQuestionsResponse } from "@/lib/api";
+import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions, getSuggestionRun } from "@/lib/api/evals-api";
+import type { TopQuestionsResponse, SuggestionRunResponse } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
 
@@ -53,6 +54,7 @@ export function useFeedbackPage() {
   const [datasets, setDatasets] = useState<TestDatasetItem[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState<TestCaseSuggestion | null>(null);
   const [saving, setSaving] = useState(false);
+  const [suggestionRun, setSuggestionRun] = useState<SuggestionRunResponse | null>(null);
 
   // Feedback evaluation state
   const [evalResult, setEvalResult] = useState<FeedbackEvaluateResponse | null>(null);
@@ -292,16 +294,26 @@ export function useFeedbackPage() {
         const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
         params[key] = globalFilters.filteredUsers.join(",");
       }
-      const [sugData, dsData] = await Promise.all([
+      const [run, dsData] = await Promise.all([
         generateSuggestions(params),
         getDatasets(),
       ]);
-      setSuggestions(sugData);
+      setSuggestionRun(run);
       setDatasets(dsData.data);
       setSugGenerated(true);
+      setSuggestions([]);
+      if (run.status === "completed") {
+        setSuggestions(run.suggestions);
+        setSugLoading(false);
+      } else if (run.status === "failed") {
+        setSugLoading(false);
+        toast.error("Failed to generate suggestions", {
+          description: run.error || "Unknown error",
+        });
+      }
+      // pending/running → polling effect takes over.
     } catch (err: any) {
       toast.error("Failed to generate suggestions", { description: err.message });
-    } finally {
       setSugLoading(false);
     }
   }, [sugFilter, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers]);
@@ -319,9 +331,57 @@ export function useFeedbackPage() {
     }
   }, []);
 
+  const loadLatestSuggestions = useCallback(async () => {
+    setSugLoading(true);
+    try {
+      const run = await getLatestSuggestions();
+      setSuggestionRun(run);
+      if (run.status === "completed") {
+        setSuggestions(run.suggestions);
+        setSugGenerated(run.count > 0);
+        setSugLoading(false);
+      } else if (run.status === "failed") {
+        setSuggestions([]);
+        setSugLoading(false);
+      }
+      // If pending/running, the polling effect picks it up and clears loading.
+    } catch {
+      // No previous run — leave the empty state as-is.
+      setSugLoading(false);
+    }
+  }, []);
+
+  // Polling loop for suggestion run progress
+  useEffect(() => {
+    if (!suggestionRun || !["pending", "running"].includes(suggestionRun.status)) return;
+    const runId = suggestionRun.id;
+    const interval = setInterval(async () => {
+      try {
+        const updated = await getSuggestionRun(runId);
+        setSuggestionRun(updated);
+        if (updated.status === "completed") {
+          clearInterval(interval);
+          setSuggestions(updated.suggestions);
+          setSugGenerated(updated.count > 0);
+          setSugLoading(false);
+        } else if (updated.status === "failed") {
+          clearInterval(interval);
+          setSugLoading(false);
+          toast.error("Failed to generate suggestions", {
+            description: updated.error || "Unknown error",
+          });
+        }
+      } catch {
+        clearInterval(interval);
+        setSugLoading(false);
+      }
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [suggestionRun?.id, suggestionRun?.status]);
+
   useEffect(() => {
     if (tab === "suggestions") {
-      // Suggestions are generated on demand via the toolbar button.
+      loadLatestSuggestions();
       return;
     }
     if (tab === "top-questions") {
@@ -329,14 +389,12 @@ export function useFeedbackPage() {
     } else {
       loadFeedback();
     }
-  }, [tab, loadFeedback, loadTopQuestions]);
+  }, [tab, loadFeedback, loadTopQuestions, loadLatestSuggestions]);
 
-  // Reset generated state when filters or feedback type change so the empty
-  // state nudges the user to re-run with the current scope.
-  useEffect(() => {
-    setSugGenerated(false);
-    setSuggestions([]);
-  }, [sugFilter, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
+  // Saved suggestion runs persist across filter changes — wiping them on every
+  // filter tweak would defeat the persistence the user expects, and racing
+  // against the async traceNames fetch was wiping freshly-loaded suggestions.
+  // Users regenerate explicitly when they want fresh data for new filters.
 
   useEffect(() => {
     setPage(1);
@@ -440,6 +498,7 @@ export function useFeedbackPage() {
     sugLoading,
     sugGenerated,
     sugFilter, setSugFilter,
+    suggestionRun,
     datasets,
     selectedSuggestion, setSelectedSuggestion,
     saving,

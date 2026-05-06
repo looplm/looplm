@@ -121,3 +121,35 @@ class TopQuestionsAnalysis(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     project = relationship("Project")
+
+
+class FeedbackSuggestionRun(Base):
+    """Stores generated test case suggestions from feedback so they survive page reloads."""
+
+    __tablename__ = "feedback_suggestion_runs"
+    __table_args__ = (
+        Index("idx_feedback_suggestion_runs_project_id", "project_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    status = Column(String(32), nullable=False, server_default=text("'pending'"))
+    error = Column(Text, nullable=True)
+    feedback_type = Column(String(16), nullable=False, server_default=text("'all'"))
+    filter_from_date = Column(DateTime(timezone=True), nullable=True)
+    filter_to_date = Column(DateTime(timezone=True), nullable=True)
+    filter_environment = Column(String(255), nullable=True)
+    filter_include_user_ids = Column(JSONB, nullable=True)
+    filter_exclude_user_ids = Column(JSONB, nullable=True)
+    filter_limit = Column(Integer, nullable=False, server_default=text("20"))
+    total = Column(Integer, nullable=False, server_default=text("0"))
+    processed = Column(Integer, nullable=False, server_default=text("0"))
+    suggestions = Column(JSONB, nullable=False, server_default=text("'[]'"))
+    count = Column(Integer, nullable=False, server_default=text("0"))
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    project = relationship("Project")

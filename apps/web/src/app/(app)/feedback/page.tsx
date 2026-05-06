@@ -32,6 +32,7 @@ export default function FeedbackPage() {
     sugLoading,
     sugGenerated,
     sugFilter, setSugFilter,
+    suggestionRun,
     datasets,
     selectedSuggestion, setSelectedSuggestion,
     saving,
@@ -181,6 +182,7 @@ export default function FeedbackPage() {
           sugGenerated={sugGenerated}
           sugFilter={sugFilter}
           setSugFilter={setSugFilter}
+          suggestionRun={suggestionRun}
           datasets={datasets}
           selectedSuggestion={selectedSuggestion}
           setSelectedSuggestion={setSelectedSuggestion}

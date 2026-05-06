@@ -183,6 +183,19 @@ export interface TopQuestionsResponse {
   completed_at?: string;
 }
 
+export interface SuggestionRunResponse {
+  id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  error?: string;
+  total: number;
+  processed: number;
+  count: number;
+  suggestions: TestCaseSuggestion[];
+  started_at?: string;
+  completed_at?: string;
+  created_at?: string;
+}
+
 // --- Test Datasets ---
 
 export interface TestDatasetItem {

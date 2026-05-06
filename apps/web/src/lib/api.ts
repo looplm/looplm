@@ -58,6 +58,7 @@ export type {
   FeedbackEvaluatorConfig,
   TopQuestionTheme,
   TopQuestionsResponse,
+  SuggestionRunResponse,
   GraderSummaryItem,
   ScoreSummaryItem,
   EvalRunListItem,
