@@ -185,7 +185,7 @@ export interface TopQuestionsResponse {
 
 export interface SuggestionRunResponse {
   id: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
   error?: string;
   total: number;
   processed: number;

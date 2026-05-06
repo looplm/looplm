@@ -416,6 +416,40 @@ async def get_suggestion_run(
     return _build_suggestion_run_response(run)
 
 
+@router.post(
+    "/generate-suggestions/{run_id}/stop",
+    response_model=SuggestionRunResponse,
+    dependencies=[require_write("observe", "feedback")],
+)
+async def stop_suggestion_run(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Cancel an in-flight suggestion run."""
+    from datetime import timezone as tz
+
+    from app.models.feedback_eval import FeedbackSuggestionRun
+    from app.routers.feedback_suggestion_worker import _suggestion_tasks
+
+    run = await db.get(FeedbackSuggestionRun, run_id)
+    if not run or run.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Suggestion run not found")
+    if run.status not in ("pending", "running"):
+        return _build_suggestion_run_response(run)
+
+    task = _suggestion_tasks.pop(run_id, None)
+    if task and not task.done():
+        task.cancel()
+
+    run.status = "cancelled"
+    run.completed_at = datetime.now(tz.utc)
+    await db.commit()
+    await db.refresh(run)
+
+    return _build_suggestion_run_response(run)
+
+
 class RegenerateExpectedAnswerResponse(BaseModel):
     expected_answer: str | None
 

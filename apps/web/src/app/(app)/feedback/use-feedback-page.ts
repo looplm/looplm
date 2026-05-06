@@ -20,7 +20,7 @@ import {
   type TestCaseCreateBody,
 } from "@/lib/api";
 import { evaluateFeedback, getFeedbackEvaluation, stopFeedbackEvaluation, getFeedbackEvaluatorConfig, updateFeedbackEvaluatorConfig } from "@/lib/api/feedback-api";
-import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions, getSuggestionRun } from "@/lib/api/evals-api";
+import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions, getSuggestionRun, stopSuggestionRun } from "@/lib/api/evals-api";
 import type { TopQuestionsResponse, SuggestionRunResponse } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
@@ -340,7 +340,7 @@ export function useFeedbackPage() {
         setSuggestions(run.suggestions);
         setSugGenerated(run.count > 0);
         setSugLoading(false);
-      } else if (run.status === "failed") {
+      } else if (run.status === "failed" || run.status === "cancelled") {
         setSuggestions([]);
         setSugLoading(false);
       }
@@ -370,6 +370,9 @@ export function useFeedbackPage() {
           toast.error("Failed to generate suggestions", {
             description: updated.error || "Unknown error",
           });
+        } else if (updated.status === "cancelled") {
+          clearInterval(interval);
+          setSugLoading(false);
         }
       } catch {
         clearInterval(interval);
@@ -378,6 +381,18 @@ export function useFeedbackPage() {
     }, 1500);
     return () => clearInterval(interval);
   }, [suggestionRun?.id, suggestionRun?.status]);
+
+  async function handleStopSuggestionRun() {
+    if (!suggestionRun || !["pending", "running"].includes(suggestionRun.status)) return;
+    try {
+      const updated = await stopSuggestionRun(suggestionRun.id);
+      setSuggestionRun(updated);
+      setSugLoading(false);
+      toast.success("Generation stopped");
+    } catch (err: any) {
+      toast.error("Failed to stop generation", { description: err.message });
+    }
+  }
 
   useEffect(() => {
     if (tab === "suggestions") {
@@ -526,5 +541,6 @@ export function useFeedbackPage() {
     handleAcceptSuggestion,
     handleAnalyzeTopQuestions,
     handleGenerateSuggestions: loadSuggestions,
+    handleStopSuggestionRun,
   };
 }

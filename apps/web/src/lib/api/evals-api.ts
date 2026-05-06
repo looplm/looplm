@@ -186,6 +186,12 @@ export const getLatestSuggestions = () =>
     "/api/feedback/generate-suggestions/latest"
   );
 
+export const stopSuggestionRun = (runId: string) =>
+  request<import("../api-types/data").SuggestionRunResponse>(
+    `/api/feedback/generate-suggestions/${runId}/stop`,
+    { method: "POST" }
+  );
+
 export const acceptSuggestion = (datasetId: string, body: TestCaseCreateBody) =>
   request<TestCaseItem>(`/api/datasets/${datasetId}/cases/from-suggestion`, {
     method: "POST",

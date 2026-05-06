@@ -58,6 +58,7 @@ export default function FeedbackPage() {
     handleAcceptSuggestion,
     handleAnalyzeTopQuestions,
     handleGenerateSuggestions,
+    handleStopSuggestionRun,
   } = useFeedbackPage();
 
   return (
@@ -189,6 +190,7 @@ export default function FeedbackPage() {
           saving={saving}
           onAccept={handleAcceptSuggestion}
           onGenerate={handleGenerateSuggestions}
+          onStop={handleStopSuggestionRun}
           canEdit={canEdit}
         />
       ) : (

@@ -18,6 +18,7 @@ interface SuggestionsTabProps {
   saving: boolean;
   onAccept: (datasetId: string, form: TestCaseFormData) => void;
   onGenerate: () => void;
+  onStop: () => void;
   canEdit: boolean;
 }
 
@@ -34,6 +35,7 @@ export function SuggestionsTab({
   saving,
   onAccept,
   onGenerate,
+  onStop,
   canEdit,
 }: SuggestionsTabProps) {
   const runActive =
@@ -89,6 +91,15 @@ export function SuggestionsTab({
             <div className="flex-1 h-2 rounded-full bg-indigo-200 dark:bg-indigo-900/30 overflow-hidden">
               <div className="h-full w-1/3 rounded-full bg-indigo-500 animate-pulse" />
             </div>
+          )}
+          {suggestionRun && ["pending", "running"].includes(suggestionRun.status) && (
+            <button
+              onClick={onStop}
+              disabled={!canEdit}
+              className="px-3 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-300 dark:border-indigo-800 text-xs text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            >
+              Stop
+            </button>
           )}
         </div>
       ) : null}
