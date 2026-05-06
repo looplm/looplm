@@ -41,10 +41,11 @@ export function SuggestionReviewModal({
   saving: boolean;
 }) {
   const [form, setForm] = useState<TestCaseFormData>(() => formFromSuggestion(suggestion));
-  const initialDatasetId = (): string => {
-    if (suggestion.suggested_dataset_id) return suggestion.suggested_dataset_id;
-    return datasets[0]?.id ?? CREATE_NEW_DATASET;
-  };
+  // Default to the worker's suggested dataset if it found a relevance match.
+  // Otherwise default to creating a new one — picking an arbitrary existing
+  // dataset would silently mis-categorise the test case.
+  const initialDatasetId = (): string =>
+    suggestion.suggested_dataset_id ?? CREATE_NEW_DATASET;
   const [selectedDatasetId, setSelectedDatasetId] = useState<string>(initialDatasetId);
   const [newDatasetName, setNewDatasetName] = useState("");
   const [creatingDataset, setCreatingDataset] = useState(false);
@@ -54,9 +55,7 @@ export function SuggestionReviewModal({
   useEffect(() => {
     setForm(formFromSuggestion(suggestion));
     setConfigValid(true);
-    setSelectedDatasetId(
-      suggestion.suggested_dataset_id || datasets[0]?.id || CREATE_NEW_DATASET
-    );
+    setSelectedDatasetId(suggestion.suggested_dataset_id ?? CREATE_NEW_DATASET);
     setNewDatasetName("");
   }, [suggestion, datasets]);
 

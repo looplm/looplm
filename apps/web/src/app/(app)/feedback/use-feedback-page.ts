@@ -334,7 +334,15 @@ export function useFeedbackPage() {
   const loadLatestSuggestions = useCallback(async () => {
     setSugLoading(true);
     try {
-      const run = await getLatestSuggestions();
+      const [run, dsData] = await Promise.all([
+        getLatestSuggestions().catch(() => null),
+        getDatasets().catch(() => null),
+      ]);
+      if (dsData) setDatasets(dsData.data);
+      if (!run) {
+        setSugLoading(false);
+        return;
+      }
       setSuggestionRun(run);
       if (run.status === "completed") {
         setSuggestions(run.suggestions);
@@ -346,7 +354,6 @@ export function useFeedbackPage() {
       }
       // If pending/running, the polling effect picks it up and clears loading.
     } catch {
-      // No previous run — leave the empty state as-is.
       setSugLoading(false);
     }
   }, []);
