@@ -4,12 +4,60 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from app.models.models import FeedbackScore, TestCase, Trace
 from app.schemas.datasets import TestCaseItem, TestCaseSuggestion
 
 logger = logging.getLogger(__name__)
+
+
+# Strip leading personal salutations from assistant responses before they
+# become canonical expected answers. Personal names ("Hallo Ursula, …",
+# "Sehr geehrter Herr Müller, …") leak across test cases — they aren't part
+# of the answer being graded. Reviewers can still edit in the modal if a
+# false positive slips through.
+_GREETING_WITH_PREFIX = re.compile(
+    r"^(?:hallo|hi|hey|liebe[r]?|sehr\s+geehrte[r]?|guten\s+\w+)\s+"
+    r"(?:(?:frau|herr|mr|mrs|ms|dr)\.?\s+)?"
+    r"[A-ZÄÖÜ][a-zäöüß]+(?:[-\s][A-ZÄÖÜ][a-zäöüß]+)?"
+    r"\s*[,!:.]\s*",
+    re.IGNORECASE,
+)
+
+
+def strip_personal_greeting(text: str | None, known_name: str | None = None) -> str | None:
+    """Remove leading personal salutations from assistant text.
+
+    Always strips greeting-prefixed forms like ``"Hallo Ursula, "`` or
+    ``"Sehr geehrter Herr Müller, "`` — those are unambiguous.
+
+    Strips a bare ``"Name, "`` prefix only when ``known_name`` is provided
+    (typically from ``trace.user_id`` / ``trace_metadata["userName"]``).
+    Without that signal we leave bare leading words alone, so legitimate
+    sentence starts like ``"Berlin, die Hauptstadt …"`` are not mangled.
+    """
+    if not text:
+        return text
+
+    stripped = _GREETING_WITH_PREFIX.sub("", text, count=1)
+
+    if stripped == text and known_name:
+        first_token = known_name.strip().split()[0] if known_name.strip() else ""
+        if first_token:
+            bare = re.compile(
+                rf"^{re.escape(first_token)}\s*[,!:.]\s*",
+                re.IGNORECASE,
+            )
+            stripped = bare.sub("", text, count=1)
+
+    if stripped == text:
+        return text
+    stripped = stripped.lstrip()
+    if stripped:
+        stripped = stripped[0].upper() + stripped[1:]
+    return stripped
 
 
 def _tc_to_item(tc: TestCase) -> TestCaseItem:
@@ -129,8 +177,19 @@ def build_suggestions(
         message_count = metadata.get("messageCount")
         has_summary = (isinstance(message_count, int) and message_count > 8) or bool(metadata.get("hasSummary"))
 
-        # For positive feedback, use actual answer as expected
-        suggested = actual_answer if feedback.value == 1 else None
+        # User name (display) for stripping personal greetings from the
+        # canonical answer. metadata.userName is the friendly display name;
+        # trace.user_id is usually an opaque identifier but worth a fallback.
+        user_name = metadata.get("userName") or trace.user_id
+
+        # For positive feedback, use the actual answer as the expected one,
+        # but strip the personal greeting first so names don't leak into the
+        # canonical test case.
+        suggested = (
+            strip_personal_greeting(actual_answer, known_name=user_name)
+            if feedback.value == 1
+            else None
+        )
 
         suggestions.append(TestCaseSuggestion(
             feedback_id=feedback.id,
