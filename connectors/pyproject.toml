@@ -1,6 +1,6 @@
 [project]
 name = "looplm-connectors"
-version = "0.3.0"
+version = "0.4.0"
 description = "LoopLM connector integrations (LangSmith, Langfuse, etc.)"
 requires-python = ">=3.12"
 dependencies = ["httpx>=0.27.0"]
