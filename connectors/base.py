@@ -1,8 +1,30 @@
 """Abstract base connector class for all LoopLM integrations."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Awaitable, Callable, Literal, Optional
+
+
+Phase = Literal[
+    "fetching_traces",
+    "processing_traces",
+    "fetching_scores",
+    "processing_scores",
+]
+
+
+@dataclass
+class SyncProgress:
+    """A single progress event emitted by a connector during sync."""
+
+    phase: Phase
+    message: str
+    current: Optional[int] = None
+    total: Optional[int] = None
+
+
+ProgressCallback = Callable[[SyncProgress], Awaitable[None]]
 
 
 class BaseConnector(ABC):
@@ -29,6 +51,10 @@ class BaseConnector(ABC):
         ...
 
     @abstractmethod
-    async def sync(self, since: datetime) -> list[dict[str, Any]]:
+    async def sync(
+        self,
+        since: datetime,
+        on_progress: ProgressCallback | None = None,
+    ) -> list[dict[str, Any]]:
         """Full sync flow: fetch traces, normalize, and return raw traces."""
         ...

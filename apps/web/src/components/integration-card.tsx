@@ -1,8 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Integration } from "@/lib/api";
 import StatusBadge from "@/components/status-badge";
+
+const PHASE_LABELS: Record<NonNullable<Integration["sync_phase"]>, string> = {
+  fetching_traces: "Fetching traces",
+  processing_traces: "Processing traces",
+  fetching_scores: "Fetching scores",
+  processing_scores: "Processing scores",
+};
+
+function formatElapsed(startedAt: string, now: number): string {
+  const diffMs = Math.max(0, now - new Date(startedAt).getTime());
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatSince(iso: string): string | null {
+  const date = new Date(iso);
+  // Treat anything before 2021 as "all time" — that's the 2020-01-01 fallback
+  if (date.getUTCFullYear() < 2021) return null;
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
 
 interface IntegrationCardProps {
   integration: Integration;
@@ -29,6 +55,21 @@ export function IntegrationCard({
   onUpdateExistingChange,
   onCustomSinceDateChange,
 }: IntegrationCardProps) {
+  const isSyncing = i.sync_status === "syncing";
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isSyncing || !i.sync_started_at) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isSyncing, i.sync_started_at]);
+
+  const phaseLabel = i.sync_phase ? PHASE_LABELS[i.sync_phase] : "Starting sync…";
+  const showDeterminate =
+    i.sync_phase === "processing_traces" &&
+    i.sync_progress_total != null &&
+    i.sync_progress_total > 0;
+  const sinceLabel = i.sync_since ? formatSince(i.sync_since) : null;
+
   return (
     <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
       <div className="flex items-center justify-between">
@@ -122,32 +163,46 @@ export function IntegrationCard({
           </button>
         </div>
       )}
-      {i.sync_status === "syncing" && (
+      {isSyncing && (
         <div className="mt-3">
-          {i.sync_progress_total != null ? (
-            <>
-              <div className="flex items-center justify-between text-sm text-gray-500 dark:text-slate-400 mb-1.5">
-                <span>Syncing traces...</span>
-                <span>{i.sync_progress_current ?? 0} / {i.sync_progress_total}</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-blue-500 transition-all duration-300 animate-pulse"
-                  style={{
-                    width: i.sync_progress_total > 0
-                      ? `${Math.round(((i.sync_progress_current ?? 0) / i.sync_progress_total) * 100)}%`
-                      : "100%",
-                  }}
-                />
-              </div>
-            </>
-          ) : (
-            <div className="space-y-1.5">
-              <p className="text-sm text-gray-500 dark:text-slate-400">Starting sync...</p>
-              <div className="h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
-                <div className="h-full w-1/3 rounded-full bg-blue-500 animate-[indeterminate_1.5s_ease-in-out_infinite]" />
-              </div>
-            </div>
+          <div className="flex items-center justify-between text-sm text-gray-500 dark:text-slate-400 mb-1.5">
+            <span>{phaseLabel}</span>
+            <span className="flex items-center gap-3">
+              {showDeterminate ? (
+                <span>
+                  {i.sync_progress_current ?? 0} / {i.sync_progress_total} traces
+                </span>
+              ) : i.sync_progress_current != null && i.sync_progress_current > 0 ? (
+                <span>{i.sync_progress_current} fetched</span>
+              ) : null}
+              {i.sync_started_at && (
+                <span className="tabular-nums text-gray-400 dark:text-slate-500">
+                  {formatElapsed(i.sync_started_at, now)}
+                </span>
+              )}
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
+            {showDeterminate ? (
+              <div
+                className="h-full rounded-full bg-blue-500 transition-all duration-300 animate-pulse"
+                style={{
+                  width: `${Math.round(((i.sync_progress_current ?? 0) / (i.sync_progress_total ?? 1)) * 100)}%`,
+                }}
+              />
+            ) : (
+              <div className="h-full w-1/3 rounded-full bg-blue-500 animate-[indeterminate_1.5s_ease-in-out_infinite]" />
+            )}
+          </div>
+          {i.sync_message && (
+            <p className="mt-2 text-xs text-gray-500 dark:text-slate-400 truncate">
+              {i.sync_message}
+            </p>
+          )}
+          {sinceLabel && (
+            <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+              Scanning since {sinceLabel}
+            </p>
           )}
           <p className="mt-2 text-xs text-gray-400 dark:text-slate-500">
             Sync runs in the background — you can safely navigate away.
@@ -157,9 +212,12 @@ export function IntegrationCard({
       {i.sync_status === "error" && i.last_sync_error && (
         <div className="mt-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
           <p>Sync error: {i.last_sync_error}</p>
-          {i.sync_progress_current != null && i.sync_progress_total != null && (
+          {i.sync_phase && (
             <p className="mt-1 text-red-400/70">
-              Failed after processing {i.sync_progress_current} of {i.sync_progress_total} traces
+              Failed during {PHASE_LABELS[i.sync_phase].toLowerCase()}
+              {i.sync_progress_current != null && i.sync_progress_total != null && (
+                <> ({i.sync_progress_current} of {i.sync_progress_total} processed)</>
+              )}
             </p>
           )}
         </div>

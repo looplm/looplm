@@ -70,6 +70,9 @@ export interface Integration {
   sync_progress_current?: number;
   sync_progress_total?: number;
   sync_started_at?: string;
+  sync_phase?: "fetching_traces" | "processing_traces" | "fetching_scores" | "processing_scores";
+  sync_message?: string;
+  sync_since?: string;
   created_at: string;
   updated_at: string;
 }

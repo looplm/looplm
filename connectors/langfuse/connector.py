@@ -10,7 +10,7 @@ from dateutil.parser import isoparse
 
 import httpx
 
-from connectors.base import BaseConnector
+from connectors.base import BaseConnector, ProgressCallback, SyncProgress
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,12 @@ class LangfuseConnector(BaseConnector):
             logger.error("Langfuse health check failed: %s", e)
             return False
 
-    async def fetch_traces(self, since: datetime, limit: int = 100) -> list[dict[str, Any]]:
+    async def fetch_traces(
+        self,
+        since: datetime,
+        limit: int = 100,
+        on_progress: ProgressCallback | None = None,
+    ) -> list[dict[str, Any]]:
         """Fetch raw traces from Langfuse API."""
         traces = []
         page = 1
@@ -60,6 +65,12 @@ class LangfuseConnector(BaseConnector):
                 if not batch:
                     break
                 traces.extend(batch)
+                if on_progress is not None:
+                    await on_progress(SyncProgress(
+                        phase="fetching_traces",
+                        message=f"Fetched page {page} ({len(traces)} traces so far)",
+                        current=len(traces),
+                    ))
                 if len(traces) >= limit:
                     break
                 page += 1
@@ -156,7 +167,12 @@ class LangfuseConnector(BaseConnector):
             "spans": spans,
         }
 
-    async def fetch_scores(self, since: datetime, limit: int = 500) -> list[dict[str, Any]]:
+    async def fetch_scores(
+        self,
+        since: datetime,
+        limit: int = 500,
+        on_progress: ProgressCallback | None = None,
+    ) -> list[dict[str, Any]]:
         """Fetch scores from Langfuse API (feedback + grader scores)."""
         scores: list[dict[str, Any]] = []
         page = 1
@@ -178,6 +194,12 @@ class LangfuseConnector(BaseConnector):
                 if not batch:
                     break
                 scores.extend(batch)
+                if on_progress is not None:
+                    await on_progress(SyncProgress(
+                        phase="fetching_scores",
+                        message=f"Fetched page {page} ({len(scores)} scores so far)",
+                        current=len(scores),
+                    ))
                 if len(scores) >= limit:
                     break
                 page += 1
@@ -195,17 +217,36 @@ class LangfuseConnector(BaseConnector):
             "scored_at": self._parse_ts(raw_score.get("createdAt")),
         }
 
-    async def sync(self, since: datetime) -> list[dict[str, Any]]:
+    async def sync(
+        self,
+        since: datetime,
+        on_progress: ProgressCallback | None = None,
+    ) -> list[dict[str, Any]]:
         """Full sync: fetch traces and enrich with observations."""
-        raw_traces = await self.fetch_traces(since)
+        raw_traces = await self.fetch_traces(since, on_progress=on_progress)
+        total = len(raw_traces)
+        if on_progress is not None:
+            await on_progress(SyncProgress(
+                phase="processing_traces",
+                message=f"Enriching {total} traces with observations",
+                current=0,
+                total=total,
+            ))
         enriched = []
-        for trace in raw_traces:
+        for idx, trace in enumerate(raw_traces, start=1):
             try:
                 detail = await self.fetch_trace_detail(trace["id"])
                 enriched.append(detail)
             except Exception as e:
                 logger.warning("Failed to fetch detail for trace %s: %s", trace.get("id"), e)
                 enriched.append(trace)
+            if on_progress is not None:
+                await on_progress(SyncProgress(
+                    phase="processing_traces",
+                    message=f"Enriched {idx} of {total} traces with observations",
+                    current=idx,
+                    total=total,
+                ))
         return enriched
 
     async def sync_prompts(self) -> list[dict]:

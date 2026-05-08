@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.encryption import decrypt_api_key
 from app.models.models import FeedbackScore, Integration, IntegrationType, Span, SyncStatus, Trace
+from connectors.base import SyncProgress
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +69,25 @@ async def run_sync(integration_id: UUID, db: AsyncSession, *, since_override: da
     try:
         connector = _get_connector(integration)
         since = since_override or integration.last_synced_at or datetime(2020, 1, 1, tzinfo=timezone.utc)
-        raw_traces = await connector.sync(since)
 
+        integration.sync_since = since
+        integration.sync_phase = "fetching_traces"
+        integration.sync_message = f"Connecting to {integration.type.value}…"
+        await db.commit()
+
+        async def on_progress(p: SyncProgress) -> None:
+            integration.sync_phase = p.phase
+            integration.sync_message = p.message[:255]
+            if p.total is not None:
+                integration.sync_progress_total = p.total
+            if p.current is not None:
+                integration.sync_progress_current = p.current
+            await db.commit()
+
+        raw_traces = await connector.sync(since, on_progress=on_progress)
+
+        integration.sync_phase = "processing_traces"
+        integration.sync_message = f"Storing {len(raw_traces)} traces"
         integration.sync_progress_total = len(raw_traces)
         integration.sync_progress_current = 0
         await db.commit()
@@ -253,7 +271,7 @@ async def run_sync(integration_id: UUID, db: AsyncSession, *, since_override: da
         score_count = 0
         if integration.type == IntegrationType.langfuse and hasattr(connector, "fetch_scores"):
             try:
-                score_count = await _sync_scores(connector, integration, db)
+                score_count = await _sync_scores(connector, integration, db, on_progress=on_progress)
             except Exception as e:
                 logger.warning("Score sync failed for integration %s: %s", integration_id, e)
 
@@ -263,6 +281,9 @@ async def run_sync(integration_id: UUID, db: AsyncSession, *, since_override: da
         integration.sync_progress_current = None
         integration.sync_progress_total = None
         integration.sync_started_at = None
+        integration.sync_phase = None
+        integration.sync_message = None
+        integration.sync_since = None
         await db.commit()
 
         logger.info(
@@ -287,7 +308,7 @@ async def run_sync(integration_id: UUID, db: AsyncSession, *, since_override: da
         raise
 
 
-async def _sync_scores(connector, integration: Integration, db: AsyncSession) -> int:
+async def _sync_scores(connector, integration: Integration, db: AsyncSession, *, on_progress=None) -> int:
     """Sync scores from Langfuse into feedback_scores table."""
     # Backfill trace_id on scores that were synced before their trace existed
     trace_subq = (
@@ -313,8 +334,15 @@ async def _sync_scores(connector, integration: Integration, db: AsyncSession) ->
         logger.info("Backfilled trace_id on %d scores for integration %s", result.rowcount, integration.id)
 
     since = integration.last_synced_at or datetime(2020, 1, 1, tzinfo=timezone.utc)
-    raw_scores = await connector.fetch_scores(since)
+    raw_scores = await connector.fetch_scores(since, on_progress=on_progress)
     logger.info("Fetched %d raw scores for integration %s", len(raw_scores), integration.id)
+    if on_progress is not None and raw_scores:
+        await on_progress(SyncProgress(
+            phase="processing_scores",
+            message=f"Storing {len(raw_scores)} feedback scores",
+            current=0,
+            total=len(raw_scores),
+        ))
 
     count = 0
     for raw in raw_scores:
