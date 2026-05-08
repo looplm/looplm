@@ -14,7 +14,6 @@ import type {
   EvalJobLogsResponse,
   TriggerEvalResponse,
   TestCaseItem,
-  TestCaseSuggestion,
   TestCaseCreateBody,
   JsonImportListResponse,
   EvalReportResponse,
@@ -171,10 +170,27 @@ export const getLatestTopQuestions = () =>
 
 export const generateSuggestions = (params?: Record<string, string>) => {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-  return request<TestCaseSuggestion[]>(`/api/feedback/generate-suggestions${qs}`, {
-    method: "POST",
-  });
+  return request<import("../api-types/data").SuggestionRunResponse>(
+    `/api/feedback/generate-suggestions${qs}`,
+    { method: "POST" }
+  );
 };
+
+export const getSuggestionRun = (runId: string) =>
+  request<import("../api-types/data").SuggestionRunResponse>(
+    `/api/feedback/generate-suggestions/${runId}`
+  );
+
+export const getLatestSuggestions = () =>
+  request<import("../api-types/data").SuggestionRunResponse>(
+    "/api/feedback/generate-suggestions/latest"
+  );
+
+export const stopSuggestionRun = (runId: string) =>
+  request<import("../api-types/data").SuggestionRunResponse>(
+    `/api/feedback/generate-suggestions/${runId}/stop`,
+    { method: "POST" }
+  );
 
 export const acceptSuggestion = (datasetId: string, body: TestCaseCreateBody) =>
   request<TestCaseItem>(`/api/datasets/${datasetId}/cases/from-suggestion`, {

@@ -1,6 +1,6 @@
 "use client";
 
-import type { TestCaseSuggestion, TestDatasetItem } from "@/lib/api";
+import type { SuggestionRunResponse, TestCaseSuggestion, TestDatasetItem } from "@/lib/api";
 import { SuggestionConditions } from "@/components/test-case-conditions";
 import { SuggestionReviewModal } from "./suggestion-review-modal";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
@@ -11,12 +11,14 @@ interface SuggestionsTabProps {
   sugGenerated: boolean;
   sugFilter: "all" | "positive" | "negative";
   setSugFilter: (f: "all" | "positive" | "negative") => void;
+  suggestionRun: SuggestionRunResponse | null;
   datasets: TestDatasetItem[];
   selectedSuggestion: TestCaseSuggestion | null;
   setSelectedSuggestion: (s: TestCaseSuggestion | null) => void;
   saving: boolean;
   onAccept: (datasetId: string, form: TestCaseFormData) => void;
   onGenerate: () => void;
+  onStop: () => void;
   canEdit: boolean;
 }
 
@@ -26,14 +28,34 @@ export function SuggestionsTab({
   sugGenerated,
   sugFilter,
   setSugFilter,
+  suggestionRun,
   datasets,
   selectedSuggestion,
   setSelectedSuggestion,
   saving,
   onAccept,
   onGenerate,
+  onStop,
   canEdit,
 }: SuggestionsTabProps) {
+  const runActive =
+    suggestionRun !== null && ["pending", "running"].includes(suggestionRun.status);
+  const showProgress = sugLoading || runActive;
+  const progressLabel = (() => {
+    if (!suggestionRun || suggestionRun.status === "pending") return "Starting generation…";
+    if (suggestionRun.status === "running") {
+      if (suggestionRun.total > 0) {
+        return `Drafting acceptance criteria… ${suggestionRun.processed} of ${suggestionRun.total}`;
+      }
+      return "Building suggestions…";
+    }
+    return "Generating suggestions…";
+  })();
+  const progressPct =
+    suggestionRun && suggestionRun.total > 0
+      ? Math.min(100, Math.round((suggestionRun.processed / suggestionRun.total) * 100))
+      : null;
+
   return (
     <div>
       <div className="flex gap-2 mb-4">
@@ -52,9 +74,37 @@ export function SuggestionsTab({
         ))}
       </div>
 
-      {sugLoading ? (
-        <p className="text-gray-500 dark:text-slate-400">Generating suggestions...</p>
-      ) : suggestions.length === 0 ? (
+      {showProgress ? (
+        <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-900/50">
+          <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          <span className="text-sm text-indigo-700 dark:text-indigo-300 whitespace-nowrap">
+            {progressLabel}
+          </span>
+          {progressPct !== null ? (
+            <div className="flex-1 h-2 rounded-full bg-indigo-200 dark:bg-indigo-900/30 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-indigo-500 transition-all duration-500"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          ) : (
+            <div className="flex-1 h-2 rounded-full bg-indigo-200 dark:bg-indigo-900/30 overflow-hidden">
+              <div className="h-full w-1/3 rounded-full bg-indigo-500 animate-pulse" />
+            </div>
+          )}
+          {suggestionRun && ["pending", "running"].includes(suggestionRun.status) && (
+            <button
+              onClick={onStop}
+              disabled={!canEdit}
+              className="px-3 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-300 dark:border-indigo-800 text-xs text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            >
+              Stop
+            </button>
+          )}
+        </div>
+      ) : null}
+
+      {showProgress && suggestions.length === 0 ? null : suggestions.length === 0 ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400 space-y-3">
           <p>
             {sugGenerated

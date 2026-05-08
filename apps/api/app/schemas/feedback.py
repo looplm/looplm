@@ -183,3 +183,19 @@ class TopQuestionsResponse(BaseModel):
     themes: list[TopQuestionTheme] = []
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+
+# --- Suggestion Run ---
+
+
+class SuggestionRunResponse(BaseModel):
+    id: UUID
+    status: str  # "pending" | "running" | "completed" | "failed"
+    error: Optional[str] = None
+    total: int = 0
+    processed: int = 0
+    count: int = 0
+    suggestions: list[Any] = []
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None

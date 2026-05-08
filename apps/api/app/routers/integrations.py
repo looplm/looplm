@@ -164,6 +164,9 @@ async def trigger_sync(
     integration.sync_progress_current = None
     integration.sync_progress_total = None
     integration.sync_started_at = datetime.now(timezone.utc)
+    integration.sync_phase = None
+    integration.sync_message = None
+    integration.sync_since = None
     await db.flush()
 
     since_override = body.since if body else None
@@ -199,6 +202,9 @@ async def stop_sync(
     integration.sync_progress_current = None
     integration.sync_progress_total = None
     integration.sync_started_at = None
+    integration.sync_phase = None
+    integration.sync_message = None
+    integration.sync_since = None
     await db.flush()
 
     return {"message": "Sync stopped"}

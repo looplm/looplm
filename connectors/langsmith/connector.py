@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from connectors.base import BaseConnector
+from connectors.base import BaseConnector, ProgressCallback, SyncProgress
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,18 @@ class LangSmithConnector(BaseConnector):
             logger.error("LangSmith health check failed: %s", e)
             return False
 
-    async def fetch_traces(self, since: datetime, limit: int = 100) -> list[dict[str, Any]]:
+    async def fetch_traces(
+        self,
+        since: datetime,
+        limit: int = 100,
+        on_progress: ProgressCallback | None = None,
+    ) -> list[dict[str, Any]]:
         """Fetch raw runs (traces) from LangSmith API."""
+        if on_progress is not None:
+            await on_progress(SyncProgress(
+                phase="fetching_traces",
+                message=f"Querying LangSmith for traces since {since.date().isoformat()}",
+            ))
         runs = []
         async with httpx.AsyncClient() as client:
             query_body: dict[str, Any] = {
@@ -61,6 +71,12 @@ class LangSmithConnector(BaseConnector):
             resp.raise_for_status()
             data = resp.json()
             runs = data.get("runs", data) if isinstance(data, dict) else data
+        if on_progress is not None:
+            await on_progress(SyncProgress(
+                phase="fetching_traces",
+                message=f"Found {len(runs)} traces",
+                current=len(runs),
+            ))
         return runs[:limit]
 
     async def _resolve_project_id(self, client: httpx.AsyncClient, project_name: str) -> str | None:
@@ -219,9 +235,14 @@ class LangSmithConnector(BaseConnector):
             "child_traces": child_traces,
         }
 
-    async def sync(self, since: datetime, enrich_limit: int = 3) -> list[dict[str, Any]]:
+    async def sync(
+        self,
+        since: datetime,
+        on_progress: ProgressCallback | None = None,
+        enrich_limit: int = 3,
+    ) -> list[dict[str, Any]]:
         """Full sync: fetch traces and enrich the most recent ones with child runs."""
-        raw_traces = await self.fetch_traces(since)
+        raw_traces = await self.fetch_traces(since, on_progress=on_progress)
 
         async def _enrich(trace: dict[str, Any]) -> dict[str, Any]:
             try:
@@ -240,6 +261,14 @@ class LangSmithConnector(BaseConnector):
         # Only enrich the most recent N traces to avoid rate limits
         to_enrich = raw_traces[:enrich_limit]
         rest = raw_traces[enrich_limit:]
+
+        if on_progress is not None and to_enrich:
+            await on_progress(SyncProgress(
+                phase="processing_traces",
+                message=f"Enriching {len(to_enrich)} most recent traces with child runs",
+                current=0,
+                total=len(raw_traces),
+            ))
 
         enriched = await asyncio.gather(*[_bounded_enrich(t) for t in to_enrich])
         return list(enriched) + rest

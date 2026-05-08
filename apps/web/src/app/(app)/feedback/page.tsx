@@ -32,6 +32,7 @@ export default function FeedbackPage() {
     sugLoading,
     sugGenerated,
     sugFilter, setSugFilter,
+    suggestionRun,
     datasets,
     selectedSuggestion, setSelectedSuggestion,
     saving,
@@ -57,6 +58,7 @@ export default function FeedbackPage() {
     handleAcceptSuggestion,
     handleAnalyzeTopQuestions,
     handleGenerateSuggestions,
+    handleStopSuggestionRun,
   } = useFeedbackPage();
 
   return (
@@ -181,12 +183,14 @@ export default function FeedbackPage() {
           sugGenerated={sugGenerated}
           sugFilter={sugFilter}
           setSugFilter={setSugFilter}
+          suggestionRun={suggestionRun}
           datasets={datasets}
           selectedSuggestion={selectedSuggestion}
           setSelectedSuggestion={setSelectedSuggestion}
           saving={saving}
           onAccept={handleAcceptSuggestion}
           onGenerate={handleGenerateSuggestions}
+          onStop={handleStopSuggestionRun}
           canEdit={canEdit}
         />
       ) : (

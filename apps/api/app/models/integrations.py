@@ -42,6 +42,9 @@ class Integration(Base):
     sync_progress_current = Column(Integer)
     sync_progress_total = Column(Integer)
     sync_started_at = Column(DateTime(timezone=True))
+    sync_phase = Column(String(32))
+    sync_message = Column(String(255))
+    sync_since = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 

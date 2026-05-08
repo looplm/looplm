@@ -36,6 +36,9 @@ class IntegrationResponse(BaseModel):
     sync_progress_current: Optional[int] = None
     sync_progress_total: Optional[int] = None
     sync_started_at: Optional[datetime] = None
+    sync_phase: Optional[str] = None
+    sync_message: Optional[str] = None
+    sync_since: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

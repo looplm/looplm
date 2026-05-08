@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from uuid import UUID
@@ -17,12 +18,12 @@ from app.models.models import FeedbackScore, Integration, Trace
 from app.models.project import Project
 from app.models.user import User
 from app.services.observe_filter import get_observe_trace_names
-from app.schemas.datasets import TestCaseSuggestion
 from app.schemas.feedback import (
     FeedbackStatsResponse,
     FeedbackTrend,
     GraderStats,
     GraderTrend,
+    SuggestionRunResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -234,9 +235,25 @@ async def feedback_stats(
     )
 
 
+def _build_suggestion_run_response(run) -> SuggestionRunResponse:
+    return SuggestionRunResponse(
+        id=run.id,
+        status=run.status,
+        error=run.error,
+        total=run.total or 0,
+        processed=run.processed or 0,
+        count=run.count or 0,
+        suggestions=run.suggestions or [],
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        created_at=run.created_at,
+    )
+
+
 @router.post(
     "/generate-suggestions",
-    response_model=list[TestCaseSuggestion],
+    response_model=SuggestionRunResponse,
+    status_code=202,
     dependencies=[require_write("observe", "feedback")],
 )
 async def generate_suggestions(
@@ -251,15 +268,18 @@ async def generate_suggestions(
     project: Project = Depends(get_current_project),
     _user: User = Depends(get_current_user),
 ):
-    """Generate LLM-enhanced test case suggestions from recent feedback.
+    """Kick off background generation of LLM-enhanced test case suggestions.
 
-    Only feedback rows linked to a trace are considered. Honors the project's
-    Observe trace-name filter and optional date/environment/user filters.
+    Returns a run record the frontend can poll. Only feedback rows linked to a
+    trace are considered. Honors the project's Observe trace-name filter and
+    optional date/environment/user filters.
     """
-    from app.routers.dataset_helpers import (
-        build_suggestions,
-        enrich_suggestions_with_llm,
-        score_dataset_relevance,
+    from app.db import async_session
+    from app.models.feedback_eval import FeedbackSuggestionRun
+    from app.routers.dataset_helpers import build_suggestions
+    from app.routers.feedback_suggestion_worker import (
+        _suggestion_tasks,
+        run_suggestion_generation,
     )
 
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
@@ -302,71 +322,132 @@ async def generate_suggestions(
 
     suggestions = build_suggestions(rows)
 
-    # Attach comments from feedback
     feedback_comments: dict[str, str | None] = {}
     for feedback, _trace in rows:
         feedback_comments[str(feedback.id)] = feedback.comment
-
     for sug in suggestions:
         sug.comment = feedback_comments.get(str(sug.feedback_id))
 
-    # Enrich negative suggestions with LLM-generated expected answers
-    has_negative = any(s.feedback_value == 0 and not s.suggested_expected_answer for s in suggestions)
-    if has_negative:
-        try:
-            from app.services.analysis_llm import AnalysisLlmService
+    if not suggestions:
+        raise HTTPException(
+            status_code=400,
+            detail="No suggestions could be built from feedback in the current filter range.",
+        )
 
-            llm_service = AnalysisLlmService(user_settings=_user.settings)
-            suggestions = await enrich_suggestions_with_llm(
-                suggestions, llm_service, feedback_comments
-            )
-        except Exception:
-            logger.info("LLM not configured or failed, skipping expected answer generation")
+    needs_enrichment_count = sum(
+        1 for s in suggestions if s.feedback_value == 0 and not s.suggested_expected_answer
+    )
 
-    # Smart dataset suggestion: score datasets by metadata overlap
-    from app.models.models import TestCase, TestDataset
+    run = FeedbackSuggestionRun(
+        project_id=project.id,
+        status="pending",
+        feedback_type=feedback_type,
+        filter_from_date=from_date,
+        filter_to_date=to_date,
+        filter_environment=environment,
+        filter_include_user_ids=inc_uids or None,
+        filter_exclude_user_ids=exc_uids or None,
+        filter_limit=limit,
+        total=needs_enrichment_count,
+        processed=0,
+    )
+    db.add(run)
+    await db.flush()
+    await db.refresh(run)
+    await db.commit()
 
-    ds_query = select(TestDataset).where(TestDataset.project_id == project.id)
-    ds_result = await db.execute(ds_query)
-    datasets = ds_result.scalars().all()
+    task = asyncio.create_task(
+        run_suggestion_generation(
+            run_id=run.id,
+            project_id=project.id,
+            suggestions=suggestions,
+            feedback_comments=feedback_comments,
+            user_settings=_user.settings,
+            db_factory=async_session,
+        )
+    )
+    _suggestion_tasks[run.id] = task
 
-    if datasets:
-        # Pre-load test case metadata per dataset
-        dataset_cases: dict[str, list[dict]] = {}
-        for ds in datasets:
-            cases_result = await db.execute(
-                select(
-                    TestCase.team_filter,
-                    TestCase.tag_filter,
-                    TestCase.context_filters,
-                ).where(TestCase.dataset_id == ds.id)
-            )
-            dataset_cases[str(ds.id)] = [
-                {
-                    "team_filter": row.team_filter or [],
-                    "tag_filter": row.tag_filter or [],
-                    "context_filters": row.context_filters or {},
-                }
-                for row in cases_result.all()
-            ]
+    return _build_suggestion_run_response(run)
 
-        for sug in suggestions:
-            best_id = None
-            best_score = 0.0
-            for ds in datasets:
-                ds_id = str(ds.id)
-                score = score_dataset_relevance(
-                    dataset_cases.get(ds_id, []),
-                    sug.team_filter,
-                    sug.tag_filter,
-                    sug.context_filters,
-                )
-                if score > best_score:
-                    best_score = score
-                    best_id = ds.id
-            sug.suggested_dataset_id = best_id
 
-    return suggestions
+@router.get(
+    "/generate-suggestions/latest",
+    response_model=SuggestionRunResponse,
+)
+async def get_latest_suggestions(
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Return the most recent suggestion run for the current project.
+
+    404 if nothing has ever been generated — the frontend treats that as the
+    "click Generate" empty state.
+    """
+    from app.models.feedback_eval import FeedbackSuggestionRun
+
+    result = await db.execute(
+        select(FeedbackSuggestionRun)
+        .where(FeedbackSuggestionRun.project_id == project.id)
+        .order_by(FeedbackSuggestionRun.created_at.desc())
+        .limit(1)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="No suggestion run found")
+    return _build_suggestion_run_response(run)
+
+
+@router.get(
+    "/generate-suggestions/{run_id}",
+    response_model=SuggestionRunResponse,
+)
+async def get_suggestion_run(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Get a specific suggestion run for polling progress."""
+    from app.models.feedback_eval import FeedbackSuggestionRun
+
+    run = await db.get(FeedbackSuggestionRun, run_id)
+    if not run or run.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Suggestion run not found")
+    return _build_suggestion_run_response(run)
+
+
+@router.post(
+    "/generate-suggestions/{run_id}/stop",
+    response_model=SuggestionRunResponse,
+    dependencies=[require_write("observe", "feedback")],
+)
+async def stop_suggestion_run(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Cancel an in-flight suggestion run."""
+    from datetime import timezone as tz
+
+    from app.models.feedback_eval import FeedbackSuggestionRun
+    from app.routers.feedback_suggestion_worker import _suggestion_tasks
+
+    run = await db.get(FeedbackSuggestionRun, run_id)
+    if not run or run.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Suggestion run not found")
+    if run.status not in ("pending", "running"):
+        return _build_suggestion_run_response(run)
+
+    task = _suggestion_tasks.pop(run_id, None)
+    if task and not task.done():
+        task.cancel()
+
+    run.status = "cancelled"
+    run.completed_at = datetime.now(tz.utc)
+    await db.commit()
+    await db.refresh(run)
+
+    return _build_suggestion_run_response(run)
 
 
 class RegenerateExpectedAnswerResponse(BaseModel):
