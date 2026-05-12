@@ -27,7 +27,7 @@ from app.schemas.datasets import (
 )
 from app.schemas.evaluations import PaginationInfo
 
-from .dataset_helpers import _tc_to_item, build_suggestions
+from .dataset_helpers import _tc_to_item, build_suggestions, load_trace_source_urls
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +144,9 @@ async def get_suggestions(
     result = await db.execute(query)
     rows = result.all()
 
-    return build_suggestions(rows)
+    trace_ids = [trace.id for _fb, trace in rows if trace is not None]
+    trace_sources = await load_trace_source_urls(db, trace_ids)
+    return build_suggestions(rows, trace_sources=trace_sources)
 
 
 @router.post(
