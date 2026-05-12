@@ -276,7 +276,7 @@ async def generate_suggestions(
     """
     from app.db import async_session
     from app.models.feedback_eval import FeedbackSuggestionRun
-    from app.routers.dataset_helpers import build_suggestions
+    from app.routers.dataset_helpers import build_suggestions, load_trace_source_urls
     from app.routers.feedback_suggestion_worker import (
         _suggestion_tasks,
         run_suggestion_generation,
@@ -320,7 +320,9 @@ async def generate_suggestions(
     result = await db.execute(query)
     rows = result.all()
 
-    suggestions = build_suggestions(rows)
+    trace_ids = [trace.id for _fb, trace in rows if trace is not None]
+    trace_sources = await load_trace_source_urls(db, trace_ids)
+    suggestions = build_suggestions(rows, trace_sources=trace_sources)
 
     feedback_comments: dict[str, str | None] = {}
     for feedback, _trace in rows:

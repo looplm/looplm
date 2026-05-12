@@ -138,6 +138,7 @@ class TestCaseSuggestion(BaseModel):
     context_filters: dict[str, str] = Field(default_factory=dict)
     team_filter: list[str] = Field(default_factory=list)
     tag_filter: list[str] = Field(default_factory=list)
+    expected_sources: list[str] = Field(default_factory=list)
     message_count: Optional[int] = None
     has_summary: bool = False
     scored_at: Optional[datetime] = None

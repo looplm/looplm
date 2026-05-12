@@ -251,6 +251,7 @@ export interface TestCaseSuggestion {
   context_filters: Record<string, string>;
   team_filter: string[];
   tag_filter: string[];
+  expected_sources: string[];
   message_count: number | null;
   has_summary: boolean;
   scored_at: string | null;

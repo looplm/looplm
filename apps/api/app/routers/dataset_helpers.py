@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 
-from app.models.models import FeedbackScore, TestCase, Trace
+from app.models.models import FeedbackScore, Span, TestCase, Trace
 from app.schemas.datasets import TestCaseItem, TestCaseSuggestion
 
 logger = logging.getLogger(__name__)
@@ -141,15 +141,104 @@ def _extract_user_prompt(trace_input: Any) -> str | None:
     return None
 
 
+async def load_trace_source_urls(
+    db: Any,
+    trace_ids: list[Any],
+) -> dict[str, list[str]]:
+    """Load retrieval-context span outputs for ``trace_ids`` and return a
+    ``{str(trace_id): [url, ...]}`` map.
+
+    Looks for spans named ``retrieval-context`` (the agent's RAG step in our
+    observability traces). A single trace can have multiple — we merge them
+    in insertion order and de-duplicate URLs.
+    """
+    from sqlalchemy import select
+
+    if not trace_ids:
+        return {}
+
+    rows = (
+        await db.execute(
+            select(Span.trace_id, Span.output)
+            .where(Span.trace_id.in_(trace_ids))
+            .where(Span.name == "retrieval-context")
+            .order_by(Span.created_at)
+        )
+    ).all()
+
+    by_trace: dict[str, list[str]] = {}
+    seen: dict[str, set[str]] = {}
+    for trace_id, output in rows:
+        key = str(trace_id)
+        bucket = by_trace.setdefault(key, [])
+        seen_set = seen.setdefault(key, set())
+        for url in extract_retrieval_source_urls(output):
+            if url not in seen_set:
+                seen_set.add(url)
+                bucket.append(url)
+    return by_trace
+
+
+# Confluence Cloud URLs in retrieval payloads carry a trailing slug after
+# ``/pages/<id>/`` that often contains malformed or double-encoded characters.
+# Confluence resolves the bare ``/pages/<id>`` form to the same page, so trim
+# the slug to keep the link clickable.
+_CONFLUENCE_PAGE_URL = re.compile(
+    r"^(https?://[^/]+/wiki/spaces/[^/]+/pages/\d+)(?:/.*)?$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_source_url(url: str) -> str:
+    match = _CONFLUENCE_PAGE_URL.match(url)
+    if match:
+        return match.group(1)
+    return url
+
+
+def extract_retrieval_source_urls(span_output: Any) -> list[str]:
+    """Pull source URLs out of a retrieval-context span's output payload.
+
+    The expected shape is ``{"sources": [{"url": "...", ...}, ...]}``.
+    Returns a de-duplicated list preserving original order. Non-string and
+    blank URLs are skipped so we never persist garbage as expected sources.
+    """
+    if not isinstance(span_output, dict):
+        return []
+    sources = span_output.get("sources")
+    if not isinstance(sources, list):
+        return []
+    seen: set[str] = set()
+    urls: list[str] = []
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        url = src.get("url")
+        if not isinstance(url, str):
+            continue
+        url = _normalize_source_url(url.strip())
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+
 def build_suggestions(
     rows: list[tuple[FeedbackScore, Trace | None]],
+    trace_sources: dict[str, list[str]] | None = None,
 ) -> list[TestCaseSuggestion]:
     """Build test case suggestions from feedback+trace rows.
 
     Deduplicates by prompt and enriches with context metadata.
+
+    ``trace_sources`` maps ``str(trace_id) -> [source_url, ...]`` extracted
+    from each trace's retrieval-context span(s). Passed in by the endpoint so
+    we keep this helper pure and avoid an N+1 lookup per trace.
     """
     suggestions: list[TestCaseSuggestion] = []
     seen_prompts: set[str] = set()
+    trace_sources = trace_sources or {}
 
     for feedback, trace in rows:
         if trace is None:
@@ -191,6 +280,8 @@ def build_suggestions(
             else None
         )
 
+        sources = trace_sources.get(str(trace.id), []) if trace.id else []
+
         suggestions.append(TestCaseSuggestion(
             feedback_id=feedback.id,
             trace_id=feedback.trace_id,
@@ -201,6 +292,7 @@ def build_suggestions(
             context_filters=context_filters,
             team_filter=metadata.get("teamFilter", []),
             tag_filter=metadata.get("tagFilter", []),
+            expected_sources=sources,
             message_count=message_count,
             has_summary=has_summary,
             scored_at=feedback.scored_at,

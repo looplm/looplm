@@ -13,6 +13,9 @@ function formFromSuggestion(sug: TestCaseSuggestion): TestCaseFormData {
   const config: Record<string, unknown> = {};
   if (sug.team_filter.length > 0) config.team_filter = sug.team_filter;
   if (sug.tag_filter.length > 0) config.tag_filter = sug.tag_filter;
+  if (sug.expected_sources && sug.expected_sources.length > 0) {
+    config.expected_sources = sug.expected_sources;
+  }
   return {
     test_id: sug.prompt
       .slice(0, 60)
@@ -26,6 +29,8 @@ function formFromSuggestion(sug: TestCaseSuggestion): TestCaseFormData {
       : "",
   };
 }
+
+const WIDE_STORAGE_KEY = "looplm:suggestion-modal-wide";
 
 export function SuggestionReviewModal({
   suggestion,
@@ -51,6 +56,15 @@ export function SuggestionReviewModal({
   const [creatingDataset, setCreatingDataset] = useState(false);
   const [configValid, setConfigValid] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
+  const [wide, setWide] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(WIDE_STORAGE_KEY) === "1";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(WIDE_STORAGE_KEY, wide ? "1" : "0");
+  }, [wide]);
 
   useEffect(() => {
     setForm(formFromSuggestion(suggestion));
@@ -107,13 +121,40 @@ export function SuggestionReviewModal({
     <>
       <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60]" onClick={onClose} />
       <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+        <div
+          className={`bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 shadow-xl w-full max-h-[90vh] flex flex-col transition-[max-width] duration-150 ${
+            wide ? "max-w-7xl" : "max-w-4xl"
+          }`}
+        >
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-800 shrink-0">
             <h2 className="text-lg font-semibold">Review Suggestion</h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200">
-              &times;
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setWide((w) => !w)}
+                title={wide ? "Narrow modal" : "Widen modal"}
+                aria-label={wide ? "Narrow modal" : "Widen modal"}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-slate-800"
+              >
+                {wide ? (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 21m0 0h5.25M3 21v-5.25M15 9l6-6m0 0h-5.25M21 3v5.25" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9m11.25-5.25v4.5m0-4.5h-4.5m4.5 0L15 9m-11.25 11.25v-4.5m0 4.5h4.5m-4.5 0L9 15m11.25 5.25v-4.5m0 4.5h-4.5m4.5 0L15 15" />
+                  </svg>
+                )}
+              </button>
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 px-2"
+              >
+                &times;
+              </button>
+            </div>
           </div>
 
           {/* Body */}
@@ -248,6 +289,31 @@ export function SuggestionReviewModal({
                 placeholder="(optional)"
               />
             </div>
+
+            {suggestion.expected_sources && suggestion.expected_sources.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Expected Sources
+                  <span className="ml-2 text-xs font-normal text-gray-400">
+                    from retrieval context — edit in Configuration below
+                  </span>
+                </label>
+                <ul className="space-y-1">
+                  {suggestion.expected_sources.map((url) => (
+                    <li key={url} className="text-xs">
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-indigo-600 dark:text-indigo-400 hover:underline break-all"
+                      >
+                        {url}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <hr className="border-gray-100 dark:border-slate-800" />
 
