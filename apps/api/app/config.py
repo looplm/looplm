@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # Frontend URL for building invite links
     frontend_url: str = "http://localhost:3100"
 
+    # Update check (GitHub releases lookup for the About settings panel)
+    update_check_enabled: bool = True
+    github_token: str = ""
+
     # Connector credentials
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""

@@ -12,10 +12,11 @@ import ProjectSettings from "@/components/settings/project-settings";
 import EvaluationsSettings from "@/components/settings/evaluations-settings";
 import GeneralSettings from "@/components/settings/general-settings";
 import MembersSettings from "@/components/settings/members-settings";
+import AboutSettings from "@/components/settings/about-settings";
 import IntegrationsPanel from "@/components/integrations-panel";
 import { usePermissions } from "@/components/permissions-context";
 
-const ALL_TABS = ["project", "members", "evaluations", "integrations", "ai-models"] as const;
+const ALL_TABS = ["project", "members", "evaluations", "integrations", "ai-models", "about"] as const;
 type Tab = (typeof ALL_TABS)[number];
 
 const TAB_LABELS: Partial<Record<Tab, string>> = { "ai-models": "AI Models" };
@@ -106,6 +107,7 @@ export default function SettingsPage() {
           projects={projects}
         />
       )}
+      {activeTab === "about" && <AboutSettings />}
     </div>
   );
 }
