@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import __version__
 from app.db import get_db
 
 logger = logging.getLogger(__name__)
@@ -28,4 +29,4 @@ async def health_check(db: AsyncSession = Depends(get_db)) -> dict[str, str]:
 
 @router.get("/")
 async def root() -> dict[str, str]:
-    return {"message": "LoopLM API", "version": "0.1.0"}
+    return {"message": "LoopLM API", "version": __version__}
