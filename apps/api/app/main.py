@@ -12,10 +12,10 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.config import settings
 from app.routers import (
-    analysis, advisor, auth_router, costs_overview, dashboard, datasets, evaluations, evaluators,
-    experiments, feedback, fixes, graph, health, imports, integrations, langsmith, llm_costs,
-    code_agent, permissions, project_members, projects, prompts, route_analysis, trace_detail,
-    traces, user_settings, version,
+    admin, analysis, advisor, auth_router, costs_overview, dashboard, datasets, evaluations,
+    evaluators, experiments, feedback, fixes, graph, health, imports, integrations, langsmith,
+    llm_costs, code_agent, permissions, project_members, projects, prompts, route_analysis,
+    trace_detail, traces, user_settings, version,
 )
 
 logger = logging.getLogger("looplm")
@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.models.models import Base
     from app.models.user import User  # noqa: F401 — ensure user table is created
     from app.models.project import Project  # noqa: F401 — ensure project table is created
+    from app.models.admin_audit import AdminAudit  # noqa: F401 — ensure audit table is created
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -134,3 +135,4 @@ app.include_router(llm_costs.router)
 app.include_router(user_settings.router)
 app.include_router(permissions.router)
 app.include_router(project_members.router)
+app.include_router(admin.router)

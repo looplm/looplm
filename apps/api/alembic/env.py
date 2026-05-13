@@ -12,6 +12,7 @@ from app.models.user import User  # noqa: F401
 from app.models.project import Project  # noqa: F401
 from app.models.project_member import ProjectMember  # noqa: F401
 from app.models.project_invitation import ProjectInvitation  # noqa: F401
+from app.models.admin_audit import AdminAudit  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

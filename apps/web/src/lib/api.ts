@@ -111,3 +111,4 @@ export * from "./api/datasets-api";
 export * from "./api/code-agent-api";
 export * from "./api/costs-api";
 export * from "./api/version";
+export * from "./api/admin";

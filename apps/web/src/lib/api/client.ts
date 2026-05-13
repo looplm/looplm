@@ -269,6 +269,7 @@ export interface ProjectPermissions {
   allowed_sections: string[];
   allowed_pages: string[] | null;
   write_pages: string[] | null;
+  is_platform_admin: boolean;
 }
 
 export const getMyPermissions = () =>

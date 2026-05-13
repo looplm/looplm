@@ -17,6 +17,7 @@ class User(Base):
     hashed_password = Column(String(512), nullable=False)
     settings = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
+    is_platform_admin = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")

@@ -13,10 +13,19 @@ import EvaluationsSettings from "@/components/settings/evaluations-settings";
 import GeneralSettings from "@/components/settings/general-settings";
 import MembersSettings from "@/components/settings/members-settings";
 import AboutSettings from "@/components/settings/about-settings";
+import InstanceSettings from "@/components/settings/instance-settings";
 import IntegrationsPanel from "@/components/integrations-panel";
 import { usePermissions } from "@/components/permissions-context";
 
-const ALL_TABS = ["project", "members", "evaluations", "integrations", "ai-models", "about"] as const;
+const ALL_TABS = [
+  "project",
+  "members",
+  "evaluations",
+  "integrations",
+  "ai-models",
+  "instance",
+  "about",
+] as const;
 type Tab = (typeof ALL_TABS)[number];
 
 const TAB_LABELS: Partial<Record<Tab, string>> = { "ai-models": "AI Models" };
@@ -24,8 +33,12 @@ const TAB_LABELS: Partial<Record<Tab, string>> = { "ai-models": "AI Models" };
 export default function SettingsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { isAdmin } = usePermissions();
-  const TABS = ALL_TABS.filter((t) => t !== "members" || isAdmin);
+  const { isAdmin, isPlatformAdmin } = usePermissions();
+  const TABS = ALL_TABS.filter((t) => {
+    if (t === "members") return isAdmin;
+    if (t === "instance") return isPlatformAdmin;
+    return true;
+  });
 
   const tabParam = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState<Tab>(
@@ -107,6 +120,7 @@ export default function SettingsPage() {
           projects={projects}
         />
       )}
+      {activeTab === "instance" && isPlatformAdmin && <InstanceSettings />}
       {activeTab === "about" && <AboutSettings />}
     </div>
   );
