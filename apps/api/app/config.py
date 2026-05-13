@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     update_check_enabled: bool = True
     github_token: str = ""
 
+    # Platform admin: email whose account is treated as platform admin even
+    # when its user row hasn't been promoted yet. Useful for first-time setups
+    # and recovery. Leave blank to rely solely on the User.is_platform_admin flag.
+    instance_owner_email: str = ""
+
     # Connector credentials
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""

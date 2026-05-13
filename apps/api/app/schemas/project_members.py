@@ -80,3 +80,4 @@ class PermissionsResponse(BaseModel):
     allowed_sections: list[str]
     allowed_pages: list[str] | None = None
     write_pages: list[str] | None = None
+    is_platform_admin: bool = False

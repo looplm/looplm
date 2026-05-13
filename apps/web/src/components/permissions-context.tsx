@@ -9,6 +9,7 @@ interface PermissionsContextValue {
   allowedPages: string[] | null;
   writePages: string[] | null;
   isAdmin: boolean;
+  isPlatformAdmin: boolean;
   loading: boolean;
   canAccess: (section: string) => boolean;
   canAccessPage: (page: string) => boolean;
@@ -22,6 +23,7 @@ const PermissionsContext = createContext<PermissionsContextValue>({
   allowedPages: null,
   writePages: null,
   isAdmin: true,
+  isPlatformAdmin: false,
   loading: true,
   canAccess: () => true,
   canAccessPage: () => true,
@@ -38,6 +40,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
   ]);
   const [allowedPages, setAllowedPages] = useState<string[] | null>(null);
   const [writePages, setWritePages] = useState<string[] | null>(null);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const fetchPermissions = useCallback(() => {
@@ -47,6 +50,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
         setAllowedSections(data.allowed_sections);
         setAllowedPages(data.allowed_pages);
         setWritePages(data.write_pages);
+        setIsPlatformAdmin(data.is_platform_admin);
       })
       .catch(() => {
         // On error, default to full access (existing owner-only behavior)
@@ -54,6 +58,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
         setAllowedSections(["observe", "evaluate", "improve"]);
         setAllowedPages(null);
         setWritePages(null);
+        setIsPlatformAdmin(false);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -109,6 +114,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
         allowedPages,
         writePages,
         isAdmin,
+        isPlatformAdmin,
         loading,
         canAccess,
         canAccessPage,

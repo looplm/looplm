@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, EmailStr, Field
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
@@ -15,6 +15,7 @@ from app.auth import (
     verify_password,
     verify_refresh_token,
 )
+from app.config import settings
 from app.db import get_db
 from app.models.project import Project
 from app.models.project_invitation import ProjectInvitation
@@ -52,7 +53,18 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 
-    user = User(email=body.email, hashed_password=hash_password(body.password))
+    user_count = await db.scalar(select(func.count()).select_from(User))
+    is_first_user = (user_count or 0) == 0
+    is_instance_owner = bool(
+        settings.instance_owner_email
+        and body.email.lower() == settings.instance_owner_email.lower()
+    )
+
+    user = User(
+        email=body.email,
+        hashed_password=hash_password(body.password),
+        is_platform_admin=is_first_user or is_instance_owner,
+    )
     db.add(user)
     await db.flush()
     await db.refresh(user)

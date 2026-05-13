@@ -244,3 +244,32 @@ async def require_project_admin(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
         )
+
+
+def _is_instance_owner_email(email: str) -> bool:
+    owner = settings.instance_owner_email
+    return bool(owner) and email.lower() == owner.lower()
+
+
+async def require_platform_admin(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Dependency that ensures the current user is a platform admin.
+
+    A user is a platform admin if `is_platform_admin` is true, or if their
+    email matches `INSTANCE_OWNER_EMAIL`. The env match auto-promotes the user
+    row so subsequent checks are local.
+    """
+    if user.is_platform_admin:
+        return user
+
+    if _is_instance_owner_email(user.email):
+        user.is_platform_admin = True
+        await db.flush()
+        return user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Platform admin access required",
+    )
