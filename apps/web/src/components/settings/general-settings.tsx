@@ -41,7 +41,8 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
   const [codeAgentModel, setCodeAgentModel] = useState("");
   const [codeAgentApiKey, setCodeAgentApiKey] = useState("");
   const [codeAgentApiKeyMask, setCodeAgentApiKeyMask] = useState("");
-  const [codeAgentFoundryResource, setCodeAgentFoundryResource] = useState("");
+  const [codeAgentAzureEndpoint, setCodeAgentAzureEndpoint] = useState("");
+  const [codeAgentAzureApiVersion, setCodeAgentAzureApiVersion] = useState("");
   const [codeAgentSaving, setCodeAgentSaving] = useState(false);
   const [codeAgentMessage, setCodeAgentMessage] = useState("");
 
@@ -72,11 +73,15 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
   useEffect(() => {
     if (currentProject) {
       const s = currentProject.settings || {};
-      setCodeAgentProvider((s.code_agent_provider as string) || "anthropic");
+      const storedProvider = (s.code_agent_provider as string) || "anthropic";
+      // Legacy values that are no longer supported fall back to anthropic in the UI.
+      const isSupported = ["openai", "anthropic", "azure_openai"].includes(storedProvider);
+      setCodeAgentProvider(isSupported ? storedProvider : "anthropic");
       setCodeAgentModel((s.code_agent_model as string) || "");
       setCodeAgentApiKey("");
       setCodeAgentApiKeyMask((s.code_agent_api_key as string) || "");
-      setCodeAgentFoundryResource((s.code_agent_foundry_resource as string) || "");
+      setCodeAgentAzureEndpoint((s.code_agent_azure_endpoint as string) || "");
+      setCodeAgentAzureApiVersion((s.code_agent_azure_api_version as string) || "");
     }
     setCodeAgentMessage("");
   }, [currentProjectId]);
@@ -114,13 +119,12 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
     setCodeAgentSaving(true);
     setCodeAgentMessage("");
     try {
+      const isAzure = codeAgentProvider === "azure_openai";
       const settings: Record<string, unknown> = {
         code_agent_provider: codeAgentProvider,
         code_agent_model: codeAgentModel.trim() || null,
-        code_agent_foundry_resource:
-          codeAgentProvider === "azure_foundry"
-            ? codeAgentFoundryResource.trim() || null
-            : null,
+        code_agent_azure_endpoint: isAzure ? codeAgentAzureEndpoint.trim() || null : null,
+        code_agent_azure_api_version: isAzure ? codeAgentAzureApiVersion.trim() || null : null,
       };
       if (codeAgentApiKey.trim()) {
         settings.code_agent_api_key = codeAgentApiKey.trim();
@@ -256,20 +260,31 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
                   className={inputClass}
                 >
                   <option value="anthropic">Anthropic</option>
-                  <option value="azure_foundry">Azure AI Foundry</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="azure_openai">Azure OpenAI</option>
                 </select>
               </div>
               <div>
-                <label className={labelClass}>Model</label>
+                <label className={labelClass}>
+                  {codeAgentProvider === "azure_openai" ? "Deployment Name" : "Model"}
+                </label>
                 <input
                   type="text"
                   value={codeAgentModel}
                   onChange={(e) => setCodeAgentModel(e.target.value)}
-                  placeholder="claude-sonnet-4-6"
+                  placeholder={
+                    codeAgentProvider === "azure_openai"
+                      ? "gpt-4o"
+                      : codeAgentProvider === "openai"
+                        ? "gpt-4o"
+                        : "claude-sonnet-4-20250514"
+                  }
                   className={`${inputClass} font-mono`}
                 />
                 <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
-                  Leave blank for the SDK default.
+                  {codeAgentProvider === "azure_openai"
+                    ? "Required: the Azure deployment name."
+                    : "Leave blank for the provider's default model."}
                 </p>
               </div>
             </div>
@@ -280,32 +295,50 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
                 type="password"
                 value={codeAgentApiKey}
                 onChange={(e) => setCodeAgentApiKey(e.target.value)}
-                placeholder={codeAgentApiKeyMask || (codeAgentProvider === "azure_foundry" ? "Azure AI Foundry API key" : "sk-ant-...")}
+                placeholder={
+                  codeAgentApiKeyMask ||
+                  (codeAgentProvider === "openai"
+                    ? "sk-..."
+                    : codeAgentProvider === "azure_openai"
+                      ? "Azure OpenAI API key"
+                      : "sk-ant-...")
+                }
                 className={inputClass}
               />
               <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
                 {codeAgentApiKeyMask
                   ? "Key saved. Leave blank to keep current key, or enter a new one to replace it."
-                  : codeAgentProvider === "azure_foundry"
-                    ? "Your Azure AI Foundry API key."
-                    : "Your Anthropic API key."}
+                  : codeAgentProvider === "openai"
+                    ? "Your OpenAI API key."
+                    : codeAgentProvider === "azure_openai"
+                      ? "Your Azure OpenAI API key."
+                      : "Your Anthropic API key."}
               </p>
             </div>
 
-            {codeAgentProvider === "azure_foundry" && (
-              <div>
-                <label className={labelClass}>Azure AI Foundry Resource</label>
-                <input
-                  type="text"
-                  value={codeAgentFoundryResource}
-                  onChange={(e) => setCodeAgentFoundryResource(e.target.value)}
-                  placeholder="my-azure-resource"
-                  className={`${inputClass} font-mono`}
-                />
-                <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
-                  The Azure resource name (used as https://&#123;resource&#125;.services.ai.azure.com/anthropic).
-                </p>
-              </div>
+            {codeAgentProvider === "azure_openai" && (
+              <>
+                <div>
+                  <label className={labelClass}>Endpoint</label>
+                  <input
+                    type="url"
+                    value={codeAgentAzureEndpoint}
+                    onChange={(e) => setCodeAgentAzureEndpoint(e.target.value)}
+                    placeholder="https://your-resource.openai.azure.com"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>API Version</label>
+                  <input
+                    type="text"
+                    value={codeAgentAzureApiVersion}
+                    onChange={(e) => setCodeAgentAzureApiVersion(e.target.value)}
+                    placeholder="2024-10-21"
+                    className={inputClass}
+                  />
+                </div>
+              </>
             )}
 
             {codeAgentMessage && (

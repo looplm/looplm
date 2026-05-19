@@ -1,4 +1,4 @@
-"""Code Agent endpoints — eval-driven code suggestions via Claude Agent SDK."""
+"""Code Agent endpoints — eval-driven code suggestions via Pydantic AI."""
 
 from __future__ import annotations
 
@@ -32,6 +32,8 @@ from app.services.code_agent_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/code-agent", tags=["code-agent"], dependencies=[require_section("improve", "routes")])
+
+_SUPPORTED_PROVIDERS = {"openai", "anthropic", "azure_openai"}
 
 _code_agent_tasks: dict[UUID, asyncio.Task] = {}
 
@@ -85,6 +87,21 @@ async def trigger_code_agent_analysis(
 
     mode = (body.analysis_mode if body else "detailed") or "detailed"
 
+    provider = ps.get("code_agent_provider", "anthropic")
+    if provider not in _SUPPORTED_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_PROVIDER",
+                    "message": (
+                        f"Code Agent provider {provider!r} is no longer supported. "
+                        "Reconfigure in Settings → supported: openai, anthropic, azure_openai."
+                    ),
+                }
+            },
+        )
+
     # Create analysis record
     analysis = OpenCodeAnalysis(
         project_id=project.id,
@@ -106,10 +123,11 @@ async def trigger_code_agent_analysis(
             repo_path=repo_path,
             extra_context=body.extra_context if body else "",
             file_patterns=file_patterns,
-            provider=ps.get("code_agent_provider", "anthropic"),
+            provider=provider,
             model=ps.get("code_agent_model"),
             api_key=ps.get("code_agent_api_key"),
-            foundry_resource=ps.get("code_agent_foundry_resource"),
+            azure_endpoint=ps.get("code_agent_azure_endpoint"),
+            azure_api_version=ps.get("code_agent_azure_api_version"),
             mode=mode,
         )
     )

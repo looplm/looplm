@@ -23,7 +23,7 @@ alembic = ">=1.13.0"
 celery = ">=5.4.0"
 langfuse = ">=2.0.0"
 langsmith = ">=0.1.0"
-claude-agent-sdk = ">=0.1.0"
+pydantic-ai-slim = {version = ">=1.0.0", extras = ["openai", "anthropic"]}
 looplm-connectors = {path = "../../connectors", develop = true}
 
 [tool.poetry.group.dev.dependencies]

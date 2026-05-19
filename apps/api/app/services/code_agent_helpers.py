@@ -1,7 +1,7 @@
 """Helpers for the Code Agent service.
 
 Extracted from `code_agent_service.py` to keep file sizes manageable.
-Contains prompt-building, progress tracking, and fallback parsing utilities.
+Contains prompt-building and progress tracking utilities.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.code_agent import OpenCodeAnalysis
 from app.models.evaluations import EvalResult, EvalRun
-from app.schemas.code_agent import AgentAnalysisOutput
 
 logger = logging.getLogger(__name__)
 
@@ -110,24 +109,3 @@ async def _update_progress(
     await db.commit()
 
 
-def _parse_fallback_output(raw: str) -> AgentAnalysisOutput:
-    """Try to parse agent result text as JSON if structured output wasn't available."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
-    if text.startswith("json"):
-        text = text[4:].strip()
-
-    try:
-        data = json.loads(text)
-        return AgentAnalysisOutput.model_validate(data)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Could not parse agent fallback output, returning empty")
-        return AgentAnalysisOutput(
-            failure_summary="Analysis completed but output could not be parsed.",
-            suggestions=[],
-            files_analyzed=[],
-        )

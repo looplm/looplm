@@ -1,17 +1,33 @@
-"""Code Agent service — eval-driven code suggestions via Claude Agent SDK."""
+"""Code Agent service — eval-driven code suggestions via Pydantic AI.
+
+Replaces the previous Claude Agent SDK implementation. Supports OpenAI,
+Anthropic, and Azure OpenAI as providers. Filesystem tools live in
+`code_agent_tools.py` and are sandboxed to the configured repo path.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID
 
+from pydantic_ai import Agent
+from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
+from pydantic_ai.messages import TextPart, ToolCallPart
+from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.providers.azure import AzureProvider
+from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.usage import UsageLimits
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.evaluations import EvalResult, EvalRun
 from app.models.code_agent import CodeSuggestion, OpenCodeAnalysis
+from app.models.evaluations import EvalResult, EvalRun
 from app.schemas.code_agent import (
     AgentAnalysisOutput,
     CodeSuggestionItem,
@@ -19,7 +35,6 @@ from app.schemas.code_agent import (
 )
 from app.services.code_agent_helpers import (
     _build_agent_prompt,
-    _parse_fallback_output,
     _update_progress,
 )
 from app.services.code_agent_prompts import (
@@ -27,11 +42,81 @@ from app.services.code_agent_prompts import (
     OPENCODE_SYSTEM_PROMPT_NO_REPO,
     OPENCODE_SYSTEM_PROMPT_QUICK,
 )
+from app.services.code_agent_tools import (
+    RepoContext,
+    glob_files,
+    grep_files,
+    read_file,
+)
+from app.services.llm_pricing import calculate_cost
 
 logger = logging.getLogger(__name__)
 
 
-# ── Core analysis ─────────────────────────────────────────────
+# Default model name per provider when the caller hasn't picked one.
+_DEFAULT_MODELS = {
+    "openai": "gpt-4o",
+    "anthropic": "claude-sonnet-4-20250514",
+    # Azure has no sensible default — the deployment name is required.
+    "azure_openai": None,
+}
+
+_QUICK_MODE_REQUEST_LIMIT = 3
+_QUICK_MODE_OUTPUT_TOKEN_LIMIT = 4000
+_DETAILED_MODE_REQUEST_LIMIT = 25
+
+
+class CodeAgentConfigError(ValueError):
+    """Raised when the per-project Code Agent configuration is invalid."""
+
+
+def _build_model(
+    provider: str,
+    model: str | None,
+    api_key: str | None,
+    azure_endpoint: str | None = None,
+    azure_api_version: str | None = None,
+):
+    """Construct a Pydantic AI model for the configured provider."""
+    if provider == "openai":
+        if not api_key:
+            raise CodeAgentConfigError("OpenAI API key is required.")
+        return OpenAIChatModel(
+            model or _DEFAULT_MODELS["openai"],
+            provider=OpenAIProvider(api_key=api_key),
+        )
+
+    if provider == "anthropic":
+        if not api_key:
+            raise CodeAgentConfigError("Anthropic API key is required.")
+        return AnthropicModel(
+            model or _DEFAULT_MODELS["anthropic"],
+            provider=AnthropicProvider(api_key=api_key),
+        )
+
+    if provider == "azure_openai":
+        if not api_key:
+            raise CodeAgentConfigError("Azure OpenAI API key is required.")
+        if not azure_endpoint:
+            raise CodeAgentConfigError("Azure OpenAI endpoint is required.")
+        if not azure_api_version:
+            raise CodeAgentConfigError("Azure OpenAI API version is required.")
+        if not model:
+            raise CodeAgentConfigError("Azure OpenAI deployment name is required.")
+        return OpenAIChatModel(
+            model,
+            provider=AzureProvider(
+                azure_endpoint=azure_endpoint,
+                api_version=azure_api_version,
+                api_key=api_key,
+            ),
+        )
+
+    raise CodeAgentConfigError(
+        f"Unsupported Code Agent provider: {provider!r}. "
+        "Reconfigure in Settings — supported values: openai, anthropic, azure_openai."
+    )
+
 
 async def analyze_eval_run(
     project_id: UUID,
@@ -44,14 +129,12 @@ async def analyze_eval_run(
     provider: str = "anthropic",
     model: str | None = None,
     api_key: str | None = None,
-    foundry_resource: str | None = None,
+    azure_endpoint: str | None = None,
+    azure_api_version: str | None = None,
     mode: str = "detailed",
 ) -> None:
-    """Run Claude agent to analyze eval failures. Designed to run as a background task."""
-    import asyncio
-
+    """Run the Code Agent for an eval run. Designed to run as a background task."""
     async with db_factory() as db:
-        # Update status to running
         analysis = await db.get(OpenCodeAnalysis, analysis_id)
         if not analysis:
             logger.error("OpenCodeAnalysis %s not found", analysis_id)
@@ -62,8 +145,7 @@ async def analyze_eval_run(
         await db.commit()
 
         try:
-            from claude_agent_sdk import ClaudeAgentOptions, query
-            # Load eval run and failed results
+            # Load eval run + failed results
             run_result = await db.execute(
                 select(EvalRun).where(
                     EvalRun.id == eval_run_id,
@@ -89,183 +171,103 @@ async def analyze_eval_run(
                 await db.commit()
                 return
 
-            # Build prompt
-            prompt = _build_agent_prompt(
-                failed_results, run, extra_context, file_patterns
-            )
+            prompt = _build_agent_prompt(failed_results, run, extra_context, file_patterns)
 
             await _update_progress(
                 db, analysis,
                 progress_message=f"Analyzing {len(failed_results)} failure(s)...",
             )
 
-            # Build env vars for the Agent SDK subprocess (avoid mutating os.environ)
-            sdk_env: dict[str, str] = {}
-            if provider == "azure_foundry":
-                sdk_env["CLAUDE_CODE_USE_FOUNDRY"] = "1"
-                if api_key:
-                    sdk_env["ANTHROPIC_FOUNDRY_API_KEY"] = api_key
-                if foundry_resource:
-                    sdk_env["ANTHROPIC_FOUNDRY_RESOURCE"] = foundry_resource
-                # Clear any inherited direct API key so CLI doesn't use it
-                sdk_env["ANTHROPIC_API_KEY"] = ""
+            llm_model = _build_model(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                azure_endpoint=azure_endpoint,
+                azure_api_version=azure_api_version,
+            )
+
+            is_quick = mode == "quick"
+            if is_quick:
+                system_prompt = OPENCODE_SYSTEM_PROMPT_QUICK
+                tools = ()
+            elif repo_path:
+                system_prompt = OPENCODE_SYSTEM_PROMPT
+                tools = (read_file, glob_files, grep_files)
             else:
-                sdk_env["CLAUDE_CODE_USE_FOUNDRY"] = ""
-                if api_key:
-                    sdk_env["ANTHROPIC_API_KEY"] = api_key
+                system_prompt = OPENCODE_SYSTEM_PROMPT_NO_REPO
+                tools = ()
 
-            try:
-                # Configure agent based on mode and repo availability
-                is_quick = mode == "quick"
-                common_opts: dict = {
-                    "permission_mode": "bypassPermissions",
-                    "output_format": {
-                        "type": "json_schema",
-                        "schema": AgentAnalysisOutput.model_json_schema(),
-                    },
-                    "env": sdk_env,
-                }
-                if model:
-                    common_opts["model"] = model
-                if is_quick:
-                    common_opts["max_turns"] = 3
-                    common_opts["max_budget_usd"] = 0.50
+            agent = Agent(
+                llm_model,
+                output_type=AgentAnalysisOutput,
+                system_prompt=system_prompt,
+                deps_type=RepoContext,
+                tools=tools,
+            )
 
-                if is_quick:
-                    # Quick mode: no tool use, fast analysis
-                    options = ClaudeAgentOptions(
-                        allowed_tools=[],
-                        system_prompt=OPENCODE_SYSTEM_PROMPT_QUICK,
-                        **common_opts,
-                    )
-                elif repo_path:
-                    options = ClaudeAgentOptions(
-                        allowed_tools=["Read", "Glob", "Grep"],
-                        cwd=repo_path,
-                        system_prompt=OPENCODE_SYSTEM_PROMPT,
-                        **common_opts,
-                    )
-                else:
-                    options = ClaudeAgentOptions(
-                        allowed_tools=[],
-                        system_prompt=OPENCODE_SYSTEM_PROMPT_NO_REPO,
-                        **common_opts,
-                    )
+            deps = RepoContext(repo_root=Path(repo_path) if repo_path and not is_quick else None)
+            usage_limits = UsageLimits(
+                request_limit=_QUICK_MODE_REQUEST_LIMIT if is_quick else _DETAILED_MODE_REQUEST_LIMIT,
+                output_tokens_limit=_QUICK_MODE_OUTPUT_TOKEN_LIMIT if is_quick else None,
+            )
 
-                # Run the agent with progress tracking
-                result_message = None
-                turn_count = 0
-                await _update_progress(
-                    db, analysis,
-                    progress_message="Agent started...",
-                    log_entry="Agent session started",
-                )
-                from claude_agent_sdk.types import (
-                    AssistantMessage as SDKAssistantMessage,
-                    ResultMessage as SDKResultMessage,
-                    SystemMessage as SDKSystemMessage,
-                )
+            await _update_progress(
+                db, analysis,
+                progress_message="Agent started...",
+                log_entry="Agent session started",
+            )
 
-                async for message in query(prompt=prompt, options=options):
-                    # ResultMessage — final result with cost/usage
-                    if isinstance(message, SDKResultMessage):
-                        result_message = message
-                        continue
+            turn_count = 0
+            agent_output: AgentAnalysisOutput | None = None
+            usage = None
+            resolved_model_name = getattr(llm_model, "model_name", model or "")
 
-                    # AssistantMessage — agent thinking/tool use
-                    if isinstance(message, SDKAssistantMessage):
+            async with agent.iter(prompt, deps=deps, usage_limits=usage_limits) as run_ctx:
+                async for node in run_ctx:
+                    if isinstance(node, ModelRequestNode):
                         turn_count += 1
-                        log_msg = ""
-                        progress_msg = f"Turn {turn_count}: Thinking..."
-
-                        # Extract tool use or text from content blocks
-                        for block in (message.content or []):
-                            block_type = getattr(block, "type", None)
-                            if block_type == "tool_use":
-                                tool_name = getattr(block, "name", "tool")
-                                inp = getattr(block, "input", {}) or {}
-                                detail = ""
-                                if isinstance(inp, dict):
-                                    detail = inp.get("file_path") or inp.get("pattern") or inp.get("command", "")
-                                log_msg = f"{tool_name}: {detail}" if detail else tool_name
-                                progress_msg = f"Turn {turn_count}: {tool_name}..."
-                                break
-                            elif block_type == "text":
-                                txt = getattr(block, "text", "")
-                                if txt:
-                                    log_msg = txt[:120].replace("\n", " ").strip()
-                                break
-
-                        if not log_msg:
-                            log_msg = f"Turn {turn_count}"
-
                         await _update_progress(
                             db, analysis,
                             num_turns=turn_count,
-                            progress_message=progress_msg,
-                            log_entry=log_msg,
+                            progress_message=f"Turn {turn_count}: Thinking...",
+                            log_entry=f"Turn {turn_count}",
                         )
-                        continue
-
-                    # SystemMessage — metadata (init, subagent, etc.)
-                    if isinstance(message, SDKSystemMessage):
-                        subtype = message.subtype or "system"
-                        data = message.data or {}
-                        # Skip noisy system messages, log interesting ones
-                        if subtype in ("init", "config"):
-                            continue
-                        if subtype == "api_retry":
-                            error = data.get("error", "")
-                            delay = data.get("delay", data.get("retry_after", ""))
-                            log_msg = f"API retry: {error}" if error else "API retry"
-                            if delay:
-                                log_msg += f" (wait {delay}s)"
-                            progress_msg = "Waiting for API..."
-                        else:
-                            log_msg = f"[{subtype}]"
-                            if "message" in data:
-                                log_msg += f" {str(data['message'])[:100]}"
-                            progress_msg = None
+                    elif isinstance(node, CallToolsNode):
+                        log_msg, progress_msg = _summarize_model_response(node, turn_count)
                         await _update_progress(
                             db, analysis,
                             progress_message=progress_msg,
                             log_entry=log_msg,
                         )
-                        continue
+                agent_output = run_ctx.result.output if run_ctx.result else None
+                usage = run_ctx.result.usage if run_ctx.result else None
 
-                    # UserMessage (tool results) — skip, not interesting for the user
-            finally:
-                pass  # env vars passed via options.env, no cleanup needed
+            if agent_output is None:
+                raise RuntimeError("Agent returned no output")
 
-            if not result_message:
-                raise RuntimeError("Agent returned no result message")
-
-            if getattr(result_message, "is_error", False):
-                raise RuntimeError(
-                    f"Agent error: {getattr(result_message, 'result', 'Unknown error')}"
-                )
-
-            # Parse structured output
-            structured = getattr(result_message, "structured_output", None)
-            if structured:
-                output = AgentAnalysisOutput.model_validate(structured)
-            else:
-                # Fallback: try to parse from result text
-                raw = getattr(result_message, "result", "")
-                output = _parse_fallback_output(raw)
-
-            # Persist results
             await _persist_results(
                 analysis=analysis,
-                output=output,
+                output=agent_output,
                 project_id=project_id,
-                result_message=result_message,
+                usage=usage,
+                provider=provider,
+                model_name=resolved_model_name,
+                num_turns=turn_count,
                 db=db,
             )
 
         except asyncio.CancelledError:
             logger.info("Code Agent analysis cancelled for run %s", eval_run_id)
             analysis.status = "cancelled"
+            analysis.completed_at = datetime.now(timezone.utc)
+            analysis.progress_message = None
+            await db.commit()
+            raise
+
+        except CodeAgentConfigError as e:
+            logger.warning("Code Agent config error for run %s: %s", eval_run_id, e)
+            analysis.status = "failed"
+            analysis.error = str(e)[:2000]
             analysis.completed_at = datetime.now(timezone.utc)
             analysis.progress_message = None
             await db.commit()
@@ -279,45 +281,77 @@ async def analyze_eval_run(
             await db.commit()
 
 
+def _summarize_model_response(node: CallToolsNode, turn_count: int) -> tuple[str, str | None]:
+    """Extract a one-line log + progress message from a model response node."""
+    model_response = node.model_response
+    log_msg = f"Turn {turn_count}"
+    progress_msg: str | None = f"Turn {turn_count}: Thinking..."
+
+    for part in model_response.parts:
+        if isinstance(part, ToolCallPart):
+            args = part.args_as_dict() if hasattr(part, "args_as_dict") else {}
+            if not isinstance(args, dict):
+                args = {}
+            detail = (
+                args.get("path")
+                or args.get("pattern")
+                or args.get("path_glob")
+                or ""
+            )
+            log_msg = f"{part.tool_name}: {detail}" if detail else part.tool_name
+            progress_msg = f"Turn {turn_count}: {part.tool_name}..."
+            break
+        if isinstance(part, TextPart) and part.content:
+            log_msg = part.content[:120].replace("\n", " ").strip() or log_msg
+            break
+
+    return log_msg, progress_msg
+
+
 async def _persist_results(
     analysis: OpenCodeAnalysis,
     output: AgentAnalysisOutput,
     project_id: UUID,
-    result_message,
+    usage,
+    provider: str,
+    model_name: str,
+    num_turns: int,
     db: AsyncSession,
 ) -> None:
-    """Persist agent output as CodeSuggestion rows."""
+    """Persist agent output as CodeSuggestion rows + an LlmUsageRecord."""
+    input_tokens = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
+    output_tokens = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
+    total_tokens = input_tokens + output_tokens
+    cost_usd = calculate_cost(model_name, input_tokens, output_tokens) if model_name else None
+
     analysis.status = "completed"
     analysis.completed_at = datetime.now(timezone.utc)
     analysis.progress_message = None
     analysis.failure_summary = output.failure_summary
     analysis.files_analyzed = output.files_analyzed
     analysis.suggestion_count = len(output.suggestions)
-    analysis.total_cost_usd = getattr(result_message, "total_cost_usd", None)
-    analysis.num_turns = getattr(result_message, "num_turns", None)
+    analysis.total_cost_usd = cost_usd
+    analysis.num_turns = num_turns
 
-    # Record in unified LLM usage table
     from app.models.llm_usage import LlmUsageRecord
-    cost_usd = getattr(result_message, "total_cost_usd", None)
-    if cost_usd is not None:
-        db.add(LlmUsageRecord(
-            project_id=project_id,
-            service_name="code_agent",
-            function_name="analyze_eval_run",
-            provider="claude_agent_sdk",
-            model=getattr(result_message, "model", "claude-sonnet-4-20250514"),
-            input_tokens=0,
-            output_tokens=0,
-            total_tokens=0,
-            cost_usd=cost_usd,
-            request_metadata={
-                "analysis_id": str(analysis.id),
-                "num_turns": getattr(result_message, "num_turns", None),
-            },
-        ))
+    db.add(LlmUsageRecord(
+        project_id=project_id,
+        service_name="code_agent",
+        function_name="analyze_eval_run",
+        provider=provider,
+        model=model_name or "unknown",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        cost_usd=cost_usd,
+        request_metadata={
+            "analysis_id": str(analysis.id),
+            "num_turns": num_turns,
+        },
+    ))
 
     for suggestion in output.suggestions:
-        row = CodeSuggestion(
+        db.add(CodeSuggestion(
             analysis_id=analysis.id,
             project_id=project_id,
             type=suggestion.type,
@@ -331,8 +365,7 @@ async def _persist_results(
             confidence=suggestion.confidence,
             reasoning=suggestion.reasoning,
             related_test_ids=suggestion.related_test_ids,
-        )
-        db.add(row)
+        ))
 
     await db.commit()
 
@@ -344,7 +377,7 @@ async def get_analysis(
     project_id: UUID,
     db: AsyncSession,
 ) -> OpenCodeAnalysisResponse | None:
-    """Get the latest OpenCode analysis for an eval run."""
+    """Get the latest analysis for an eval run."""
     stmt = (
         select(OpenCodeAnalysis)
         .where(
