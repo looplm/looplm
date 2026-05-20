@@ -13,9 +13,9 @@ from app import __version__
 from app.config import settings
 from app.routers import (
     admin, analysis, advisor, auth_router, costs_overview, dashboard, datasets, evaluations,
-    evaluators, experiments, feedback, fixes, graph, health, imports, integrations, langsmith,
-    llm_costs, code_agent, permissions, project_members, projects, prompts, route_analysis,
-    trace_detail, traces, user_settings, version,
+    evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
+    integrations, langsmith, llm_costs, code_agent, permissions, project_members, projects,
+    prompts, route_analysis, trace_detail, traces, user_settings, version,
 )
 
 logger = logging.getLogger("looplm")
@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.models.user import User  # noqa: F401 — ensure user table is created
     from app.models.project import Project  # noqa: F401 — ensure project table is created
     from app.models.admin_audit import AdminAudit  # noqa: F401 — ensure audit table is created
+    from app.models.github import GithubInstallation  # noqa: F401 — ensure table is created
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -130,6 +131,7 @@ app.include_router(experiments.router)
 app.include_router(datasets.router)
 app.include_router(imports.router)
 app.include_router(code_agent.router)
+app.include_router(github_oauth.router)
 app.include_router(costs_overview.router)
 app.include_router(llm_costs.router)
 app.include_router(user_settings.router)

@@ -15,6 +15,7 @@ from app.auth import get_current_project, get_current_user, require_section, req
 from app.db import async_session, get_db
 from app.models.evaluations import EvalRun
 from app.models.code_agent import OpenCodeAnalysis
+from app.models.github import GithubInstallation
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.code_agent import (
@@ -23,6 +24,7 @@ from app.schemas.code_agent import (
     OpenCodeAnalysisResponse,
     TriggerOpenCodeRequest,
 )
+from app.services import github_app
 from app.services.code_agent_service import (
     analyze_eval_run,
     get_analysis,
@@ -64,7 +66,8 @@ async def trigger_code_agent_analysis(
             detail={"error": {"code": "NOT_FOUND", "message": "Eval run not found"}},
         )
 
-    # Resolve repo path (optional)
+    # Resolve repo path. Explicit local path wins; otherwise materialize the
+    # project's linked GitHub repo (if any) into a managed clone.
     ps = dict(project.settings or {})
     repo_path = ps.get("code_agent_repo_path")
     if repo_path:
@@ -79,6 +82,31 @@ async def trigger_code_agent_analysis(
                     }
                 },
             )
+    else:
+        installation = (
+            await db.execute(
+                select(GithubInstallation).where(GithubInstallation.project_id == project.id)
+            )
+        ).scalar_one_or_none()
+        if installation and installation.repo_full_name:
+            try:
+                cloned = await github_app.ensure_repo_clone(
+                    project_id=project.id,
+                    installation_id=installation.installation_id,
+                    repo_full_name=installation.repo_full_name,
+                    default_branch=installation.repo_default_branch,
+                )
+                repo_path = str(cloned)
+            except (github_app.GithubAppDisabledError, github_app.GithubAppError) as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "error": {
+                            "code": "GITHUB_CLONE_FAILED",
+                            "message": str(exc),
+                        }
+                    },
+                ) from exc
 
     file_patterns = (
         (body.file_patterns if body and body.file_patterns else None)

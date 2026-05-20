@@ -51,6 +51,18 @@ class Settings(BaseSettings):
     # and recovery. Leave blank to rely solely on the User.is_platform_admin flag.
     instance_owner_email: str = ""
 
+    # GitHub App — used by the Code Agent to clone connected repos.
+    # All optional; the feature is disabled when app_id is unset.
+    github_app_id: str = ""
+    github_app_name: str = ""              # slug used to build install URLs: github.com/apps/<slug>
+    github_app_client_id: str = ""
+    github_app_client_secret: str = ""
+    github_app_private_key: str = ""       # PEM contents (use \n escapes in .env)
+    github_app_private_key_path: str = ""  # alternative: path to a mounted PEM file
+    github_clone_dir: str = "/var/looplm/repos"
+    github_api_base_url: str = "https://api.github.com"
+    github_oauth_base_url: str = "https://github.com"
+
     # Connector credentials
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""

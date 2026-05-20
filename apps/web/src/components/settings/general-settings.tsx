@@ -2,9 +2,15 @@
 
 import { useEffect, useState } from "react";
 import {
+  disconnectProjectGithubInstallation,
+  getGithubAuthUrl,
+  getGithubStatus,
+  getProjectGithubInstallation,
   getUserSettings,
   updateUserSettings,
   updateProject,
+  type GithubInstallation,
+  type GithubStatus,
   type UserSettings,
   type Project,
 } from "@/lib/api";
@@ -35,6 +41,12 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
 
   // Masked values from API (shown as placeholders)
   const [masked, setMasked] = useState<UserSettings | null>(null);
+
+  // GitHub bridge (project-level, depends on instance config)
+  const [githubStatus, setGithubStatus] = useState<GithubStatus | null>(null);
+  const [githubInstallation, setGithubInstallation] = useState<GithubInstallation | null>(null);
+  const [githubBusy, setGithubBusy] = useState(false);
+  const [githubError, setGithubError] = useState("");
 
   // Code Agent LLM (project-level)
   const [codeAgentProvider, setCodeAgentProvider] = useState("anthropic");
@@ -68,7 +80,20 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
 
   useEffect(() => {
     loadSettings();
+    getGithubStatus()
+      .then(setGithubStatus)
+      .catch(() => setGithubStatus({ enabled: false, app_name: null, install_url: null }));
   }, []);
+
+  useEffect(() => {
+    if (!currentProjectId || !githubStatus?.enabled) {
+      setGithubInstallation(null);
+      return;
+    }
+    getProjectGithubInstallation()
+      .then(setGithubInstallation)
+      .catch(() => setGithubInstallation(null));
+  }, [currentProjectId, githubStatus?.enabled]);
 
   useEffect(() => {
     if (currentProject) {
@@ -111,6 +136,35 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
       setError(e instanceof Error ? e.message : "Failed to save settings");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleConnectGithub() {
+    if (!currentProjectId) return;
+    setGithubBusy(true);
+    setGithubError("");
+    try {
+      const redirectUri = `${window.location.origin}/github/callback`;
+      const { url } = await getGithubAuthUrl(redirectUri);
+      window.location.href = url;
+    } catch (e: unknown) {
+      setGithubBusy(false);
+      setGithubError(e instanceof Error ? e.message : "Failed to start GitHub connect");
+    }
+  }
+
+  async function handleDisconnectGithub() {
+    if (!currentProjectId) return;
+    if (!confirm("Disconnect this GitHub repo? The local clone will be removed.")) return;
+    setGithubBusy(true);
+    setGithubError("");
+    try {
+      await disconnectProjectGithubInstallation();
+      setGithubInstallation(null);
+    } catch (e: unknown) {
+      setGithubError(e instanceof Error ? e.message : "Failed to disconnect");
+    } finally {
+      setGithubBusy(false);
     }
   }
 
@@ -240,6 +294,92 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
             {saving ? "Saving..." : saved ? "Saved!" : "Save"}
           </button>
         </div>
+      </div>
+
+      <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
+        <h2 className="text-lg font-semibold mb-1">GitHub repository</h2>
+        <p className="text-sm text-gray-400 dark:text-slate-500 mb-4">
+          Connect a GitHub repo so the Code Agent can analyse your source on every run.
+        </p>
+        {!githubStatus ? (
+          <p className="text-sm text-gray-400">Loading…</p>
+        ) : !githubStatus.enabled ? (
+          <p className="text-sm text-gray-500 dark:text-slate-400">
+            The GitHub App isn&apos;t configured on this instance. Ask an admin to set{" "}
+            <code className="font-mono text-xs">GITHUB_APP_*</code> in <code>.env</code>.
+          </p>
+        ) : !currentProject ? (
+          <p className="text-sm text-gray-400 dark:text-slate-500 italic">
+            No project selected.
+          </p>
+        ) : githubInstallation && githubInstallation.repo_full_name ? (
+          <div className="space-y-3">
+            <div className="text-sm">
+              <span className="text-gray-500 dark:text-slate-400">Connected repo:</span>{" "}
+              <span className="font-mono">{githubInstallation.repo_full_name}</span>
+              <span className="text-gray-400 dark:text-slate-500">
+                {" · "}
+                {githubInstallation.repo_default_branch || "main"}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleConnectGithub}
+                disabled={githubBusy}
+                className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-md disabled:opacity-50"
+              >
+                Change repo
+              </button>
+              <button
+                onClick={handleDisconnectGithub}
+                disabled={githubBusy}
+                className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950 rounded-md disabled:opacity-50"
+              >
+                Disconnect
+              </button>
+            </div>
+            {githubStatus.install_url && (
+              <p className="text-xs text-gray-400 dark:text-slate-500">
+                Need to install the App on another org or repo?{" "}
+                <a
+                  href={githubStatus.install_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-500 hover:underline"
+                >
+                  Open GitHub
+                </a>
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <button
+              onClick={handleConnectGithub}
+              disabled={githubBusy}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg"
+            >
+              {githubBusy ? "Starting…" : "Connect GitHub"}
+            </button>
+            {githubStatus.install_url && (
+              <p className="text-xs text-gray-400 dark:text-slate-500">
+                First time?{" "}
+                <a
+                  href={githubStatus.install_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-500 hover:underline"
+                >
+                  Install the App on GitHub
+                </a>{" "}
+                first, then return here and click Connect.
+              </p>
+            )}
+          </div>
+        )}
+        {githubError && (
+          <p className="text-sm text-red-500 mt-3">{githubError}</p>
+        )}
       </div>
 
       <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
