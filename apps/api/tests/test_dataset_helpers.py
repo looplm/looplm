@@ -52,87 +52,44 @@ def test_history_handles_openai_multipart_content():
 
 # ── build_contextualized_prompt ────────────────────────────────
 
-def test_contextualized_empty_messages_returns_bare_question():
-    assert build_contextualized_prompt([], "What is X?") == "What is X?"
+def test_contextualized_without_summary_returns_bare_question():
+    assert build_contextualized_prompt("What is X?") == "What is X?"
+    assert build_contextualized_prompt("What is X?", summary=None) == "What is X?"
+    assert build_contextualized_prompt("What is X?", summary="   ") == "What is X?"
 
 
-def test_contextualized_single_user_turn_returns_bare_question():
-    # The conversation contains only the final user message → no preamble.
+def test_contextualized_with_summary_prepends_topic_preamble():
     result = build_contextualized_prompt(
-        [{"role": "user", "content": "What is X?"}],
-        "What is X?",
-    )
-    assert result == "What is X?"
-
-
-def test_contextualized_with_summary_and_last_assistant():
-    messages = [
-        {"role": "user", "content": "Was sind die Hauptrisiken von X?"},
-        {"role": "assistant", "content": "Die Hauptrisiken sind A, B und C."},
-        {"role": "user", "content": "Und die Fristen?"},
-        {"role": "assistant", "content": "Die Frist beträgt 14 Tage."},
-        {"role": "user", "content": "Kannst du mir dazu Rechtsentscheide zeigen?"},
-    ]
-    result = build_contextualized_prompt(
-        messages,
         final_question="Kannst du mir dazu Rechtsentscheide zeigen?",
-        summary="Nutzer fragte nach Risiken von X und Fristen.",
+        summary="Der Nutzer fragt nach Datenschutzverstößen im Lieferantenkontext und wie diese korrekt gemeldet werden.",
     )
-    assert result.startswith("[Earlier in this conversation (summary):")
-    assert "Nutzer fragte nach Risiken von X und Fristen." in result
-    assert "Last turn:" in result
-    assert "Assistant: Die Frist beträgt 14 Tage." in result
-    assert result.endswith("Kannst du mir dazu Rechtsentscheide zeigen?")
+    assert result == (
+        "[Conversation so far:\n"
+        "Der Nutzer fragt nach Datenschutzverstößen im Lieferantenkontext "
+        "und wie diese korrekt gemeldet werden.]\n\n"
+        "Kannst du mir dazu Rechtsentscheide zeigen?"
+    )
 
 
-def test_contextualized_without_summary_still_shows_last_assistant():
-    # No LLM available → no summary, but the last assistant turn is still
-    # carried verbatim so the follow-up's referent is visible.
+def test_contextualized_strips_summary_whitespace():
     result = build_contextualized_prompt(
-        messages=[
-            {"role": "user", "content": "previous question"},
-            {"role": "assistant", "content": "previous answer"},
-            {"role": "user", "content": "follow up"},
-        ],
         final_question="follow up",
-        summary=None,
+        summary="  topic with surrounding whitespace  \n",
     )
-    assert result.startswith("[Earlier in this conversation:")
-    assert "(summary)" not in result
-    assert "Assistant: previous answer" in result
-    assert result.endswith("follow up")
+    assert "topic with surrounding whitespace" in result
+    assert "  topic with surrounding whitespace" not in result
 
 
-def test_contextualized_truncates_long_last_assistant_turn():
-    long_answer = "x" * 5000
+def test_contextualized_does_not_echo_assistant_answer():
+    # Regression guard: the prompt must NEVER contain the literal "Last turn"
+    # or "Assistant:" markers we used earlier — those leaked answers into
+    # the test prompt.
     result = build_contextualized_prompt(
-        messages=[
-            {"role": "user", "content": "first"},
-            {"role": "assistant", "content": long_answer},
-            {"role": "user", "content": "follow up"},
-        ],
-        final_question="follow up",
+        final_question="wie melde ich einen Datenschutzverstoß",
+        summary="data-protection reporting in the supplier context",
     )
-    # Final question is intact; long answer is capped.
-    assert result.endswith("follow up")
-    assert "x" * 5000 not in result
-    assert "…" in result
-
-
-def test_contextualized_drops_trailing_user_message_matching_question():
-    # The span typically ends with the final user message — we shouldn't
-    # echo it inside the preamble.
-    result = build_contextualized_prompt(
-        messages=[
-            {"role": "user", "content": "earlier question"},
-            {"role": "assistant", "content": "earlier answer"},
-            {"role": "user", "content": "Kannst du mir dazu mehr zeigen?"},
-        ],
-        final_question="Kannst du mir dazu mehr zeigen?",
-        summary="User asked about X.",
-    )
-    # The final question appears exactly once — at the end.
-    assert result.count("Kannst du mir dazu mehr zeigen?") == 1
+    assert "Last turn:" not in result
+    assert "Assistant:" not in result
 
 
 # ── _extract_user_prompt (unchanged behavior) ──────────────────

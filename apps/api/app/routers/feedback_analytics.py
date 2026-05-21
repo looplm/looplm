@@ -520,15 +520,14 @@ async def regenerate_expected_answer(
         raise HTTPException(status_code=503, detail="LLM is not configured for this user") from exc
 
     # Match the suggestion-generation flow so re-rolled criteria see the same
-    # context the original draft did. For single-turn traces the contextualized
-    # prompt is just the bare question.
+    # context the original draft did. The summary captures topic only — never
+    # the assistant's prior answers, which would leak the test's expected
+    # output.
     trace_messages = await load_trace_conversation_messages(db, [trace.id])
     history = trace_messages.get(str(trace.id), [])
     older_turns = [t for t in history if t["content"].strip() != final_question.strip()]
-    if older_turns and older_turns[-1]["role"] == "assistant":
-        older_turns = older_turns[:-1]
     summary = await summarize_conversation(llm_service, older_turns) if older_turns else None
-    prompt = build_contextualized_prompt(history, final_question, summary=summary)
+    prompt = build_contextualized_prompt(final_question, summary=summary)
 
     answer = await generate_expected_answer(
         llm_service,

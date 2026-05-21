@@ -250,7 +250,7 @@ export function SuggestionReviewModal({
                 Prompt
                 {form.prompt.includes("[Earlier in this conversation") && (
                   <span className="ml-2 text-xs font-normal text-gray-500 dark:text-slate-400">
-                    includes prior conversation — edit as needed
+                    includes conversation topic — edit as needed
                   </span>
                 )}
               </label>

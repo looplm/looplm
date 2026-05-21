@@ -203,71 +203,27 @@ def _extract_conversation_history(trace_input: Any) -> list[dict[str, str]]:
     return []
 
 
-# Cap the last assistant turn so even a verbose answer doesn't blow up the
-# prompt. The user's final question is always emitted in full.
-_LAST_TURN_CAP = 1500
-
-
 def build_contextualized_prompt(
-    messages: list[dict[str, str]],
     final_question: str,
     summary: str | None = None,
 ) -> str:
     """Format a self-contained suggestion prompt.
 
-    ``messages`` is the conversation that preceded the assistant response
-    being graded (typically pulled from the agent's ``llm-generation`` span
-    input). The function emits a transcript-style preamble with two parts —
-    an LLM-generated summary of older turns, and the verbatim last assistant
-    message — followed by the user's final question.
-
-    If there's no prior context at all, the bare final question is returned
-    unchanged.
+    A multi-turn conversation gets a short topic recap above the user's
+    final question so follow-ups like ``"kannst du mir dazu Rechtsentscheide
+    zeigen?"`` carry the topic their meaning depends on. We deliberately do
+    NOT include the assistant's prior answers — that would leak the answer
+    to a question that's about to be asked again as a test case.
     """
-    turns = [
-        m for m in messages
-        if isinstance(m, dict)
-        and m.get("role") in ("user", "assistant")
-        and isinstance(m.get("content"), str)
-        and m["content"].strip()
-    ]
-
-    # The conversation usually ends with the final user message — drop it so
-    # we don't echo the question inside the preamble.
-    if turns and turns[-1]["role"] == "user" and turns[-1]["content"].strip() == final_question.strip():
-        turns = turns[:-1]
-
-    last_assistant: str | None = None
-    if turns and turns[-1]["role"] == "assistant":
-        last_assistant = turns[-1]["content"]
-
-    if not summary and not last_assistant:
+    summary_text = summary.strip() if summary else None
+    if not summary_text:
         return final_question
 
-    parts: list[str] = []
-    header = "[Earlier in this conversation"
-    if summary:
-        header += " (summary):"
-    else:
-        header += ":"
-    parts.append(header)
-
-    if summary:
-        parts.append("")
-        parts.append(summary.strip())
-
-    if last_assistant:
-        excerpt = last_assistant.strip()
-        if len(excerpt) > _LAST_TURN_CAP:
-            excerpt = excerpt[:_LAST_TURN_CAP].rstrip() + "…"
-        parts.append("")
-        parts.append("Last turn:")
-        parts.append(f"Assistant: {excerpt}")
-
-    parts.append("]")
-    parts.append("")
-    parts.append(final_question)
-    return "\n".join(parts)
+    return (
+        "[Conversation so far:\n"
+        f"{summary_text}]\n\n"
+        f"{final_question}"
+    )
 
 
 async def load_trace_conversation_messages(
@@ -316,8 +272,15 @@ async def summarize_conversation(
     llm_service: Any,
     turns: list[dict[str, str]],
 ) -> str | None:
-    """Use the analysis LLM to compress older conversation turns into 1-2
-    sentences so a follow-up question carries enough context to stand alone.
+    """Use the analysis LLM to compress older conversation turns into a one-
+    sentence topic recap so a follow-up question still makes sense without
+    the full transcript.
+
+    The summary intentionally captures *what was being discussed* (topic,
+    subject, what the user was asking about) but NOT the assistant's
+    answers, factual claims, names, numbers, or procedures. This output
+    becomes part of the test prompt — leaking the assistant's prior answer
+    would let the model under test cheat by regurgitating it.
 
     Returns ``None`` on any failure — callers should fall through to a
     bare-prompt suggestion rather than raise.
@@ -340,11 +303,23 @@ async def summarize_conversation(
                 {
                     "role": "system",
                     "content": (
-                        "You summarize the older part of a chat so a follow-up question the "
-                        "user asks next still makes sense without the full transcript. "
-                        "Write 1–2 sentences in the same language as the conversation. "
-                        "State what the user was asking about and the key facts the assistant "
-                        "established. No preamble, no meta-commentary."
+                        "You write a short recap of what the user has been discussing "
+                        "in a chat. Your output will be prepended to the user's next "
+                        "question and used as a test case for an AI assistant, so the "
+                        "assistant must be able to answer the question without your "
+                        "recap containing the answer.\n\n"
+                        "Hard rules:\n"
+                        "1. Capture the subject(s) the user was asking about and any "
+                        "details the user themselves provided (their role, their "
+                        "context, constraints they mentioned, what they've tried, what "
+                        "they're trying to achieve).\n"
+                        "2. Do NOT include any information the assistant provided — no "
+                        "specific facts, procedures, numbers, names, URLs, or "
+                        "instructions. Those would give away the answer.\n"
+                        "3. Write 2–4 short sentences in the same language as the chat. "
+                        "Plain prose, no bullet points, no preamble, no meta-commentary.\n"
+                        "4. If the user only asked one short question with no extra "
+                        "context, a single sentence is fine."
                     ),
                 },
                 {"role": "user", "content": transcript},

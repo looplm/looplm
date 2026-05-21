@@ -75,28 +75,20 @@ async def run_suggestion_generation(
     async def _process_one(sug: TestCaseSuggestion) -> None:
         try:
             messages = feedback_messages.get(str(sug.feedback_id), [])
-            # Drop the trailing turn if it's exactly the final user question —
-            # that's the part the suggestion is grading, not prior context.
             final_question = sug.prompt
+            # Drop the trailing turn if it's exactly the final user question —
+            # we're summarizing what came before, not echoing it.
             older_turns = [
                 t for t in messages
                 if t["content"].strip() != final_question.strip()
             ]
-            if older_turns and older_turns[-1]["role"] == "assistant":
-                # The last assistant turn is shown verbatim — only summarize
-                # what comes before it.
-                to_summarize = older_turns[:-1]
-            else:
-                to_summarize = older_turns
 
             summary: str | None = None
-            if llm_service is not None and to_summarize:
-                summary = await summarize_conversation(llm_service, to_summarize)
+            if llm_service is not None and older_turns:
+                summary = await summarize_conversation(llm_service, older_turns)
 
-            if messages:
-                sug.prompt = build_contextualized_prompt(
-                    messages, final_question, summary=summary,
-                )
+            if summary:
+                sug.prompt = build_contextualized_prompt(final_question, summary=summary)
 
             # Criteria drafting still only applies to negative feedback that
             # doesn't already have a suggested answer.
