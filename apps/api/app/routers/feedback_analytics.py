@@ -472,7 +472,11 @@ async def regenerate_expected_answer(
     Scoped to feedback the caller's project owns. Uses the same prompt as
     initial enrichment so reviewers can re-roll a draft they don't like.
     """
-    from app.routers.dataset_helpers import _extract_user_prompt, _extract_answer, generate_expected_answer
+    from app.routers.dataset_helpers import (
+        _build_prompt_with_context,
+        _extract_answer,
+        generate_expected_answer,
+    )
 
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
 
@@ -489,7 +493,7 @@ async def regenerate_expected_answer(
         raise HTTPException(status_code=404, detail="Feedback not found")
 
     feedback, trace = row
-    prompt = _extract_user_prompt(trace.input)
+    prompt = _build_prompt_with_context(trace.input)
     if not prompt:
         raise HTTPException(status_code=422, detail="Trace input has no extractable user prompt")
 

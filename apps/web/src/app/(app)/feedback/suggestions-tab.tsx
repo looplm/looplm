@@ -148,7 +148,12 @@ export function SuggestionsTab({
                       </span>
                     )}
                   </div>
-                  <p className="text-sm font-medium mb-2">{sug.prompt}</p>
+                  <p
+                    className="text-sm font-medium mb-2 line-clamp-3 whitespace-pre-line"
+                    title={sug.prompt}
+                  >
+                    {sug.prompt}
+                  </p>
                   {sug.actual_answer && (
                     <div
                       className={`text-xs p-2 rounded-lg mb-2 max-h-24 overflow-auto ${

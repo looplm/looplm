@@ -246,11 +246,18 @@ export function SuggestionReviewModal({
 
             {/* Prompt */}
             <div>
-              <label className="block text-sm font-medium mb-1">Prompt</label>
+              <label className="block text-sm font-medium mb-1">
+                Prompt
+                {form.prompt.includes("[Earlier in this conversation:") && (
+                  <span className="ml-2 text-xs font-normal text-gray-500 dark:text-slate-400">
+                    includes prior conversation — edit as needed
+                  </span>
+                )}
+              </label>
               <textarea
                 value={form.prompt}
                 onChange={(e) => setForm({ ...form, prompt: e.target.value })}
-                rows={3}
+                rows={form.prompt.includes("\n") ? 8 : 3}
                 className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm"
               />
             </div>

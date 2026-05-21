@@ -141,6 +141,118 @@ def _extract_user_prompt(trace_input: Any) -> str | None:
     return None
 
 
+def _extract_conversation_history(trace_input: Any) -> list[dict[str, str]]:
+    """Return the ordered user/assistant turns recorded in a trace input.
+
+    Each turn is ``{"role": "user" | "assistant", "content": "..."}``.
+    Returns an empty list if the input doesn't expose a recognisable
+    conversation structure (e.g. a bare prompt string).
+    """
+    if not trace_input or isinstance(trace_input, str):
+        return []
+
+    def _text_from_content(content: Any) -> str | None:
+        if isinstance(content, str):
+            return content.strip() or None
+        if isinstance(content, list):
+            parts: list[str] = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text = part.get("text", "")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text)
+            joined = "\n".join(parts).strip()
+            return joined or None
+        return None
+
+    def _from_messages(messages: Any) -> list[dict[str, str]]:
+        if not isinstance(messages, list):
+            return []
+        turns: list[dict[str, str]] = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            text = _text_from_content(msg.get("content"))
+            if not text:
+                for k in ("text", "input", "prompt"):
+                    v = msg.get(k)
+                    if isinstance(v, str) and v.strip():
+                        text = v.strip()
+                        break
+            if text:
+                turns.append({"role": role, "content": text})
+        return turns
+
+    if isinstance(trace_input, list):
+        return _from_messages(trace_input)
+
+    if isinstance(trace_input, dict):
+        from_messages = _from_messages(trace_input.get("messages"))
+        if from_messages:
+            return from_messages
+        for key in ("prompt", "question", "query", "text", "input"):
+            value = trace_input.get(key)
+            if isinstance(value, (dict, list)):
+                nested = _extract_conversation_history(value)
+                if nested:
+                    return nested
+
+    return []
+
+
+# Cap per-turn excerpt length and total turns kept as context so the prompt
+# doesn't balloon when traces carry a long history. The final user question
+# is always emitted in full — only prior turns are trimmed.
+_CONTEXT_PER_TURN_CAP = 600
+_CONTEXT_MAX_TURNS = 6
+
+
+def _build_prompt_with_context(trace_input: Any) -> str | None:
+    """Return a self-contained prompt string for a test-case suggestion.
+
+    Single-turn traces return the user message as today. Multi-turn traces
+    prepend a transcript of recent prior user/assistant turns so that
+    follow-up questions like ``"Kannst du mir Rechtsentscheide dazu zeigen?"``
+    carry the context their meaning depends on. The reviewer sees the
+    transcript in the modal and can edit it before saving.
+    """
+    history = _extract_conversation_history(trace_input)
+    if not history:
+        return _extract_user_prompt(trace_input)
+
+    last_user_idx = None
+    for i in range(len(history) - 1, -1, -1):
+        if history[i]["role"] == "user":
+            last_user_idx = i
+            break
+    if last_user_idx is None:
+        return None
+
+    final_question = history[last_user_idx]["content"]
+    prior = history[:last_user_idx]
+
+    # No earlier user turn means there's nothing the follow-up could be
+    # referring back to — emit just the question.
+    if not any(t["role"] == "user" for t in prior):
+        return final_question
+
+    prior = prior[-_CONTEXT_MAX_TURNS:]
+    lines = ["[Earlier in this conversation:"]
+    for turn in prior:
+        label = "User" if turn["role"] == "user" else "Assistant"
+        content = turn["content"]
+        if len(content) > _CONTEXT_PER_TURN_CAP:
+            content = content[:_CONTEXT_PER_TURN_CAP].rstrip() + "…"
+        lines.append(f"{label}: {content}")
+    lines.append("]")
+    lines.append("")
+    lines.append(final_question)
+    return "\n".join(lines)
+
+
 async def load_trace_source_urls(
     db: Any,
     trace_ids: list[Any],
@@ -244,8 +356,11 @@ def build_suggestions(
         if trace is None:
             continue
 
-        # Extract last user message from trace input
-        prompt = _extract_user_prompt(trace.input)
+        # Carry conversation history into the prompt for multi-turn traces.
+        # Follow-up questions ("kannst du mir dazu Rechtsentscheide zeigen?")
+        # are unusable as standalone test cases without the prior turns —
+        # the reviewer sees the transcript and can edit it before saving.
+        prompt = _build_prompt_with_context(trace.input)
         if not prompt:
             continue
 
