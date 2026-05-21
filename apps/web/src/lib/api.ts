@@ -66,6 +66,8 @@ export type {
   EvalGraderResult,
   ConversationTurn,
   EvalResultItem,
+  EvalResultSummary,
+  GraderResultSummary,
   EvalRunDetail,
   EvalRunStats,
   DatasetPickerItem,

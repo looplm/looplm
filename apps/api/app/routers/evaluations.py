@@ -18,10 +18,12 @@ from app.models.project import Project
 from app.schemas.evaluations import (
     EvalImportRequest,
     EvalResultItem,
+    EvalResultSummary,
     EvalRunDetail,
     EvalRunListItem,
     EvalRunListResponse,
     EvalRunStats,
+    GraderResultSummary,
     GraderSummaryItem,
     PaginationInfo,
     ScoreSummaryItem,
@@ -177,6 +179,27 @@ router.include_router(eval_sessions_router)
 # ── Parameterized routes (/{run_id}) — must come last ────────
 
 
+def _summarize_graders(graders: dict[str, Any] | None) -> dict[str, GraderResultSummary]:
+    """Trim each grader to (pass, reason, skipped) for the list payload."""
+    out: dict[str, GraderResultSummary] = {}
+    for name, g in (graders or {}).items():
+        if not isinstance(g, dict):
+            continue
+        out[name] = GraderResultSummary(
+            **{"pass": bool(g.get("pass", False))},
+            reason=g.get("reason"),
+            skipped=bool(g.get("skipped", False)),
+        )
+    return out
+
+
+def _turn_count(metadata: dict[str, Any] | None) -> int | None:
+    history = (metadata or {}).get("conversation_history")
+    if isinstance(history, list):
+        return len(history)
+    return None
+
+
 @router.get("/{run_id}", response_model=EvalRunDetail)
 async def get_eval_run(
     run_id: UUID,
@@ -191,13 +214,24 @@ async def get_eval_run(
     if not run:
         raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Eval run not found"}})
 
-    results_query = select(EvalResult).where(EvalResult.run_id == run.id)
+    # Only select the columns the table needs. We pull `result_metadata` solely
+    # to derive `turn_count`; the full blob is not returned.
+    results_query = select(
+        EvalResult.id,
+        EvalResult.test_id,
+        EvalResult.pass_,
+        EvalResult.tags,
+        EvalResult.graders,
+        EvalResult.turns_to_pass,
+        EvalResult.result_metadata,
+        EvalResult.created_at,
+    ).where(EvalResult.run_id == run.id)
     if pass_filter is not None:
         results_query = results_query.where(EvalResult.pass_ == pass_filter)
     results_query = results_query.order_by(EvalResult.test_id)
 
     results_result = await db.execute(results_query)
-    results = results_result.scalars().all()
+    rows = results_result.all()
 
     pass_rate = run.passed / run.total if run.total > 0 else 0.0
 
@@ -215,23 +249,56 @@ async def get_eval_run(
         metadata=run.run_metadata or {},
         created_at=run.created_at,
         results=[
-            EvalResultItem(
+            EvalResultSummary(
                 id=r.id,
                 test_id=r.test_id,
                 **{"pass": r.pass_},
-                reason=r.reason,
-                input=r.input,
-                output=r.output,
-                expected_output=r.expected_output,
-                tags=r.tags,
-                graders=r.graders or {},
-                scores=r.scores or {},
-                metadata=_enrich_result_metadata(r.result_metadata),
+                tags=r.tags or [],
+                graders=_summarize_graders(r.graders),
                 turns_to_pass=r.turns_to_pass,
+                turn_count=_turn_count(r.result_metadata),
                 created_at=r.created_at,
             )
-            for r in results
+            for r in rows
         ],
+    )
+
+
+@router.get("/{run_id}/results/{result_id}", response_model=EvalResultItem)
+async def get_eval_result(
+    run_id: UUID,
+    result_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Return a single eval result with full input/output/metadata. Used by the row modal."""
+    result = await db.execute(
+        select(EvalResult)
+        .join(EvalRun, EvalResult.run_id == EvalRun.id)
+        .where(
+            EvalResult.id == result_id,
+            EvalResult.run_id == run_id,
+            EvalRun.project_id == project.id,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Eval result not found"}})
+
+    return EvalResultItem(
+        id=row.id,
+        test_id=row.test_id,
+        **{"pass": row.pass_},
+        reason=row.reason,
+        input=row.input,
+        output=row.output,
+        expected_output=row.expected_output,
+        tags=row.tags or [],
+        graders=row.graders or {},
+        scores=row.scores or {},
+        metadata=_enrich_result_metadata(row.result_metadata),
+        turns_to_pass=row.turns_to_pass,
+        created_at=row.created_at,
     )
 
 

@@ -1,6 +1,11 @@
-import type { EvalResultItem, EvalGraderResult, EvaluatorItem } from "@/lib/api";
+import type { EvalGraderResult, EvaluatorItem, GraderResultSummary } from "@/lib/api";
 
-export function recomputePass(result: EvalResultItem, disabledGraders: Set<string>): boolean {
+type ResultLike = {
+  pass: boolean;
+  graders: Record<string, { pass: boolean; skipped?: boolean }>;
+};
+
+export function recomputePass(result: ResultLike, disabledGraders: Set<string>): boolean {
   if (!result.pass) {
     const graders = result.graders || {};
     const allGradersPassing = Object.entries(graders).every(
@@ -40,10 +45,10 @@ export function sentenceFoundIn(sentence: string, target: string): boolean {
 }
 
 /** Sort grader entries by: affects_pass first, then relevance (core > important > minor), then name */
-export function sortGraderEntries(
-  entries: [string, EvalGraderResult][],
+export function sortGraderEntries<G extends GraderResultSummary | EvalGraderResult>(
+  entries: [string, G][],
   evaluatorMap: Record<string, EvaluatorItem>
-): [string, EvalGraderResult][] {
+): [string, G][] {
   const relevanceOrder: Record<string, number> = { core: 0, important: 1, minor: 2 };
   return [...entries].sort(([nameA], [nameB]) => {
     const metaA = evaluatorMap[nameA];
@@ -59,10 +64,10 @@ export function sortGraderEntries(
 }
 
 /** Sort grader detail cards: failed (affects_pass first) > skipped > passed */
-export function sortGraderDetails(
-  entries: [string, EvalGraderResult][],
+export function sortGraderDetails<G extends GraderResultSummary | EvalGraderResult>(
+  entries: [string, G][],
   evaluatorMap: Record<string, EvaluatorItem>
-): [string, EvalGraderResult][] {
+): [string, G][] {
   const relevanceOrder: Record<string, number> = { core: 0, important: 1, minor: 2 };
   return [...entries].sort(([nameA, gA], [nameB, gB]) => {
     const statusA = gA.skipped ? 1 : gA.pass ? 2 : 0;

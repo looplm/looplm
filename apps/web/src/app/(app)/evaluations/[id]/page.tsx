@@ -4,11 +4,13 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   getEvalRun,
+  getEvalResult,
   getEvaluators,
   generateMultiRunReport,
   rerunEval,
   type EvalRunDetail,
   type EvalResultItem,
+  type EvalResultSummary,
   type EvaluatorItem,
 } from "@/lib/api";
 import { StatCard } from "@/components/eval-shared";
@@ -31,6 +33,7 @@ export default function EvalRunDetailPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedResult, setSelectedResult] = useState<EvalResultItem | null>(null);
+  const [loadingResultId, setLoadingResultId] = useState<string | null>(null);
   const [disabledGraders, setDisabledGraders] = useState<Set<string>>(new Set());
   const [evaluatorMap, setEvaluatorMap] = useState<Record<string, EvaluatorItem>>({});
 
@@ -108,6 +111,21 @@ export default function EvalRunDetailPage() {
     const failed = total - passed;
     return { total, passed, failed, passRate: total > 0 ? passed / total : 0 };
   }, [computedResults]);
+
+  const handleSelectResult = useCallback(
+    async (summary: EvalResultSummary) => {
+      setLoadingResultId(summary.id);
+      try {
+        const full = await getEvalResult(id, summary.id);
+        setSelectedResult(full);
+      } catch (err: any) {
+        toast.error("Failed to load test result", { description: err?.message });
+      } finally {
+        setLoadingResultId(null);
+      }
+    },
+    [id],
+  );
 
   async function handleRerun() {
     setRerunning(true);
@@ -332,7 +350,8 @@ export default function EvalRunDetailPage() {
             filteredResults={filteredResults}
             disabledGraders={disabledGraders}
             evaluatorMap={evaluatorMap}
-            onSelectResult={setSelectedResult}
+            onSelectResult={handleSelectResult}
+            loadingResultId={loadingResultId}
           />
 
           {selectedResult && (

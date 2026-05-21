@@ -4,6 +4,7 @@
  */
 
 import type {
+  EvalResultItem,
   EvalRunListResponse,
   EvalRunDetail,
   EvalRunListItem,
@@ -32,6 +33,9 @@ export const getEvalRuns = (params?: Record<string, string>) => {
 
 export const getEvalRun = (id: string) =>
   request<EvalRunDetail>(`/api/evals/${id}`);
+
+export const getEvalResult = (runId: string, resultId: string) =>
+  request<EvalResultItem>(`/api/evals/${runId}/results/${resultId}`);
 
 export const getEvalRunStats = (id: string, excludeGraders?: string[]) => {
   const qs = excludeGraders?.length ? `?exclude_graders=${excludeGraders.join(",")}` : "";

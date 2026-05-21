@@ -90,6 +90,29 @@ class EvalRunListResponse(BaseModel):
     pagination: PaginationInfo
 
 
+class GraderResultSummary(BaseModel):
+    """Trimmed grader result used in the list-of-results response (no `details`)."""
+    pass_: bool = Field(alias="pass")
+    reason: Optional[str] = None
+    skipped: Optional[bool] = False
+
+    model_config = {"populate_by_name": True}
+
+
+class EvalResultSummary(BaseModel):
+    """Lightweight row used by the eval-run detail table — no input/output/reason text."""
+    id: UUID
+    test_id: str
+    pass_: bool = Field(alias="pass")
+    tags: list[str]
+    graders: dict[str, GraderResultSummary]
+    turns_to_pass: Optional[int] = None
+    turn_count: Optional[int] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True, "populate_by_name": True}
+
+
 class EvalResultItem(BaseModel):
     id: UUID
     test_id: str
@@ -121,7 +144,7 @@ class EvalRunDetail(BaseModel):
     score_summary: dict[str, ScoreSummaryItem]
     metadata: dict[str, Any]
     created_at: datetime
-    results: list[EvalResultItem]
+    results: list[EvalResultSummary]
 
     model_config = {"from_attributes": True}
 

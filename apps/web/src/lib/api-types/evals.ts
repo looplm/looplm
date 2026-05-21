@@ -55,6 +55,23 @@ export interface ConversationTurn {
   graders: Record<string, { pass: boolean; reason?: string; skipped?: boolean }>;
 }
 
+export interface GraderResultSummary {
+  pass: boolean;
+  reason?: string;
+  skipped?: boolean;
+}
+
+export interface EvalResultSummary {
+  id: string;
+  test_id: string;
+  pass: boolean;
+  tags: string[];
+  graders: Record<string, GraderResultSummary>;
+  turns_to_pass?: number | null;
+  turn_count?: number | null;
+  created_at: string;
+}
+
 export interface EvalResultItem {
   id: string;
   test_id: string;
@@ -84,7 +101,7 @@ export interface EvalRunDetail {
   score_summary: Record<string, ScoreSummaryItem>;
   metadata: Record<string, unknown>;
   created_at: string;
-  results: EvalResultItem[];
+  results: EvalResultSummary[];
 }
 
 export interface EvalRunStats {

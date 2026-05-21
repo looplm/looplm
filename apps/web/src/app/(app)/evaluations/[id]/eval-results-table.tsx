@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { EvalResultItem, EvaluatorItem } from "@/lib/api";
+import type { EvalResultSummary, EvaluatorItem } from "@/lib/api";
 import { sortGraderEntries, graderDisplayName } from "./eval-utils";
 
 type SortColumn = "test_id" | "result" | "summary" | "graders";
@@ -21,10 +21,11 @@ function SortIcon({ entry, index, totalSorts }: { entry: SortEntry | undefined; 
 }
 
 interface EvalResultsTableProps {
-  filteredResults: EvalResultItem[];
+  filteredResults: EvalResultSummary[];
   disabledGraders: Set<string>;
   evaluatorMap: Record<string, EvaluatorItem>;
-  onSelectResult: (result: EvalResultItem) => void;
+  onSelectResult: (result: EvalResultSummary) => void;
+  loadingResultId?: string | null;
 }
 
 export function EvalResultsTable({
@@ -32,6 +33,7 @@ export function EvalResultsTable({
   disabledGraders,
   evaluatorMap,
   onSelectResult,
+  loadingResultId,
 }: EvalResultsTableProps) {
   const defaultSort: SortEntry[] = [
     { col: "result", dir: "desc" },
@@ -59,12 +61,12 @@ export function EvalResultsTable({
     });
   };
 
-  const getFailedCount = (result: EvalResultItem) => {
+  const getFailedCount = (result: EvalResultSummary) => {
     const entries = Object.entries(result.graders || {});
     return entries.filter(([n, g]) => !disabledGraders.has(n) && !g.pass && !g.skipped).length;
   };
 
-  const compareByCol = (a: EvalResultItem, b: EvalResultItem, col: SortColumn): number => {
+  const compareByCol = (a: EvalResultSummary, b: EvalResultSummary, col: SortColumn): number => {
     switch (col) {
       case "test_id":
         return (a.test_id || "").localeCompare(b.test_id || "");
@@ -123,11 +125,14 @@ export function EvalResultsTable({
           {sortedResults.map((result) => {
             const graderEntries = Object.entries(result.graders || {});
             const sortedGraderEntries = sortGraderEntries(graderEntries, evaluatorMap);
+            const isLoading = loadingResultId === result.id;
             return (
               <tr
                 key={result.id}
-                onClick={() => onSelectResult(result)}
-                className="border-b border-gray-100/50 dark:border-slate-800/50 hover:bg-gray-100/50 dark:hover:bg-slate-800/30 cursor-pointer"
+                onClick={() => !loadingResultId && onSelectResult(result)}
+                className={`border-b border-gray-100/50 dark:border-slate-800/50 hover:bg-gray-100/50 dark:hover:bg-slate-800/30 ${
+                  loadingResultId ? "cursor-wait" : "cursor-pointer"
+                } ${isLoading ? "opacity-60" : ""}`}
               >
                 <td className="px-4 py-3 text-sm">{result.test_id}</td>
                 <td className="px-4 py-3 text-center">
@@ -149,12 +154,12 @@ export function EvalResultsTable({
                         T{result.turns_to_pass}
                       </span>
                     )}
-                    {result.metadata?.conversation_history && !result.pass && (
+                    {result.turn_count != null && result.turn_count > 1 && !result.pass && (
                       <span
                         className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400"
-                        title={`Failed after ${(result.metadata.conversation_history as unknown[]).length} turns`}
+                        title={`Failed after ${result.turn_count} turns`}
                       >
-                        T{(result.metadata.conversation_history as unknown[]).length}
+                        T{result.turn_count}
                       </span>
                     )}
                   </div>

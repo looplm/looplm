@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   getEvalJob,
   getEvalJobLogs,
+  getEvalResult,
   getEvalRun,
   getEvaluators,
   generateMultiRunReport,
@@ -14,6 +15,7 @@ import {
   type EvalJob,
   type EvalRunDetail,
   type EvalResultItem,
+  type EvalResultSummary,
   type EvaluatorItem,
 } from "@/lib/api";
 import { JobStatusBadge, JobProgressBar, StatCard, formatDuration } from "@/components/eval-shared";
@@ -34,6 +36,7 @@ export default function EvalJobDetailPage() {
   const [run, setRun] = useState<EvalRunDetail | null>(null);
   const [evaluatorMap, setEvaluatorMap] = useState<Record<string, EvaluatorItem>>({});
   const [selectedResult, setSelectedResult] = useState<EvalResultItem | null>(null);
+  const [loadingResultId, setLoadingResultId] = useState<string | null>(null);
   const [reportMarkdown, setReportMarkdown] = useState<string | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -125,6 +128,22 @@ export default function EvalJobDetailPage() {
     const failed = total - passed;
     return { total, passed, failed, passRate: total > 0 ? passed / total : 0 };
   }, [run?.results]);
+
+  const handleSelectResult = useCallback(
+    async (summary: EvalResultSummary) => {
+      if (!job?.run_id) return;
+      setLoadingResultId(summary.id);
+      try {
+        const full = await getEvalResult(job.run_id, summary.id);
+        setSelectedResult(full);
+      } catch (err: any) {
+        toast.error("Failed to load test result", { description: err?.message });
+      } finally {
+        setLoadingResultId(null);
+      }
+    },
+    [job?.run_id],
+  );
 
   async function handleStop() {
     setStopping(true);
@@ -315,7 +334,8 @@ export default function EvalJobDetailPage() {
               filteredResults={run?.results || []}
               disabledGraders={new Set()}
               evaluatorMap={evaluatorMap}
-              onSelectResult={setSelectedResult}
+              onSelectResult={handleSelectResult}
+              loadingResultId={loadingResultId}
             />
           </div>
         </>
