@@ -45,7 +45,7 @@ export function SuggestionsTab({
     if (!suggestionRun || suggestionRun.status === "pending") return "Starting generation…";
     if (suggestionRun.status === "running") {
       if (suggestionRun.total > 0) {
-        return `Drafting acceptance criteria… ${suggestionRun.processed} of ${suggestionRun.total}`;
+        return `Summarizing context & drafting criteria… ${suggestionRun.processed} of ${suggestionRun.total}`;
       }
       return "Building suggestions…";
     }

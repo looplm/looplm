@@ -203,54 +203,158 @@ def _extract_conversation_history(trace_input: Any) -> list[dict[str, str]]:
     return []
 
 
-# Cap per-turn excerpt length and total turns kept as context so the prompt
-# doesn't balloon when traces carry a long history. The final user question
-# is always emitted in full — only prior turns are trimmed.
-_CONTEXT_PER_TURN_CAP = 600
-_CONTEXT_MAX_TURNS = 6
+# Cap the last assistant turn so even a verbose answer doesn't blow up the
+# prompt. The user's final question is always emitted in full.
+_LAST_TURN_CAP = 1500
 
 
-def _build_prompt_with_context(trace_input: Any) -> str | None:
-    """Return a self-contained prompt string for a test-case suggestion.
+def build_contextualized_prompt(
+    messages: list[dict[str, str]],
+    final_question: str,
+    summary: str | None = None,
+) -> str:
+    """Format a self-contained suggestion prompt.
 
-    Single-turn traces return the user message as today. Multi-turn traces
-    prepend a transcript of recent prior user/assistant turns so that
-    follow-up questions like ``"Kannst du mir Rechtsentscheide dazu zeigen?"``
-    carry the context their meaning depends on. The reviewer sees the
-    transcript in the modal and can edit it before saving.
+    ``messages`` is the conversation that preceded the assistant response
+    being graded (typically pulled from the agent's ``llm-generation`` span
+    input). The function emits a transcript-style preamble with two parts —
+    an LLM-generated summary of older turns, and the verbatim last assistant
+    message — followed by the user's final question.
+
+    If there's no prior context at all, the bare final question is returned
+    unchanged.
     """
-    history = _extract_conversation_history(trace_input)
-    if not history:
-        return _extract_user_prompt(trace_input)
+    turns = [
+        m for m in messages
+        if isinstance(m, dict)
+        and m.get("role") in ("user", "assistant")
+        and isinstance(m.get("content"), str)
+        and m["content"].strip()
+    ]
 
-    last_user_idx = None
-    for i in range(len(history) - 1, -1, -1):
-        if history[i]["role"] == "user":
-            last_user_idx = i
-            break
-    if last_user_idx is None:
-        return None
+    # The conversation usually ends with the final user message — drop it so
+    # we don't echo the question inside the preamble.
+    if turns and turns[-1]["role"] == "user" and turns[-1]["content"].strip() == final_question.strip():
+        turns = turns[:-1]
 
-    final_question = history[last_user_idx]["content"]
-    prior = history[:last_user_idx]
+    last_assistant: str | None = None
+    if turns and turns[-1]["role"] == "assistant":
+        last_assistant = turns[-1]["content"]
 
-    # No earlier user turn means there's nothing the follow-up could be
-    # referring back to — emit just the question.
-    if not any(t["role"] == "user" for t in prior):
+    if not summary and not last_assistant:
         return final_question
 
-    prior = prior[-_CONTEXT_MAX_TURNS:]
-    lines = ["[Earlier in this conversation:"]
-    for turn in prior:
-        label = "User" if turn["role"] == "user" else "Assistant"
-        content = turn["content"]
-        if len(content) > _CONTEXT_PER_TURN_CAP:
-            content = content[:_CONTEXT_PER_TURN_CAP].rstrip() + "…"
-        lines.append(f"{label}: {content}")
-    lines.append("]")
-    lines.append("")
-    lines.append(final_question)
-    return "\n".join(lines)
+    parts: list[str] = []
+    header = "[Earlier in this conversation"
+    if summary:
+        header += " (summary):"
+    else:
+        header += ":"
+    parts.append(header)
+
+    if summary:
+        parts.append("")
+        parts.append(summary.strip())
+
+    if last_assistant:
+        excerpt = last_assistant.strip()
+        if len(excerpt) > _LAST_TURN_CAP:
+            excerpt = excerpt[:_LAST_TURN_CAP].rstrip() + "…"
+        parts.append("")
+        parts.append("Last turn:")
+        parts.append(f"Assistant: {excerpt}")
+
+    parts.append("]")
+    parts.append("")
+    parts.append(final_question)
+    return "\n".join(parts)
+
+
+async def load_trace_conversation_messages(
+    db: Any,
+    trace_ids: list[Any],
+) -> dict[str, list[dict[str, str]]]:
+    """Load the conversation messages the agent fed to its LLM, per trace.
+
+    Returns ``{str(trace_id): [{"role": ..., "content": ...}, ...]}``.
+
+    Pulls the **last** ``llm-generation`` span per trace because that span's
+    ``input.messages`` is the most up-to-date conversation snapshot the agent
+    constructed before producing the response being graded. ``trace.input``
+    on these integrations is typically just the final user question string,
+    so it has no prior turns on its own.
+    """
+    from sqlalchemy import select
+
+    if not trace_ids:
+        return {}
+
+    rows = (
+        await db.execute(
+            select(Span.trace_id, Span.input, Span.created_at)
+            .where(Span.trace_id.in_(trace_ids))
+            .where(Span.name == "llm-generation")
+            .order_by(Span.trace_id, Span.created_at.desc())
+        )
+    ).all()
+
+    by_trace: dict[str, list[dict[str, str]]] = {}
+    for trace_id, span_input, _ in rows:
+        key = str(trace_id)
+        if key in by_trace:
+            continue  # only keep the most recent llm-generation span
+        messages = span_input.get("messages") if isinstance(span_input, dict) else None
+        if not isinstance(messages, list):
+            continue
+        history = _extract_conversation_history(messages)
+        if history:
+            by_trace[key] = history
+    return by_trace
+
+
+async def summarize_conversation(
+    llm_service: Any,
+    turns: list[dict[str, str]],
+) -> str | None:
+    """Use the analysis LLM to compress older conversation turns into 1-2
+    sentences so a follow-up question carries enough context to stand alone.
+
+    Returns ``None`` on any failure — callers should fall through to a
+    bare-prompt suggestion rather than raise.
+    """
+    if not turns:
+        return None
+
+    transcript_lines: list[str] = []
+    for t in turns:
+        label = "User" if t["role"] == "user" else "Assistant"
+        content = t["content"]
+        if len(content) > 1500:
+            content = content[:1500].rstrip() + "…"
+        transcript_lines.append(f"{label}: {content}")
+    transcript = "\n".join(transcript_lines)
+
+    try:
+        content, _usage = await llm_service.tracked_chat_completion(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You summarize the older part of a chat so a follow-up question the "
+                        "user asks next still makes sense without the full transcript. "
+                        "Write 1–2 sentences in the same language as the conversation. "
+                        "State what the user was asking about and the key facts the assistant "
+                        "established. No preamble, no meta-commentary."
+                    ),
+                },
+                {"role": "user", "content": transcript},
+            ],
+            temperature=0.1,
+        )
+        return content.strip() if content else None
+    except Exception:
+        logger.exception("Failed to summarize conversation for suggestion")
+        return None
 
 
 async def load_trace_source_urls(
@@ -356,11 +460,11 @@ def build_suggestions(
         if trace is None:
             continue
 
-        # Carry conversation history into the prompt for multi-turn traces.
-        # Follow-up questions ("kannst du mir dazu Rechtsentscheide zeigen?")
-        # are unusable as standalone test cases without the prior turns —
-        # the reviewer sees the transcript and can edit it before saving.
-        prompt = _build_prompt_with_context(trace.input)
+        # ``trace.input`` is the bare final user message on these integrations
+        # (verified empirically — the multi-turn history lives on the agent's
+        # llm-generation span, not here). The suggestion worker rewrites this
+        # field with a summary + last-turn preamble for multi-turn traces.
+        prompt = _extract_user_prompt(trace.input)
         if not prompt:
             continue
 

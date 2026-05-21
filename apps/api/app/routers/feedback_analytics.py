@@ -276,7 +276,11 @@ async def generate_suggestions(
     """
     from app.db import async_session
     from app.models.feedback_eval import FeedbackSuggestionRun
-    from app.routers.dataset_helpers import build_suggestions, load_trace_source_urls
+    from app.routers.dataset_helpers import (
+        build_suggestions,
+        load_trace_conversation_messages,
+        load_trace_source_urls,
+    )
     from app.routers.feedback_suggestion_worker import (
         _suggestion_tasks,
         run_suggestion_generation,
@@ -322,11 +326,15 @@ async def generate_suggestions(
 
     trace_ids = [trace.id for _fb, trace in rows if trace is not None]
     trace_sources = await load_trace_source_urls(db, trace_ids)
+    trace_messages = await load_trace_conversation_messages(db, trace_ids)
     suggestions = build_suggestions(rows, trace_sources=trace_sources)
 
     feedback_comments: dict[str, str | None] = {}
-    for feedback, _trace in rows:
+    feedback_messages: dict[str, list[dict[str, str]]] = {}
+    for feedback, trace in rows:
         feedback_comments[str(feedback.id)] = feedback.comment
+        if trace is not None:
+            feedback_messages[str(feedback.id)] = trace_messages.get(str(trace.id), [])
     for sug in suggestions:
         sug.comment = feedback_comments.get(str(sug.feedback_id))
 
@@ -336,9 +344,10 @@ async def generate_suggestions(
             detail="No suggestions could be built from feedback in the current filter range.",
         )
 
-    needs_enrichment_count = sum(
-        1 for s in suggestions if s.feedback_value == 0 and not s.suggested_expected_answer
-    )
+    # Progress total now covers every suggestion: each one may need a context
+    # summary, and negatives additionally need criteria. Single-turn
+    # suggestions complete immediately, but counting them keeps the bar truthful.
+    total_steps = len(suggestions)
 
     run = FeedbackSuggestionRun(
         project_id=project.id,
@@ -350,7 +359,7 @@ async def generate_suggestions(
         filter_include_user_ids=inc_uids or None,
         filter_exclude_user_ids=exc_uids or None,
         filter_limit=limit,
-        total=needs_enrichment_count,
+        total=total_steps,
         processed=0,
     )
     db.add(run)
@@ -364,6 +373,7 @@ async def generate_suggestions(
             project_id=project.id,
             suggestions=suggestions,
             feedback_comments=feedback_comments,
+            feedback_messages=feedback_messages,
             user_settings=_user.settings,
             db_factory=async_session,
         )
@@ -473,9 +483,12 @@ async def regenerate_expected_answer(
     initial enrichment so reviewers can re-roll a draft they don't like.
     """
     from app.routers.dataset_helpers import (
-        _build_prompt_with_context,
         _extract_answer,
+        _extract_user_prompt,
+        build_contextualized_prompt,
         generate_expected_answer,
+        load_trace_conversation_messages,
+        summarize_conversation,
     )
 
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
@@ -493,8 +506,8 @@ async def regenerate_expected_answer(
         raise HTTPException(status_code=404, detail="Feedback not found")
 
     feedback, trace = row
-    prompt = _build_prompt_with_context(trace.input)
-    if not prompt:
+    final_question = _extract_user_prompt(trace.input)
+    if not final_question:
         raise HTTPException(status_code=422, detail="Trace input has no extractable user prompt")
 
     actual_answer = _extract_answer(trace.output)
@@ -505,6 +518,17 @@ async def regenerate_expected_answer(
         llm_service = AnalysisLlmService(user_settings=_user.settings)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="LLM is not configured for this user") from exc
+
+    # Match the suggestion-generation flow so re-rolled criteria see the same
+    # context the original draft did. For single-turn traces the contextualized
+    # prompt is just the bare question.
+    trace_messages = await load_trace_conversation_messages(db, [trace.id])
+    history = trace_messages.get(str(trace.id), [])
+    older_turns = [t for t in history if t["content"].strip() != final_question.strip()]
+    if older_turns and older_turns[-1]["role"] == "assistant":
+        older_turns = older_turns[:-1]
+    summary = await summarize_conversation(llm_service, older_turns) if older_turns else None
+    prompt = build_contextualized_prompt(history, final_question, summary=summary)
 
     answer = await generate_expected_answer(
         llm_service,

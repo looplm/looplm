@@ -248,7 +248,7 @@ export function SuggestionReviewModal({
             <div>
               <label className="block text-sm font-medium mb-1">
                 Prompt
-                {form.prompt.includes("[Earlier in this conversation:") && (
+                {form.prompt.includes("[Earlier in this conversation") && (
                   <span className="ml-2 text-xs font-normal text-gray-500 dark:text-slate-400">
                     includes prior conversation — edit as needed
                   </span>

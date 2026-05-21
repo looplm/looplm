@@ -1,11 +1,14 @@
-"""Tests for trace-input → suggestion prompt extraction helpers."""
+"""Tests for trace-input → suggestion prompt helpers."""
 
 from __future__ import annotations
 
+import pytest
+
 from app.routers.dataset_helpers import (
-    _build_prompt_with_context,
     _extract_conversation_history,
     _extract_user_prompt,
+    build_contextualized_prompt,
+    summarize_conversation,
 )
 
 
@@ -47,97 +50,142 @@ def test_history_handles_openai_multipart_content():
     ]
 
 
-def test_history_skips_messages_without_text():
-    history = _extract_conversation_history([
-        {"role": "user", "content": ""},
-        {"role": "user", "content": "real question"},
-    ])
-    assert history == [{"role": "user", "content": "real question"}]
+# ── build_contextualized_prompt ────────────────────────────────
+
+def test_contextualized_empty_messages_returns_bare_question():
+    assert build_contextualized_prompt([], "What is X?") == "What is X?"
 
 
-# ── _build_prompt_with_context ─────────────────────────────────
-
-def test_prompt_single_turn_returns_bare_message():
-    result = _build_prompt_with_context([
-        {"role": "user", "content": "What is the capital of France?"},
-    ])
-    assert result == "What is the capital of France?"
-
-
-def test_prompt_bare_string_returns_as_is():
-    result = _build_prompt_with_context("just a question")
-    assert result == "just a question"
+def test_contextualized_single_user_turn_returns_bare_question():
+    # The conversation contains only the final user message → no preamble.
+    result = build_contextualized_prompt(
+        [{"role": "user", "content": "What is X?"}],
+        "What is X?",
+    )
+    assert result == "What is X?"
 
 
-def test_prompt_falls_back_for_non_conversation_dict():
-    # Dict with a prompt key but no messages array → falls back to bare extraction.
-    result = _build_prompt_with_context({"prompt": "hello there"})
-    assert result == "hello there"
-
-
-def test_prompt_multi_turn_includes_prior_context():
-    result = _build_prompt_with_context([
+def test_contextualized_with_summary_and_last_assistant():
+    messages = [
         {"role": "user", "content": "Was sind die Hauptrisiken von X?"},
         {"role": "assistant", "content": "Die Hauptrisiken sind A, B und C."},
+        {"role": "user", "content": "Und die Fristen?"},
+        {"role": "assistant", "content": "Die Frist beträgt 14 Tage."},
         {"role": "user", "content": "Kannst du mir dazu Rechtsentscheide zeigen?"},
-    ])
-    assert result is not None
-    assert result.startswith("[Earlier in this conversation:")
-    assert "User: Was sind die Hauptrisiken von X?" in result
-    assert "Assistant: Die Hauptrisiken sind A, B und C." in result
-    # Final question is the trailing line, in full.
+    ]
+    result = build_contextualized_prompt(
+        messages,
+        final_question="Kannst du mir dazu Rechtsentscheide zeigen?",
+        summary="Nutzer fragte nach Risiken von X und Fristen.",
+    )
+    assert result.startswith("[Earlier in this conversation (summary):")
+    assert "Nutzer fragte nach Risiken von X und Fristen." in result
+    assert "Last turn:" in result
+    assert "Assistant: Die Frist beträgt 14 Tage." in result
     assert result.endswith("Kannst du mir dazu Rechtsentscheide zeigen?")
 
 
-def test_prompt_truncates_long_prior_turns():
-    long_text = "x" * 2000
-    result = _build_prompt_with_context([
-        {"role": "user", "content": "first question"},
-        {"role": "assistant", "content": long_text},
-        {"role": "user", "content": "follow up"},
-    ])
-    assert result is not None
-    # The long assistant turn must be capped, but the final question is intact.
-    assert "x" * 2000 not in result
-    assert "…" in result
+def test_contextualized_without_summary_still_shows_last_assistant():
+    # No LLM available → no summary, but the last assistant turn is still
+    # carried verbatim so the follow-up's referent is visible.
+    result = build_contextualized_prompt(
+        messages=[
+            {"role": "user", "content": "previous question"},
+            {"role": "assistant", "content": "previous answer"},
+            {"role": "user", "content": "follow up"},
+        ],
+        final_question="follow up",
+        summary=None,
+    )
+    assert result.startswith("[Earlier in this conversation:")
+    assert "(summary)" not in result
+    assert "Assistant: previous answer" in result
     assert result.endswith("follow up")
 
 
-def test_prompt_caps_total_prior_turns():
-    # 10 prior turns; we keep at most _CONTEXT_MAX_TURNS = 6 of them.
-    messages = []
-    for i in range(5):
-        messages.append({"role": "user", "content": f"q{i}"})
-        messages.append({"role": "assistant", "content": f"a{i}"})
-    messages.append({"role": "user", "content": "final"})
-
-    result = _build_prompt_with_context(messages)
-    assert result is not None
-    # Oldest turns must be dropped; newest prior turns retained.
-    assert "q0" not in result
-    assert "a0" not in result
-    assert "q4" in result
-    assert "a4" in result
-    assert result.endswith("final")
+def test_contextualized_truncates_long_last_assistant_turn():
+    long_answer = "x" * 5000
+    result = build_contextualized_prompt(
+        messages=[
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": long_answer},
+            {"role": "user", "content": "follow up"},
+        ],
+        final_question="follow up",
+    )
+    # Final question is intact; long answer is capped.
+    assert result.endswith("follow up")
+    assert "x" * 5000 not in result
+    assert "…" in result
 
 
-def test_prompt_assistant_only_prior_emits_bare_question():
-    # If there is no earlier user message there's nothing the follow-up
-    # could be referring back to — just emit the final question.
-    result = _build_prompt_with_context([
-        {"role": "assistant", "content": "greeting from the bot"},
-        {"role": "user", "content": "what is X?"},
-    ])
-    assert result == "what is X?"
+def test_contextualized_drops_trailing_user_message_matching_question():
+    # The span typically ends with the final user message — we shouldn't
+    # echo it inside the preamble.
+    result = build_contextualized_prompt(
+        messages=[
+            {"role": "user", "content": "earlier question"},
+            {"role": "assistant", "content": "earlier answer"},
+            {"role": "user", "content": "Kannst du mir dazu mehr zeigen?"},
+        ],
+        final_question="Kannst du mir dazu mehr zeigen?",
+        summary="User asked about X.",
+    )
+    # The final question appears exactly once — at the end.
+    assert result.count("Kannst du mir dazu mehr zeigen?") == 1
 
 
 # ── _extract_user_prompt (unchanged behavior) ──────────────────
 
 def test_extract_user_prompt_returns_last_user_message():
-    # Confirm we didn't accidentally change the existing single-turn helper.
     result = _extract_user_prompt([
         {"role": "user", "content": "first"},
         {"role": "assistant", "content": "reply"},
         {"role": "user", "content": "second"},
     ])
     assert result == "second"
+
+
+# ── summarize_conversation (LLM-backed) ────────────────────────
+
+class _FakeLlm:
+    def __init__(self, response: str | None = "summary text"):
+        self.response = response
+        self.calls: list[dict] = []
+
+    async def tracked_chat_completion(self, *, messages, temperature=0.1):
+        self.calls.append({"messages": messages, "temperature": temperature})
+        if self.response is None:
+            raise RuntimeError("simulated LLM failure")
+        return self.response, {"input": 0, "output": 0}
+
+
+@pytest.mark.asyncio
+async def test_summarize_returns_none_for_empty_turns():
+    llm = _FakeLlm()
+    assert await summarize_conversation(llm, []) is None
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_summarize_returns_llm_text_stripped():
+    llm = _FakeLlm(response="  User asked about X.  ")
+    out = await summarize_conversation(llm, [
+        {"role": "user", "content": "What is X?"},
+        {"role": "assistant", "content": "X is Y."},
+    ])
+    assert out == "User asked about X."
+    assert len(llm.calls) == 1
+    # Transcript must include both roles.
+    transcript = llm.calls[0]["messages"][1]["content"]
+    assert "User: What is X?" in transcript
+    assert "Assistant: X is Y." in transcript
+
+
+@pytest.mark.asyncio
+async def test_summarize_returns_none_on_llm_failure():
+    llm = _FakeLlm(response=None)
+    out = await summarize_conversation(llm, [
+        {"role": "user", "content": "What is X?"},
+    ])
+    assert out is None

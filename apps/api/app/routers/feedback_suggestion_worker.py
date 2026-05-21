@@ -21,14 +21,21 @@ async def run_suggestion_generation(
     project_id: UUID,
     suggestions: list[TestCaseSuggestion],
     feedback_comments: dict[str, str | None],
+    feedback_messages: dict[str, list[dict[str, str]]],
     user_settings: dict | None,
     db_factory,
 ) -> None:
-    """Background task that enriches suggestions with LLM-drafted criteria,
-    scores their best-fit dataset, and persists the final list."""
+    """Background task that contextualizes each suggestion against its prior
+    conversation, drafts acceptance criteria for negatives, scores the
+    best-fit dataset, and persists the final list."""
     from app.models.feedback_eval import FeedbackSuggestionRun
     from app.models.models import TestCase, TestDataset
-    from app.routers.dataset_helpers import generate_expected_answer, score_dataset_relevance
+    from app.routers.dataset_helpers import (
+        build_contextualized_prompt,
+        generate_expected_answer,
+        score_dataset_relevance,
+        summarize_conversation,
+    )
     from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
 
     async def _mark_failed(message: str) -> None:
@@ -50,47 +57,70 @@ async def run_suggestion_generation(
         run.started_at = datetime.now(timezone.utc)
         await db.commit()
 
-    # Enrich negatives that lack a drafted expected answer. Each LLM call gets
-    # its own DB session so per-item progress writes don't block one another.
-    needs_enrichment = [
-        s for s in suggestions
-        if s.feedback_value == 0 and not s.suggested_expected_answer
-    ]
-
-    if needs_enrichment:
-        try:
-            llm_service = AnalysisLlmService(user_settings=user_settings)
-        except AnalysisLlmConfigError:
-            # No LLM configured — skip enrichment, finish the rest of the pipeline.
-            logger.info("LLM not configured, skipping expected answer generation")
-            llm_service = None
-    else:
+    try:
+        llm_service = AnalysisLlmService(user_settings=user_settings)
+    except AnalysisLlmConfigError:
+        # No LLM configured — we can still emit bare-prompt suggestions and
+        # skip both contextualization and criteria drafting.
+        logger.info("LLM not configured, skipping context summary and criteria")
         llm_service = None
 
-    async def _enrich_one(sug: TestCaseSuggestion) -> None:
-        if llm_service is None:
-            return
+    async def _bump_processed() -> None:
+        async with db_factory() as db_inner:
+            row = await db_inner.get(FeedbackSuggestionRun, run_id)
+            if row is not None:
+                row.processed = (row.processed or 0) + 1
+                await db_inner.commit()
+
+    async def _process_one(sug: TestCaseSuggestion) -> None:
         try:
-            answer = await generate_expected_answer(
-                llm_service,
-                sug.prompt,
-                sug.actual_answer,
-                feedback_comments.get(str(sug.feedback_id)),
-            )
-            if answer:
-                sug.suggested_expected_answer = answer
+            messages = feedback_messages.get(str(sug.feedback_id), [])
+            # Drop the trailing turn if it's exactly the final user question —
+            # that's the part the suggestion is grading, not prior context.
+            final_question = sug.prompt
+            older_turns = [
+                t for t in messages
+                if t["content"].strip() != final_question.strip()
+            ]
+            if older_turns and older_turns[-1]["role"] == "assistant":
+                # The last assistant turn is shown verbatim — only summarize
+                # what comes before it.
+                to_summarize = older_turns[:-1]
+            else:
+                to_summarize = older_turns
+
+            summary: str | None = None
+            if llm_service is not None and to_summarize:
+                summary = await summarize_conversation(llm_service, to_summarize)
+
+            if messages:
+                sug.prompt = build_contextualized_prompt(
+                    messages, final_question, summary=summary,
+                )
+
+            # Criteria drafting still only applies to negative feedback that
+            # doesn't already have a suggested answer.
+            if (
+                llm_service is not None
+                and sug.feedback_value == 0
+                and not sug.suggested_expected_answer
+            ):
+                answer = await generate_expected_answer(
+                    llm_service,
+                    sug.prompt,
+                    sug.actual_answer,
+                    feedback_comments.get(str(sug.feedback_id)),
+                )
+                if answer:
+                    sug.suggested_expected_answer = answer
         except Exception:
-            logger.exception("LLM enrichment failed for one suggestion; continuing")
+            logger.exception("Suggestion processing failed for one item; continuing")
         finally:
-            async with db_factory() as db_inner:
-                row = await db_inner.get(FeedbackSuggestionRun, run_id)
-                if row is not None:
-                    row.processed = (row.processed or 0) + 1
-                    await db_inner.commit()
+            await _bump_processed()
 
     try:
-        if needs_enrichment and llm_service is not None:
-            await asyncio.gather(*[_enrich_one(s) for s in needs_enrichment])
+        if suggestions:
+            await asyncio.gather(*[_process_one(s) for s in suggestions])
 
         # Smart dataset suggestion: score datasets by metadata overlap.
         async with db_factory() as db:
