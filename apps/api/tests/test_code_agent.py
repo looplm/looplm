@@ -311,15 +311,33 @@ async def test_analyze_eval_run_persists_suggestions(
 
 
 @pytest.mark.asyncio
-async def test_router_rejects_legacy_foundry_provider(
+async def test_router_falls_back_when_provider_is_legacy(
     client,
     db_session,
     test_project: Project,
     auth_headers,
+    monkeypatch,
+    tmp_path: Path,
 ):
-    # Stash a legacy provider value on the project settings.
-    test_project.settings = {"code_agent_provider": "azure_foundry"}
+    # Stash a legacy provider value on the project settings — should be
+    # silently coerced to 'anthropic' (mirroring the Settings UI fallback)
+    # rather than rejected, so users aren't blocked by a stored value the
+    # UI no longer surfaces to them.
+    test_project.settings = {
+        "code_agent_provider": "azure_foundry",
+        "code_agent_api_key": "sk-fake",
+        "code_agent_repo_path": str(tmp_path),
+    }
     await db_session.commit()
+
+    captured: dict[str, object] = {}
+
+    async def fake_analyze_eval_run(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "app.routers.code_agent.analyze_eval_run", fake_analyze_eval_run
+    )
 
     run = EvalRun(
         id=uuid4(),
@@ -337,6 +355,5 @@ async def test_router_rejects_legacy_foundry_provider(
         headers={**auth_headers, "X-Project-Id": str(test_project.id)},
         json={"analysis_mode": "quick"},
     )
-    assert resp.status_code == 400
-    body = resp.json()
-    assert body["detail"]["error"]["code"] == "INVALID_PROVIDER"
+    assert resp.status_code == 202
+    assert captured.get("provider") == "anthropic"

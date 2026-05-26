@@ -115,20 +115,20 @@ async def trigger_code_agent_analysis(
 
     mode = (body.analysis_mode if body else "detailed") or "detailed"
 
-    provider = ps.get("code_agent_provider", "anthropic")
-    if provider not in _SUPPORTED_PROVIDERS:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "INVALID_PROVIDER",
-                    "message": (
-                        f"Code Agent provider {provider!r} is no longer supported. "
-                        "Reconfigure in Settings → supported: openai, anthropic, azure_openai."
-                    ),
-                }
-            },
+    stored_provider = ps.get("code_agent_provider", "anthropic")
+    if stored_provider in _SUPPORTED_PROVIDERS:
+        provider = stored_provider
+    else:
+        # Legacy/unsupported values fall back to the default — matches the
+        # Settings UI, which also displays "anthropic" when the stored value
+        # isn't recognized. Without this the user sees a confusing error
+        # mentioning a provider name they don't remember choosing.
+        logger.warning(
+            "Project %s has unsupported code_agent_provider %r; falling back to 'anthropic'",
+            project.id,
+            stored_provider,
         )
+        provider = "anthropic"
 
     # Create analysis record
     analysis = OpenCodeAnalysis(
