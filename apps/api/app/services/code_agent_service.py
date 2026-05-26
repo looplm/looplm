@@ -211,6 +211,11 @@ async def analyze_eval_run(
                 output_tokens_limit=_QUICK_MODE_OUTPUT_TOKEN_LIMIT if is_quick else None,
             )
 
+            access_log = _describe_code_access(
+                is_quick=is_quick, repo_path=repo_path, deps=deps
+            )
+            await _update_progress(db, analysis, log_entry=access_log)
+
             await _update_progress(
                 db, analysis,
                 progress_message="Agent started...",
@@ -279,6 +284,29 @@ async def analyze_eval_run(
             analysis.completed_at = datetime.now(timezone.utc)
             analysis.progress_message = None
             await db.commit()
+
+
+def _describe_code_access(
+    *, is_quick: bool, repo_path: str | None, deps: RepoContext
+) -> str:
+    """Produce a single log line telling the user whether the agent can read code.
+
+    Surfaces the configured repo, missing-path errors, and quick-mode (no tools)
+    up front so users don't have to guess from later turns whether the model
+    actually has filesystem access.
+    """
+    if is_quick:
+        return "Code access: disabled — quick mode (model reasons from failure context only)"
+    if not repo_path:
+        return "Code access: disabled — no repository configured for this project"
+    root = deps.repo_root
+    if root is None or not root.exists() or not root.is_dir():
+        return f"Code access: unavailable — path not found: {repo_path}"
+    try:
+        top_entries = sum(1 for _ in root.iterdir())
+    except OSError as exc:
+        return f"Code access: unavailable — {repo_path} ({exc.strerror or exc})"
+    return f"Code access: enabled — {root} ({top_entries} top-level entries)"
 
 
 def _summarize_model_response(node: CallToolsNode, turn_count: int) -> tuple[str, str | None]:
