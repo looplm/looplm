@@ -56,6 +56,18 @@ export function SuggestionsTab({
       ? Math.min(100, Math.round((suggestionRun.processed / suggestionRun.total) * 100))
       : null;
 
+  const positiveCount = suggestions.filter((s) => s.feedback_value === 1).length;
+  const negativeCount = suggestions.filter((s) => s.feedback_value === 0).length;
+  const filteredSuggestions =
+    sugFilter === "all"
+      ? suggestions
+      : suggestions.filter((s) =>
+          sugFilter === "positive" ? s.feedback_value === 1 : s.feedback_value === 0,
+        );
+
+  const countFor = (f: "all" | "positive" | "negative") =>
+    f === "all" ? suggestions.length : f === "positive" ? positiveCount : negativeCount;
+
   return (
     <div>
       <div className="flex gap-2 mb-4">
@@ -70,6 +82,7 @@ export function SuggestionsTab({
             }`}
           >
             {f === "all" ? "All Feedback" : f === "positive" ? "Positive" : "Negative"}
+            {suggestions.length > 0 && ` (${countFor(f)})`}
           </button>
         ))}
       </div>
@@ -119,9 +132,22 @@ export function SuggestionsTab({
             {sugGenerated ? "Regenerate" : "Generate Test Cases"}
           </button>
         </div>
+      ) : filteredSuggestions.length === 0 ? (
+        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400 space-y-3">
+          <p>
+            No {sugFilter} suggestions in this batch ({suggestions.length} total). Switch to “All Feedback”
+            or regenerate with a different feedback type.
+          </p>
+          <button
+            onClick={() => setSugFilter("all")}
+            className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 text-sm hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+          >
+            Show all feedback
+          </button>
+        </div>
       ) : (
         <div className="space-y-3">
-          {suggestions.map((sug) => (
+          {filteredSuggestions.map((sug) => (
             <div
               key={sug.feedback_id}
               onClick={() => setSelectedSuggestion(sug)}
