@@ -29,14 +29,23 @@ NEEDS_MORE_INFO = "needs_more_info"
 UNKNOWN = "unknown"
 
 _CLASSIFIER_SYSTEM = (
-    "You classify an assistant's reply in an LLM evaluation. "
-    'Return ONLY a JSON object of the form {"intent": "<value>"}, no prose. '
-    "Allowed values:\n"
-    '- "answer": the assistant attempted to answer the user.\n'
-    '- "clarifying_question": the assistant asked the user a follow-up '
-    "question because it needed more information.\n"
-    '- "refusal": the assistant refused or said it could not answer.\n'
-    '- "other": none of the above.'
+    "You classify what an assistant did in its reply for an LLM evaluation. "
+    'Return ONLY a JSON object of the form {"intent": "<value>"}, no prose.\n'
+    "\n"
+    "Pick the value that describes the reply *as a whole*:\n"
+    '- "clarifying_question": the assistant did NOT answer the user. '
+    "Instead, the entire reply is a question (or set of questions) asking "
+    "the user for missing information needed to answer.\n"
+    '- "refusal": the assistant declined or said it could not / would not '
+    "answer.\n"
+    '- "answer": the assistant attempted to answer the user. Still pick '
+    '"answer" if the reply gives substantive content and only ends with a '
+    "follow-up question, a check-in, or an offer to help further — those "
+    "are not clarifying questions.\n"
+    '- "other": none of the above fits.\n'
+    "\n"
+    'Default to "answer" when uncertain. Only use "clarifying_question" if '
+    "the reply contains no substantive answer at all."
 )
 
 # Keep the classifier prompt short to minimise token cost.
