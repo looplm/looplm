@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { EvalResultItem, EvaluatorItem, ConversationTurn } from "@/lib/api";
-import { sortGraderEntries, sortGraderDetails } from "./eval-utils";
+import { sortGraderEntries, sortGraderDetails, formatScoreValue, formatScoreLabel } from "./eval-utils";
 import { ExpectedOutputDiff, Section, ExpandableBox, CopyButton } from "./eval-components";
 import { GraderResultCard } from "./grader-result-card";
 
@@ -400,8 +400,8 @@ export function TestResultModal({
                   <div className="flex gap-3 flex-wrap">
                     {Object.entries(result.scores).map(([name, val]) => (
                       <div key={name} className="px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
-                        <span className="text-gray-500 dark:text-slate-400">{name}: </span>
-                        <span className="font-medium">{val.toFixed(3)}</span>
+                        <span className="text-gray-500 dark:text-slate-400" title={name}>{formatScoreLabel(name)}: </span>
+                        <span className="font-medium">{formatScoreValue(name, val)}</span>
                       </div>
                     ))}
                   </div>

@@ -10,7 +10,8 @@ import {
   RelevanceBadge,
   SourceBadge,
   formatPercent,
-  formatScore,
+  formatScoreValue,
+  formatScoreLabel,
 } from "./compare-runs-badges";
 
 interface CompareRunsModalProps {
@@ -385,7 +386,7 @@ export function CompareRunsModal({ runs, onClose }: CompareRunsModalProps) {
                             }`}
                           >
                             <span className="font-medium text-gray-900 dark:text-white truncate block max-w-[220px]" title={key}>
-                              {key}
+                              {formatScoreLabel(key)}
                             </span>
                           </td>
                           {sorted.map((run, i) => {
@@ -396,10 +397,10 @@ export function CompareRunsModal({ runs, onClose }: CompareRunsModalProps) {
                                   {score ? (
                                     <div>
                                       <span className="font-medium text-gray-900 dark:text-white">
-                                        {formatScore(score.avg)}
+                                        {formatScoreValue(key, score.avg)}
                                       </span>
                                       <div className="text-[10px] text-gray-400 dark:text-slate-500">
-                                        {formatScore(score.min)}–{formatScore(score.max)}
+                                        {formatScoreValue(key, score.min)}–{formatScoreValue(key, score.max)}
                                       </div>
                                     </div>
                                   ) : (

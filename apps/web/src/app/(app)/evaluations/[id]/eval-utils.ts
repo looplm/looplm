@@ -95,3 +95,5 @@ export function passRateTextColor(passRate: number): string {
 export function graderDisplayName(name: string, evaluatorMap: Record<string, EvaluatorItem>): string {
   return evaluatorMap[name]?.display_name || name;
 }
+
+export { formatScoreValue, formatScoreLabel } from "@/components/compare-runs-badges";

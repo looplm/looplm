@@ -15,7 +15,7 @@ import {
   type EvaluatorItem,
 } from "@/lib/api";
 import { StatCard } from "@/components/eval-shared";
-import { recomputePass, passRateTextColor, graderDisplayName } from "./eval-utils";
+import { recomputePass, passRateTextColor, graderDisplayName, formatScoreValue, formatScoreLabel } from "./eval-utils";
 import { EvalResultsTable } from "./eval-results-table";
 import { TestResultModal } from "./test-result-modal";
 import { CodeSuggestionsTab } from "./code-suggestions-tab";
@@ -456,10 +456,10 @@ export default function EvalRunDetailPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {Object.entries(run.score_summary).map(([name, s]) => (
                   <div key={name} className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
-                    <p className="text-sm text-gray-500 dark:text-slate-400 mb-1">{name}</p>
-                    <p className="text-xl font-bold">{s.avg.toFixed(3)}</p>
+                    <p className="text-sm text-gray-500 dark:text-slate-400 mb-1" title={name}>{formatScoreLabel(name)}</p>
+                    <p className="text-xl font-bold">{formatScoreValue(name, s.avg)}</p>
                     <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
-                      min {s.min.toFixed(3)} / max {s.max.toFixed(3)} ({s.count} samples)
+                      min {formatScoreValue(name, s.min)} / max {formatScoreValue(name, s.max)} ({s.count} samples)
                     </p>
                   </div>
                 ))}

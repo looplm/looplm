@@ -8,6 +8,33 @@ export function formatScore(value: number) {
   return value.toFixed(2);
 }
 
+function formatDurationMs(ms: number): string {
+  const abs = Math.abs(ms);
+  if (abs < 1000) return `${ms.toFixed(0)} ms`;
+  if (abs < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  if (abs < 3_600_000) return `${(ms / 60_000).toFixed(1)} min`;
+  return `${(ms / 3_600_000).toFixed(1)} h`;
+}
+
+/**
+ * Format a score value with unit awareness:
+ * - `*_ms` → ms/s/min/h depending on magnitude
+ * - `*_s` → s/min/h (input is seconds)
+ * - otherwise → 3 decimal places
+ */
+export function formatScoreValue(name: string, value: number): string {
+  if (name.endsWith("_ms")) return formatDurationMs(value);
+  if (name.endsWith("_s")) return formatDurationMs(value * 1000);
+  return value.toFixed(3);
+}
+
+/** Human-friendly label for a score, stripping the unit suffix. */
+export function formatScoreLabel(name: string): string {
+  const stripped = name.replace(/_(ms|s)$/, "").replace(/_/g, " ").trim();
+  if (!stripped) return name;
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
 function passRateColor(rate: number) {
   if (rate >= 0.8) return "bg-green-500";
   if (rate >= 0.5) return "bg-yellow-500";
