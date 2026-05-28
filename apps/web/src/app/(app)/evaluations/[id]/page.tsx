@@ -456,7 +456,9 @@ export default function EvalRunDetailPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {Object.entries(run.score_summary).map(([name, s]) => (
                   <div key={name} className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
-                    <p className="text-sm text-gray-500 dark:text-slate-400 mb-1" title={name}>{formatScoreLabel(name)}</p>
+                    <p className="text-sm text-gray-500 dark:text-slate-400 mb-1" title={name}>
+                      Average {formatScoreLabel(name).toLowerCase()}
+                    </p>
                     <p className="text-xl font-bold">{formatScoreValue(name, s.avg)}</p>
                     <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
                       min {formatScoreValue(name, s.min)} / max {formatScoreValue(name, s.max)} ({s.count} samples)
