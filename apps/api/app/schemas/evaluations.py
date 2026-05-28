@@ -108,9 +108,21 @@ class EvalResultSummary(BaseModel):
     graders: dict[str, GraderResultSummary]
     turns_to_pass: Optional[int] = None
     turn_count: Optional[int] = None
+    failure_pattern: Optional[str] = None
+    grader_pattern: list[str] = Field(default_factory=list)
     created_at: datetime
 
     model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+class ClassifyFailuresResponse(BaseModel):
+    """Response from POST /api/evals/{run_id}/classify-failures."""
+    total: int
+    passed: int
+    failed: int
+    pass_rate: float
+    classified: int
+    failure_pattern_summary: dict[str, int] = Field(default_factory=dict)
 
 
 class EvalResultItem(BaseModel):

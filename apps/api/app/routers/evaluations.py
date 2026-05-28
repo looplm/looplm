@@ -1,6 +1,7 @@
 """Evaluation run endpoints."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from math import ceil
@@ -11,11 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, require_section, require_write
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
-from app.models.models import EvalResult, EvalRun
+from app.models.models import EvalResult, EvalRun, Evaluator
 from app.models.project import Project
+from app.models.user import User
 from app.schemas.evaluations import (
+    ClassifyFailuresResponse,
     EvalImportRequest,
     EvalResultItem,
     EvalResultSummary,
@@ -28,6 +31,8 @@ from app.schemas.evaluations import (
     PaginationInfo,
     ScoreSummaryItem,
 )
+from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
+from app.services.failure_pattern import aggregate_run_patterns, compute_failure_pattern
 
 def _enrich_result_metadata(meta: dict[str, Any] | None) -> dict[str, Any]:
     """Enrich eval result metadata with retrieval_context extracted from raw_response."""
@@ -200,6 +205,18 @@ def _turn_count(metadata: dict[str, Any] | None) -> int | None:
     return None
 
 
+def _grader_pattern(metadata: dict[str, Any] | None) -> list[str]:
+    val = (metadata or {}).get("grader_pattern")
+    if isinstance(val, list):
+        return [str(x) for x in val]
+    return []
+
+
+def _failure_pattern(metadata: dict[str, Any] | None) -> str | None:
+    val = (metadata or {}).get("failure_pattern")
+    return str(val) if val else None
+
+
 @router.get("/{run_id}", response_model=EvalRunDetail)
 async def get_eval_run(
     run_id: UUID,
@@ -257,6 +274,8 @@ async def get_eval_run(
                 graders=_summarize_graders(r.graders),
                 turns_to_pass=r.turns_to_pass,
                 turn_count=_turn_count(r.result_metadata),
+                failure_pattern=_failure_pattern(r.result_metadata),
+                grader_pattern=_grader_pattern(r.result_metadata),
                 created_at=r.created_at,
             )
             for r in rows
@@ -345,6 +364,99 @@ async def get_eval_run_stats(
         pass_rate=passed / total if total > 0 else 0.0,
         grader_summary={k: GraderSummaryItem(**v) for k, v in grader_summary.items()},
         score_summary={k: ScoreSummaryItem(**v) for k, v in score_summary.items()},
+    )
+
+
+@router.post(
+    "/{run_id}/classify-failures",
+    response_model=ClassifyFailuresResponse,
+    dependencies=[require_write("evaluate", "evaluations")],
+)
+async def classify_eval_failures(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    _user: User = Depends(get_current_user),
+):
+    """Compute or refresh ``failure_pattern`` for every failed result in this run.
+
+    Idempotent: overwrites existing pattern fields on each failed result.
+    Returns the updated run stats + ``failure_pattern_summary``.
+    """
+    run = (await db.execute(
+        select(EvalRun).where(EvalRun.id == run_id, EvalRun.project_id == project.id)
+    )).scalar_one_or_none()
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Eval run not found"}},
+        )
+
+    failed_results = list((await db.execute(
+        select(EvalResult).where(EvalResult.run_id == run.id, EvalResult.pass_ == False)  # noqa: E712
+    )).scalars().all())
+
+    if not failed_results:
+        run.run_metadata = {
+            **(run.run_metadata or {}),
+            "failure_pattern_summary": {},
+        }
+        await db.commit()
+        pass_rate = run.passed / run.total if run.total > 0 else 0.0
+        return ClassifyFailuresResponse(
+            total=run.total,
+            passed=run.passed,
+            failed=run.failed,
+            pass_rate=pass_rate,
+            classified=0,
+            failure_pattern_summary={},
+        )
+
+    evaluators = list((await db.execute(
+        select(Evaluator).where(Evaluator.project_id == project.id)
+    )).scalars().all())
+    affects_pass_map = {e.name: e.affects_pass for e in evaluators}
+
+    llm: AnalysisLlmService | None
+    try:
+        llm = AnalysisLlmService(user_settings=dict(_user.settings or {}))
+    except AnalysisLlmConfigError as exc:
+        logger.info("Classifying failures without LLM (config error: %s)", exc)
+        llm = None
+
+    sem = asyncio.Semaphore(8)
+
+    async def _classify_one(result: EvalResult) -> str | None:
+        async with sem:
+            patch, _usage = await compute_failure_pattern(
+                pass_=result.pass_,
+                graders=result.graders,
+                output=result.output,
+                affects_pass_map=affects_pass_map,
+                llm=llm,
+            )
+        if patch:
+            result.result_metadata = {**(result.result_metadata or {}), **patch}
+        return patch.get("failure_pattern")
+
+    patterns = await asyncio.gather(*(_classify_one(r) for r in failed_results))
+
+    summary = aggregate_run_patterns(patterns)
+    run.run_metadata = {
+        **(run.run_metadata or {}),
+        "failure_pattern_summary": summary,
+    }
+
+    await db.commit()
+
+    pass_rate = run.passed / run.total if run.total > 0 else 0.0
+    return ClassifyFailuresResponse(
+        total=run.total,
+        passed=run.passed,
+        failed=run.failed,
+        pass_rate=pass_rate,
+        classified=len(failed_results),
+        failure_pattern_summary=summary,
     )
 
 

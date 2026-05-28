@@ -4,6 +4,7 @@
  */
 
 import type {
+  ClassifyFailuresResponse,
   EvalResultItem,
   EvalRunListResponse,
   EvalRunDetail,
@@ -50,6 +51,11 @@ export const importEvalRun = (body: unknown) =>
 
 export const deleteEvalRun = (id: string) =>
   request<void>(`/api/evals/${id}`, { method: "DELETE" });
+
+export const classifyEvalFailures = (id: string) =>
+  request<ClassifyFailuresResponse>(`/api/evals/${id}/classify-failures`, {
+    method: "POST",
+  });
 
 export const getEvalReport = (id: string) =>
   request<EvalReportResponse>(`/api/evals/${id}/report`);

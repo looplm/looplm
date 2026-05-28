@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
+  classifyEvalFailures,
   getEvalRun,
   getEvalResult,
   getEvaluators,
@@ -20,6 +21,7 @@ import { TestResultModal } from "./test-result-modal";
 import { CodeSuggestionsTab } from "./code-suggestions-tab";
 import { toast } from "sonner";
 import { RelevanceFilterDropdown } from "@/components/relevance-filter-dropdown";
+import FilterComboBox from "@/components/filter-combo-box";
 
 type Filter = "all" | "passed" | "failed";
 type Tab = "results" | "suggestions";
@@ -42,6 +44,9 @@ export default function EvalRunDetailPage() {
   const [reportLoading, setReportLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [patternFilter, setPatternFilter] = useState<string[]>([]);
+  const [patternMode, setPatternMode] = useState<"include" | "exclude">("include");
+  const [classifying, setClassifying] = useState(false);
   useEffect(() => {
     setLoading(true);
     Promise.all([getEvalRun(id), getEvaluators()])
@@ -98,19 +103,38 @@ export default function EvalRunDetailPage() {
     }));
   }, [run, disabledGraders]);
 
+  const patternFiltered = useMemo(() => {
+    if (patternFilter.length === 0) return computedResults;
+    const set = new Set(patternFilter);
+    if (patternMode === "include") {
+      // Keep only failed results whose pattern matches.
+      return computedResults.filter((r) => r.failure_pattern && set.has(r.failure_pattern));
+    }
+    // Exclude: drop failed results whose pattern matches; passed tests stay.
+    return computedResults.filter((r) => !r.failure_pattern || !set.has(r.failure_pattern));
+  }, [computedResults, patternFilter, patternMode]);
+
   const filteredResults = useMemo(() => {
-    if (filter === "all") return computedResults;
-    return computedResults.filter((r) =>
+    if (filter === "all") return patternFiltered;
+    return patternFiltered.filter((r) =>
       filter === "passed" ? r.pass : !r.pass
     );
-  }, [computedResults, filter]);
+  }, [patternFiltered, filter]);
 
   const computedStats = useMemo(() => {
-    const total = computedResults.length;
-    const passed = computedResults.filter((r) => r.pass).length;
+    const total = patternFiltered.length;
+    const passed = patternFiltered.filter((r) => r.pass).length;
     const failed = total - passed;
     return { total, passed, failed, passRate: total > 0 ? passed / total : 0 };
-  }, [computedResults]);
+  }, [patternFiltered]);
+
+  const failurePatternSummary = useMemo(() => {
+    const fromRun = run?.metadata?.failure_pattern_summary;
+    if (fromRun && typeof fromRun === "object") {
+      return fromRun as Record<string, number>;
+    }
+    return null;
+  }, [run]);
 
   const handleSelectResult = useCallback(
     async (summary: EvalResultSummary) => {
@@ -134,6 +158,20 @@ export default function EvalRunDetailPage() {
       router.push(`/evaluations/jobs?highlight=${res.job_id}`);
     } catch {
       setRerunning(false);
+    }
+  }
+
+  async function handleClassifyFailures() {
+    setClassifying(true);
+    try {
+      await classifyEvalFailures(id);
+      const refreshed = await getEvalRun(id);
+      setRun(refreshed);
+      toast.success("Failures classified");
+    } catch (err: any) {
+      toast.error("Failed to classify failures", { description: err?.message });
+    } finally {
+      setClassifying(false);
     }
   }
 
@@ -193,6 +231,20 @@ export default function EvalRunDetailPage() {
             </span>
           )}
           <div className="ml-auto flex items-center gap-2">
+            {run.failed > 0 && (
+              <button
+                onClick={handleClassifyFailures}
+                disabled={classifying}
+                title="Classify each failure by which grader failed (and detect when the assistant asked a clarifying question)"
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {classifying
+                  ? "Classifying..."
+                  : failurePatternSummary
+                    ? "Reclassify failures"
+                    : "Classify failures"}
+              </button>
+            )}
             {run.source === "triggered" && (
               <button
                 onClick={handleRerun}
@@ -324,6 +376,39 @@ export default function EvalRunDetailPage() {
               />
             )}
           </div>
+
+          {/* Failure pattern filter (only when the run has been classified) */}
+          {failurePatternSummary && Object.keys(failurePatternSummary).length > 0 && (
+            <div className="mb-4 flex flex-wrap items-end gap-3">
+              <FilterComboBox
+                label="Failure pattern"
+                placeholder="Filter by failure pattern..."
+                options={Object.entries(failurePatternSummary)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([name, count]) => `${name} (${count})`)
+                  .concat()}
+                selected={patternFilter.map((name) => {
+                  const count = failurePatternSummary[name];
+                  return count != null ? `${name} (${count})` : name;
+                })}
+                onSelectedChange={(values) => {
+                  // Strip the trailing " (count)" suffix that we add for display.
+                  setPatternFilter(values.map((v) => v.replace(/\s*\(\d+\)\s*$/, "")));
+                }}
+                mode={patternMode}
+                onModeChange={setPatternMode}
+                allowFreeText={false}
+              />
+              {patternFilter.length > 0 && (
+                <button
+                  onClick={() => setPatternFilter([])}
+                  className="text-xs text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200 underline mb-1"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Filter */}
           <div className="flex items-center gap-2 mb-4">

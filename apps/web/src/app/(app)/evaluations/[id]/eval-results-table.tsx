@@ -185,8 +185,17 @@ export function EvalResultsTable({
                     const failed = active.filter(([, g]) => !g.pass && !g.skipped);
                     const skipped = active.filter(([, g]) => g.skipped);
                     const passed = active.filter(([, g]) => g.pass && !g.skipped);
+                    const needsInfo = result.failure_pattern === "needs_more_info";
                     return (
                       <div className="flex gap-1 flex-wrap">
+                        {needsInfo && (
+                          <span
+                            className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
+                            title="Assistant asked a clarifying question instead of answering"
+                          >
+                            Needs more info
+                          </span>
+                        )}
                         {failed.map(([name, g]) => (
                           <span
                             key={name}

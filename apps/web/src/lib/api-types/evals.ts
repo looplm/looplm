@@ -69,7 +69,18 @@ export interface EvalResultSummary {
   graders: Record<string, GraderResultSummary>;
   turns_to_pass?: number | null;
   turn_count?: number | null;
+  failure_pattern?: string | null;
+  grader_pattern?: string[];
   created_at: string;
+}
+
+export interface ClassifyFailuresResponse {
+  total: number;
+  passed: number;
+  failed: number;
+  pass_rate: number;
+  classified: number;
+  failure_pattern_summary: Record<string, number>;
 }
 
 export interface EvalResultItem {

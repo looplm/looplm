@@ -31,6 +31,7 @@ from app.routers.eval_helpers import _compute_summaries
 from app.schemas.evaluations import EvalResultImport
 from app.services.analysis_llm import AnalysisLlmService
 from app.services.eval_executor_helpers import _evaluate_single_test_case
+from app.services.failure_pattern import aggregate_run_patterns, compute_failure_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ async def run_eval(
         )
         evaluators = list(ev_result.scalars().all())
         _log(f"Loaded {len(evaluators)} enabled evaluators")
+        affects_pass_map = {e.name: e.affects_pass for e in evaluators}
 
         # Initialize LLM service if needed
         llm: AnalysisLlmService | None = None
@@ -236,6 +238,24 @@ async def run_eval(
                     suffix = " [filtered]" if fm == "as_configured" else " [unfiltered]"
                     r = r.model_copy(update={"test_id": r.test_id + suffix})
 
+                # Classify failure pattern (grader-derived + optional clarifying-question LLM check)
+                if not r.pass_:
+                    graders_for_pattern = {
+                        k: {"pass": v.pass_, "skipped": v.skipped}
+                        for k, v in r.graders.items()
+                    }
+                    pattern_patch, classifier_usage = await compute_failure_pattern(
+                        pass_=r.pass_,
+                        graders=graders_for_pattern,
+                        output=r.output,
+                        affects_pass_map=affects_pass_map,
+                        llm=llm,
+                    )
+                    if pattern_patch:
+                        r.metadata.update(pattern_patch)
+                    if classifier_usage is not None:
+                        llm_usages.append(("eval_pattern_classifier", classifier_usage))
+
                 # Serialize all DB operations — async sessions aren't concurrency-safe
                 async with db_lock:
                     completed += 1
@@ -327,6 +347,16 @@ async def run_eval(
                 **(run.run_metadata or {}),
                 "avg_turns_to_pass": round(sum(multi_turn_passes) / len(multi_turn_passes), 2),
                 "multi_turn_test_count": multi_turn_tests,
+            }
+
+        # Failure-pattern summary (counts of failure_pattern across failed results)
+        failure_pattern_summary = aggregate_run_patterns(
+            r.metadata.get("failure_pattern") for r in eval_results if not r.pass_
+        )
+        if failure_pattern_summary:
+            run.run_metadata = {
+                **(run.run_metadata or {}),
+                "failure_pattern_summary": failure_pattern_summary,
             }
 
         # Update job
