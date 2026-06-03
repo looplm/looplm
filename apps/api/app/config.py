@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     eval_target_endpoint: str = ""
     eval_default_concurrency: int = 2
 
+    # Sync — max traces fetched per sync run (bounds the time-window pagination)
+    sync_max_traces: int = 5000
+
     # Auto-grading
     auto_grade_enabled: bool = False
     auto_grade_interval_minutes: int = 5

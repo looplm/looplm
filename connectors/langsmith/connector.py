@@ -239,10 +239,16 @@ class LangSmithConnector(BaseConnector):
         self,
         since: datetime,
         on_progress: ProgressCallback | None = None,
+        limit: int = 5000,
         enrich_limit: int = 3,
     ) -> list[dict[str, Any]]:
         """Full sync: fetch traces and enrich the most recent ones with child runs."""
-        raw_traces = await self.fetch_traces(since, on_progress=on_progress)
+        raw_traces = await self.fetch_traces(since, limit=limit, on_progress=on_progress)
+        if len(raw_traces) >= limit:
+            logger.warning(
+                "LangSmith sync hit the %d-trace cap; older traces in the window were not synced",
+                limit,
+            )
 
         async def _enrich(trace: dict[str, Any]) -> dict[str, Any]:
             try:

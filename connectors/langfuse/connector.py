@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from dateutil.parser import isoparse
@@ -221,10 +221,16 @@ class LangfuseConnector(BaseConnector):
         self,
         since: datetime,
         on_progress: ProgressCallback | None = None,
+        limit: int = 5000,
     ) -> list[dict[str, Any]]:
         """Full sync: fetch traces and enrich with observations."""
-        raw_traces = await self.fetch_traces(since, on_progress=on_progress)
+        raw_traces = await self.fetch_traces(since, limit=limit, on_progress=on_progress)
         total = len(raw_traces)
+        if total >= limit:
+            logger.warning(
+                "Langfuse sync hit the %d-trace cap; older traces in the window were not synced",
+                limit,
+            )
         if on_progress is not None:
             await on_progress(SyncProgress(
                 phase="processing_traces",

@@ -55,6 +55,7 @@ class BaseConnector(ABC):
         self,
         since: datetime,
         on_progress: ProgressCallback | None = None,
+        limit: int = 5000,
     ) -> list[dict[str, Any]]:
         """Full sync flow: fetch traces, normalize, and return raw traces."""
         ...

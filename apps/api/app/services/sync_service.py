@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.encryption import decrypt_api_key
 from app.models.models import FeedbackScore, Integration, IntegrationType, Span, SyncStatus, Trace
 from connectors.base import SyncProgress
@@ -84,7 +85,7 @@ async def run_sync(integration_id: UUID, db: AsyncSession, *, since_override: da
                 integration.sync_progress_current = p.current
             await db.commit()
 
-        raw_traces = await connector.sync(since, on_progress=on_progress)
+        raw_traces = await connector.sync(since, on_progress=on_progress, limit=settings.sync_max_traces)
 
         integration.sync_phase = "processing_traces"
         integration.sync_message = f"Storing {len(raw_traces)} traces"

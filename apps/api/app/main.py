@@ -41,6 +41,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Reconcile syncs orphaned by a previous restart/crash: their in-process
+    # background task is gone, but the row is still 'syncing' and would spin
+    # the UI's progress bar forever. Mark them as errored so they can be retried.
+    from sqlalchemy import update as _sa_update
+    from app.db import async_session
+    from app.models.models import Integration, SyncStatus
+    async with async_session() as session:
+        result = await session.execute(
+            _sa_update(Integration)
+            .where(Integration.sync_status == SyncStatus.syncing)
+            .values(
+                sync_status=SyncStatus.error,
+                last_sync_error="Sync interrupted by server restart",
+                sync_progress_current=None,
+                sync_progress_total=None,
+                sync_started_at=None,
+                sync_phase=None,
+                sync_message=None,
+                sync_since=None,
+            )
+        )
+        await session.commit()
+        if result.rowcount:
+            logger.warning("Reconciled %d sync(s) orphaned by restart", result.rowcount)
+
     # Start batch eval poller
     from app.services.batch_poller import start_batch_poller, stop_batch_poller
     await start_batch_poller()
