@@ -14,7 +14,7 @@ from app.config import settings
 from app.routers import (
     admin, analysis, advisor, auth_router, costs_overview, dashboard, datasets, evaluations,
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
-    ingest, ingest_keys, integrations, langsmith, llm_costs, code_agent, permissions,
+    ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent, permissions,
     project_members, projects, prompts, route_analysis, trace_detail, traces, user_settings,
     version,
 )
@@ -151,6 +151,7 @@ app.include_router(analysis.router)
 app.include_router(langsmith.router)
 app.include_router(graph.router)
 app.include_router(route_analysis.router)
+app.include_router(issues.router)
 app.include_router(advisor.router)
 app.include_router(prompts.router)
 app.include_router(evaluations.router)
