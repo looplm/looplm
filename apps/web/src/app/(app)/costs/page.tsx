@@ -18,6 +18,16 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+// Friendly labels for known platform function names; falls back to the raw name.
+const FUNCTION_LABELS: Record<string, string> = {
+  eval_root_cause: "Root-cause analysis",
+  eval_pattern_classifier: "Failure-pattern classifier",
+};
+
+function functionLabel(name: string): string {
+  return FUNCTION_LABELS[name] ?? name;
+}
+
 type CostView = "all" | "application" | "platform";
 
 export default function CostsPage() {
@@ -178,7 +188,7 @@ export default function CostsPage() {
                             return s.by_detail!.map((d) => (
                               <tr key={`${s.service_name}-${d.function_name}-${d.model}`} className="border-t border-gray-50/50 dark:border-slate-800/50">
                                 <td className="py-1.5 pl-4 font-mono text-xs text-gray-400 dark:text-slate-500">
-                                  {hasMultipleFns ? `${d.function_name} · ${d.model}` : d.model}
+                                  {hasMultipleFns ? `${functionLabel(d.function_name)} · ${d.model}` : d.model}
                                 </td>
                                 <td className="py-1.5 text-right text-xs text-gray-400 dark:text-slate-500">{d.request_count.toLocaleString()}</td>
                                 <td className="py-1.5 text-right text-xs text-gray-400 dark:text-slate-500">

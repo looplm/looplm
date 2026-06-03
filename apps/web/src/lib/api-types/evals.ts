@@ -71,7 +71,17 @@ export interface EvalResultSummary {
   turn_count?: number | null;
   failure_pattern?: string | null;
   grader_pattern?: string[];
+  root_cause?: string | null;
   created_at: string;
+}
+
+/** Stored on EvalResultItem.metadata.root_cause — the full attribution detail. */
+export interface RootCauseDetail {
+  category: "retrieval" | "generation" | "task_spec" | "indeterminate";
+  confidence: "high" | "low";
+  source: "deterministic" | "llm";
+  evidence: string;
+  missing_facts?: string[];
 }
 
 export interface ClassifyFailuresResponse {

@@ -11,9 +11,11 @@ from app.models.models import Evaluator, EvaluatorType
 from app.services.failure_pattern import (
     NEEDS_MORE_INFO,
     UNKNOWN,
+    aggregate_root_causes,
     aggregate_run_patterns,
     classify_assistant_intent,
     compute_failure_pattern,
+    compute_root_cause,
     derive_grader_pattern,
 )
 
@@ -192,6 +194,154 @@ def test_aggregate_run_patterns_counts_and_ignores_none():
 
 def test_aggregate_run_patterns_empty():
     assert aggregate_run_patterns([]) == {}
+
+
+# ---------------------------------------------------------------------------
+# compute_root_cause — retrieval vs generation attribution
+# ---------------------------------------------------------------------------
+
+class _SufficiencyLlm:
+    """Stub returning a fixed context-sufficiency verdict; counts calls."""
+
+    def __init__(self, sufficiency: str, missing: list[str] | None = None) -> None:
+        self._payload = {"sufficiency": sufficiency, "missing_facts": missing or []}
+        self.calls = 0
+
+    async def tracked_chat_completion(self, *args: Any, **kwargs: Any):
+        self.calls += 1
+        return json.dumps(self._payload), None
+
+
+@pytest.mark.asyncio
+async def test_root_cause_passed_test_returns_empty():
+    patch, usage = await compute_root_cause(
+        pass_=True, grader_pattern=[], affects_pass_map={},
+        question="q", output="a", expected="e",
+        retrieval_context="ctx", llm=None,
+    )
+    assert patch == {} and usage is None
+
+
+@pytest.mark.asyncio
+async def test_root_cause_gate_no_retrieval_is_indeterminate():
+    llm = _SufficiencyLlm("insufficient")
+    patch, usage = await compute_root_cause(
+        pass_=False, grader_pattern=["faithfulness"],
+        affects_pass_map={"faithfulness": True},
+        question="q", output="a", expected="e",
+        retrieval_context="", llm=llm,
+    )
+    assert patch["root_cause"]["category"] == "indeterminate"
+    assert patch["root_cause"]["source"] == "deterministic"
+    assert llm.calls == 0  # gated before any LLM call
+    assert usage is None
+
+
+@pytest.mark.asyncio
+async def test_root_cause_deterministic_retrieval_from_grader():
+    """A failing retrieval grader → retrieval, no LLM needed. camelCase name."""
+    llm = _SufficiencyLlm("sufficient")
+    patch, _ = await compute_root_cause(
+        pass_=False, grader_pattern=["sourceRetrieval"],
+        affects_pass_map={"sourceRetrieval": True, "faithfulness": True},
+        question="q", output="a", expected="e",
+        retrieval_context="some context", llm=llm,
+    )
+    assert patch["root_cause"]["category"] == "retrieval"
+    assert patch["root_cause"]["confidence"] == "high"
+    assert llm.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_root_cause_deterministic_retrieval_snake_case():
+    """snake_case grader names normalise to the same signal."""
+    patch, _ = await compute_root_cause(
+        pass_=False, grader_pattern=["source_retrieval"],
+        affects_pass_map={"source_retrieval": True},
+        question="q", output="a", expected="e",
+        retrieval_context="some context", llm=None,
+    )
+    assert patch["root_cause"]["category"] == "retrieval"
+
+
+@pytest.mark.asyncio
+async def test_root_cause_deterministic_generation_when_retrieval_grader_passed():
+    """Grounding grader failed while a configured retrieval grader passed → generation."""
+    llm = _SufficiencyLlm("sufficient")
+    patch, _ = await compute_root_cause(
+        pass_=False, grader_pattern=["faithfulness"],
+        affects_pass_map={"sourceRetrieval": True, "faithfulness": True},
+        question="q", output="a", expected="e",
+        retrieval_context="some context", llm=llm,
+    )
+    assert patch["root_cause"]["category"] == "generation"
+    assert patch["root_cause"]["confidence"] == "high"
+    assert llm.calls == 0  # resolved deterministically
+
+
+@pytest.mark.asyncio
+async def test_root_cause_llm_insufficient_context_is_retrieval():
+    """No retrieval grader configured → ambiguous → judge says insufficient → retrieval."""
+    llm = _SufficiencyLlm("insufficient", missing=["the launch date"])
+    patch, usage = await compute_root_cause(
+        pass_=False, grader_pattern=["faithfulness"],
+        affects_pass_map={"faithfulness": True},
+        question="q", output="a", expected="e",
+        retrieval_context="some context", llm=llm,
+    )
+    assert patch["root_cause"]["category"] == "retrieval"
+    assert patch["root_cause"]["source"] == "llm"
+    assert patch["root_cause"]["missing_facts"] == ["the launch date"]
+    assert llm.calls == 1
+    assert usage is None  # stub returns None usage
+
+
+@pytest.mark.asyncio
+async def test_root_cause_llm_sufficient_context_with_grounding_failure_is_generation():
+    llm = _SufficiencyLlm("sufficient")
+    patch, _ = await compute_root_cause(
+        pass_=False, grader_pattern=["faithfulness"],
+        affects_pass_map={"faithfulness": True},
+        question="q", output="a", expected="e",
+        retrieval_context="some context", llm=llm,
+    )
+    assert patch["root_cause"]["category"] == "generation"
+    assert patch["root_cause"]["source"] == "llm"
+
+
+@pytest.mark.asyncio
+async def test_root_cause_llm_sufficient_context_no_grounding_failure_is_task_spec():
+    llm = _SufficiencyLlm("sufficient")
+    patch, _ = await compute_root_cause(
+        pass_=False, grader_pattern=["answerRelevance"],
+        affects_pass_map={"answerRelevance": True},
+        question="q", output="a", expected="e",
+        retrieval_context="some context", llm=llm,
+    )
+    assert patch["root_cause"]["category"] == "task_spec"
+
+
+@pytest.mark.asyncio
+async def test_root_cause_ambiguous_without_llm_is_low_confidence_indeterminate():
+    patch, usage = await compute_root_cause(
+        pass_=False, grader_pattern=["answerRelevance"],
+        affects_pass_map={"answerRelevance": True},
+        question="q", output="a", expected="e",
+        retrieval_context="some context", llm=None,
+    )
+    assert patch["root_cause"]["category"] == "indeterminate"
+    assert patch["root_cause"]["confidence"] == "low"
+    assert usage is None
+
+
+def test_aggregate_root_causes_counts_and_ignores_none():
+    assert aggregate_root_causes(
+        ["retrieval", "retrieval", "generation", None]
+    ) == {"retrieval": 2, "generation": 1}
+
+
+def test_aggregate_root_causes_empty():
+    assert aggregate_root_causes([]) == {}
 
 
 # ---------------------------------------------------------------------------

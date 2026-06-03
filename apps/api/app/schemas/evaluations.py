@@ -110,6 +110,7 @@ class EvalResultSummary(BaseModel):
     turn_count: Optional[int] = None
     failure_pattern: Optional[str] = None
     grader_pattern: list[str] = Field(default_factory=list)
+    root_cause: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True, "populate_by_name": True}

@@ -31,7 +31,12 @@ from app.routers.eval_helpers import _compute_summaries
 from app.schemas.evaluations import EvalResultImport
 from app.services.analysis_llm import AnalysisLlmService
 from app.services.eval_executor_helpers import _evaluate_single_test_case
-from app.services.failure_pattern import aggregate_run_patterns, compute_failure_pattern
+from app.services.failure_pattern import (
+    aggregate_root_causes,
+    aggregate_run_patterns,
+    compute_failure_pattern,
+    compute_root_cause,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +261,22 @@ async def run_eval(
                     if classifier_usage is not None:
                         llm_usages.append(("eval_pattern_classifier", classifier_usage))
 
+                    # Attribute the failure to the retrieval or generation stage
+                    root_cause_patch, root_cause_usage = await compute_root_cause(
+                        pass_=r.pass_,
+                        grader_pattern=pattern_patch.get("grader_pattern", []),
+                        affects_pass_map=affects_pass_map,
+                        question=r.input,
+                        output=r.output,
+                        expected=r.expected_output,
+                        retrieval_context=r.metadata.get("retrieval_context"),
+                        llm=llm,
+                    )
+                    if root_cause_patch:
+                        r.metadata.update(root_cause_patch)
+                    if root_cause_usage is not None:
+                        llm_usages.append(("eval_root_cause", root_cause_usage))
+
                 # Serialize all DB operations — async sessions aren't concurrency-safe
                 async with db_lock:
                     completed += 1
@@ -357,6 +378,17 @@ async def run_eval(
             run.run_metadata = {
                 **(run.run_metadata or {}),
                 "failure_pattern_summary": failure_pattern_summary,
+            }
+
+        # Root-cause summary (retrieval vs generation vs spec, across failed results)
+        root_cause_summary = aggregate_root_causes(
+            (r.metadata.get("root_cause") or {}).get("category")
+            for r in eval_results if not r.pass_
+        )
+        if root_cause_summary:
+            run.run_metadata = {
+                **(run.run_metadata or {}),
+                "root_cause_summary": root_cause_summary,
             }
 
         # Update job

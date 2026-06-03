@@ -217,6 +217,14 @@ def _failure_pattern(metadata: dict[str, Any] | None) -> str | None:
     return str(val) if val else None
 
 
+def _root_cause_category(metadata: dict[str, Any] | None) -> str | None:
+    rc = (metadata or {}).get("root_cause")
+    if isinstance(rc, dict):
+        cat = rc.get("category")
+        return str(cat) if cat else None
+    return None
+
+
 @router.get("/{run_id}", response_model=EvalRunDetail)
 async def get_eval_run(
     run_id: UUID,
@@ -276,6 +284,7 @@ async def get_eval_run(
                 turn_count=_turn_count(r.result_metadata),
                 failure_pattern=_failure_pattern(r.result_metadata),
                 grader_pattern=_grader_pattern(r.result_metadata),
+                root_cause=_root_cause_category(r.result_metadata),
                 created_at=r.created_at,
             )
             for r in rows

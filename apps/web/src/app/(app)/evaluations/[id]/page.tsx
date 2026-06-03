@@ -15,7 +15,7 @@ import {
   type EvaluatorItem,
 } from "@/lib/api";
 import { StatCard } from "@/components/eval-shared";
-import { recomputePass, passRateTextColor, graderDisplayName, formatScoreValue, formatScoreLabel } from "./eval-utils";
+import { recomputePass, passRateTextColor, graderDisplayName, formatScoreValue, formatScoreLabel, rootCauseStyle } from "./eval-utils";
 import { EvalResultsTable } from "./eval-results-table";
 import { TestResultModal } from "./test-result-modal";
 import { CodeSuggestionsTab } from "./code-suggestions-tab";
@@ -130,6 +130,14 @@ export default function EvalRunDetailPage() {
 
   const failurePatternSummary = useMemo(() => {
     const fromRun = run?.metadata?.failure_pattern_summary;
+    if (fromRun && typeof fromRun === "object") {
+      return fromRun as Record<string, number>;
+    }
+    return null;
+  }, [run]);
+
+  const rootCauseSummary = useMemo(() => {
+    const fromRun = run?.metadata?.root_cause_summary;
     if (fromRun && typeof fromRun === "object") {
       return fromRun as Record<string, number>;
     }
@@ -376,6 +384,36 @@ export default function EvalRunDetailPage() {
               />
             )}
           </div>
+
+          {/* Root-cause breakdown (retrieval vs generation vs spec) */}
+          {rootCauseSummary && Object.keys(rootCauseSummary).length > 0 && (
+            <div className="mb-4 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold">Failure root cause</h3>
+                <span className="text-xs text-gray-400 dark:text-slate-500">
+                  Where failing tests broke
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(rootCauseSummary)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([category, count]) => {
+                    const style = rootCauseStyle(category);
+                    if (!style) return null;
+                    return (
+                      <span
+                        key={category}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium ${style.badge}`}
+                        title={style.description}
+                      >
+                        {style.label}
+                        <span className="font-semibold tabular-nums">{count}</span>
+                      </span>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
 
           {/* Failure pattern filter (only when the run has been classified) */}
           {failurePatternSummary && Object.keys(failurePatternSummary).length > 0 && (

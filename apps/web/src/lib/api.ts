@@ -69,6 +69,7 @@ export type {
   ConversationTurn,
   EvalResultItem,
   EvalResultSummary,
+  RootCauseDetail,
   GraderResultSummary,
   EvalRunDetail,
   EvalRunStats,

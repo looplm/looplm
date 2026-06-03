@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { EvalResultItem, EvaluatorItem, ConversationTurn } from "@/lib/api";
-import { sortGraderEntries, sortGraderDetails, formatScoreValue, formatScoreLabel } from "./eval-utils";
+import type { EvalResultItem, EvaluatorItem, ConversationTurn, RootCauseDetail } from "@/lib/api";
+import { sortGraderEntries, sortGraderDetails, formatScoreValue, formatScoreLabel, rootCauseStyle } from "./eval-utils";
 import { ExpectedOutputDiff, Section, ExpandableBox, CopyButton } from "./eval-components";
 import { GraderResultCard } from "./grader-result-card";
 
@@ -337,6 +337,42 @@ export function TestResultModal({
                   </div>
                 </Section>
               )}
+
+              {/* Root Cause */}
+              {(() => {
+                const rc = result.metadata?.root_cause as RootCauseDetail | undefined;
+                const style = rc ? rootCauseStyle(rc.category) : null;
+                if (!rc || !style) return null;
+                return (
+                  <Section title="Root Cause">
+                    <div className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 flex flex-col gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`inline-block px-2 py-0.5 rounded text-sm font-medium ${style.badge}`}>
+                          {style.label}
+                        </span>
+                        <span className="text-xs text-gray-400 dark:text-slate-500">
+                          {rc.confidence} confidence · {rc.source === "llm" ? "LLM-judged" : "from graders"}
+                        </span>
+                      </div>
+                      {rc.evidence && (
+                        <p className="text-sm text-gray-700 dark:text-slate-300">{rc.evidence}</p>
+                      )}
+                      {rc.missing_facts && rc.missing_facts.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-slate-500 mb-1">
+                            Missing from retrieved context
+                          </p>
+                          <ul className="list-disc list-inside text-sm text-gray-700 dark:text-slate-300">
+                            {rc.missing_facts.map((f, i) => (
+                              <li key={i}>{f}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </Section>
+                );
+              })()}
 
               {/* Grader Details */}
               {graderEntries.length > 0 && (
