@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     # Sync — max traces fetched per sync run (bounds the time-window pagination)
     sync_max_traces: int = 5000
+    # Sync — overall timeout (seconds) for one background sync run
+    sync_timeout_seconds: int = 1800
 
     # Auto-grading
     auto_grade_enabled: bool = False

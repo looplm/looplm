@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any
+
+# Concurrent trace-detail fetches during enrichment. Sequential enrichment of a
+# large window (hundreds of traces × 2 requests each) easily exceeds the sync
+# timeout; bounded concurrency keeps it fast without hammering the API.
+ENRICH_CONCURRENCY = 8
 
 from dateutil.parser import isoparse
 
@@ -238,22 +244,22 @@ class LangfuseConnector(BaseConnector):
                 current=0,
                 total=total,
             ))
-        enriched = []
-        for idx, trace in enumerate(raw_traces, start=1):
-            try:
-                detail = await self.fetch_trace_detail(trace["id"])
-                enriched.append(detail)
-            except Exception as e:
-                logger.warning("Failed to fetch detail for trace %s: %s", trace.get("id"), e)
-                enriched.append(trace)
-            if on_progress is not None:
-                await on_progress(SyncProgress(
-                    phase="processing_traces",
-                    message=f"Enriched {idx} of {total} traces with observations",
-                    current=idx,
-                    total=total,
-                ))
-        return enriched
+
+        # Enrich concurrently (bounded). on_progress writes to a shared DB session
+        # and is NOT concurrency-safe, so we don't emit per-trace progress here —
+        # the storing loop reports granular progress afterwards.
+        sem = asyncio.Semaphore(ENRICH_CONCURRENCY)
+
+        async def _enrich(trace: dict[str, Any]) -> dict[str, Any]:
+            async with sem:
+                try:
+                    return await self.fetch_trace_detail(trace["id"])
+                except Exception as e:
+                    logger.warning("Failed to fetch detail for trace %s: %s", trace.get("id"), e)
+                    return trace
+
+        # gather preserves input order, so results line up with raw_traces.
+        return list(await asyncio.gather(*[_enrich(t) for t in raw_traces]))
 
     async def sync_prompts(self) -> list[dict]:
         """Fetch prompts from Langfuse Prompt Management API."""

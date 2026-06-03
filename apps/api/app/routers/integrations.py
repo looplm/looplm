@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project
+from app.config import settings
 from app.db import async_session, get_db
 from app.encryption import encrypt_api_key
 from app.models.models import Integration, SyncStatus
@@ -214,39 +215,47 @@ async def stop_sync(
 _sync_tasks: dict[UUID, asyncio.Task] = {}
 
 
+async def _mark_sync_error(integration_id: UUID, message: str, *, only_if_syncing: bool = False) -> None:
+    """Record a sync error on a FRESH session.
+
+    Critical: when a sync is cancelled mid-flush (e.g. the timeout below), the
+    session run_sync was using is left in an aborted state. Reusing it to record
+    the error raises PendingRollbackError, which masks the real cause. Always use
+    a clean session here.
+    """
+    try:
+        async with async_session() as db:
+            result = await db.execute(select(Integration).where(Integration.id == integration_id))
+            integration = result.scalar_one_or_none()
+            if integration and (not only_if_syncing or integration.sync_status == SyncStatus.syncing):
+                integration.sync_status = SyncStatus.error
+                integration.last_sync_error = message
+                integration.sync_progress_current = None
+                integration.sync_progress_total = None
+                integration.sync_started_at = None
+                integration.sync_phase = None
+                integration.sync_message = None
+                integration.sync_since = None
+                await db.commit()
+    except Exception:
+        logger.exception("Failed to record sync error for %s", integration_id)
+
+
 async def _run_sync_background(integration_id: UUID, since_override: datetime | None = None, update_existing: bool = False) -> None:
     """Run sync in a background task with its own DB session."""
     try:
         async with async_session() as db:
-            try:
-                await asyncio.wait_for(run_sync(integration_id, db, since_override=since_override, update_existing=update_existing), timeout=300)
-            except asyncio.TimeoutError:
-                logger.error("Sync timed out for %s", integration_id)
-                result = await db.execute(
-                    select(Integration).where(Integration.id == integration_id)
-                )
-                integration = result.scalar_one_or_none()
-                if integration:
-                    integration.sync_status = SyncStatus.error
-                    integration.last_sync_error = "Sync timed out after 5 minutes"
-                    await db.commit()
-            except Exception:
-                # run_sync sets error status itself, but guard against edge cases
-                pass
+            await asyncio.wait_for(
+                run_sync(integration_id, db, since_override=since_override, update_existing=update_existing),
+                timeout=settings.sync_timeout_seconds,
+            )
+    except asyncio.TimeoutError:
+        minutes = max(1, settings.sync_timeout_seconds // 60)
+        logger.error("Sync timed out for %s after %ss", integration_id, settings.sync_timeout_seconds)
+        await _mark_sync_error(integration_id, f"Sync timed out after {minutes} minutes")
     except Exception as e:
+        # run_sync records its own errors; this is a backstop for anything that escaped.
         from app.services.sync_service import _format_sync_error
         error_msg = _format_sync_error(e)
         logger.error("Background sync failed for %s: %s", integration_id, error_msg)
-        # Last-resort: try to mark as error so it doesn't stay stuck
-        try:
-            async with async_session() as db:
-                result = await db.execute(
-                    select(Integration).where(Integration.id == integration_id)
-                )
-                integration = result.scalar_one_or_none()
-                if integration and integration.sync_status == SyncStatus.syncing:
-                    integration.sync_status = SyncStatus.error
-                    integration.last_sync_error = f"Background task failed: {error_msg}"
-                    await db.commit()
-        except Exception:
-            logger.error("Failed to update error status for %s", integration_id)
+        await _mark_sync_error(integration_id, f"Background task failed: {error_msg}", only_if_syncing=True)
