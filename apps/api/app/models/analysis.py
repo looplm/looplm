@@ -11,6 +11,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -99,14 +100,33 @@ class AdvisorAnalysis(Base):
     __tablename__ = "advisor_analyses"
     __table_args__ = (
         Index("idx_advisor_analyses_integration_id", "integration_id"),
+        Index("idx_advisor_analyses_project_id", "project_id"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     integration_id = Column(
         UUID(as_uuid=True), ForeignKey("integrations.id", ondelete="CASCADE"), nullable=False
     )
+    # Nullable for backward compat with legacy synchronous rows; required for the
+    # async repo-aware path (repo resolution + LlmUsageRecord attribution).
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
+    )
     suggestions = Column(JSONB, nullable=False, server_default=text("'[]'"))
     analyzed_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    # Async run lifecycle (repo-aware agentic path). Synchronous graph-only rows
+    # default to 'completed' so the existing GET keeps returning them.
+    status = Column(String(32), nullable=False, server_default=text("'completed'"))
+    error = Column(Text, nullable=True)
+    progress_message = Column(String(512), nullable=True)
+    progress_log = Column(JSONB, nullable=False, server_default=text("'[]'"))
+    files_analyzed = Column(JSONB, nullable=False, server_default=text("'[]'"))
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    num_turns = Column(Integer, nullable=True)
+    total_cost_usd = Column(Float, nullable=True)
+    repo_used = Column(Boolean, nullable=False, server_default=text("false"))
 
     integration = relationship("Integration")

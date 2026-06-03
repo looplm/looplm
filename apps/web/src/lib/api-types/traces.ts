@@ -326,3 +326,32 @@ export interface AdvisorResponse {
   suggestions: Suggestion[];
   analyzed_at?: string;
 }
+
+export interface AdvisorProgressLogEntry {
+  t: string;
+  msg: string;
+}
+
+// Poll shape for the async repo-aware advisor run.
+export interface AdvisorRunResponse {
+  id: string;
+  integration_id: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  suggestions: Suggestion[];
+  error?: string | null;
+  files_analyzed: string[];
+  num_turns?: number | null;
+  total_cost_usd?: number | null;
+  repo_used: boolean;
+  progress_message?: string | null;
+  progress_log: AdvisorProgressLogEntry[];
+  started_at?: string | null;
+  completed_at?: string | null;
+  analyzed_at?: string | null;
+}
+
+// Trigger response when the async repo path is used.
+export interface AdvisorRunTrigger {
+  analysis_id: string;
+  status: string;
+}
