@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class IntegrationCreate(BaseModel):
-    type: str = Field(..., pattern="^(langfuse|langsmith|json_file)$")
+    type: str = Field(..., pattern="^(langfuse|langsmith|json_file|looplm)$")
     name: str = Field(..., max_length=255)
     api_key: Optional[str] = None
     base_url: Optional[str] = None
@@ -39,6 +39,7 @@ class IntegrationResponse(BaseModel):
     sync_phase: Optional[str] = None
     sync_message: Optional[str] = None
     sync_since: Optional[datetime] = None
+    last_received_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -47,6 +48,30 @@ class IntegrationResponse(BaseModel):
 
 class IntegrationListResponse(BaseModel):
     data: list[IntegrationResponse]
+
+
+class IngestKeyCreate(BaseModel):
+    name: str = Field("default", max_length=255)
+
+
+class IngestKeyResponse(BaseModel):
+    id: UUID
+    name: str
+    key_prefix: str
+    last_used_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class IngestKeyCreateResponse(IngestKeyResponse):
+    # The plaintext key — returned ONLY on creation, never again.
+    key: str
+
+
+class IngestKeyListResponse(BaseModel):
+    data: list[IngestKeyResponse]
 
 
 class SyncRequest(BaseModel):

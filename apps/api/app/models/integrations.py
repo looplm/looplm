@@ -45,11 +45,18 @@ class Integration(Base):
     sync_phase = Column(String(32))
     sync_message = Column(String(255))
     sync_since = Column(DateTime(timezone=True))
+    # Push-based liveness for first-party (looplm) integrations: last time a
+    # trace was received via the ingest endpoint. Distinct from last_synced_at
+    # (pull-based) so the two semantics don't collide.
+    last_received_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     project = relationship("Project", back_populates="integrations")
     traces = relationship("Trace", back_populates="integration", cascade="all, delete-orphan")
+    ingest_keys = relationship(
+        "IngestKey", back_populates="integration", cascade="all, delete-orphan"
+    )
 
 
 class Trace(Base):
@@ -142,3 +149,32 @@ class Span(Base):
 
     trace = relationship("Trace", back_populates="spans")
     parent = relationship("Span", remote_side=[id], backref="children")
+
+
+class IngestKey(Base):
+    """An API key that authorizes an SDK/machine client to push traces into a
+    first-party (looplm) integration.
+
+    Unlike third-party credentials (stored encrypted/reversible in
+    Integration.api_key), these are secrets *we* issue, so we keep only a
+    sha256 hash and verify by hashing the presented key — the plaintext is
+    shown to the user exactly once at creation.
+    """
+
+    __tablename__ = "ingest_keys"
+    __table_args__ = (
+        Index("idx_ingest_keys_integration_id", "integration_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    integration_id = Column(
+        UUID(as_uuid=True), ForeignKey("integrations.id", ondelete="CASCADE"), nullable=False
+    )
+    name = Column(String(255), nullable=False, server_default=text("'default'"))
+    key_hash = Column(String(64), nullable=False, unique=True)  # sha256 hex
+    key_prefix = Column(String(16), nullable=False)  # e.g. "llm_sk_ab12" for display
+    last_used_at = Column(DateTime(timezone=True))
+    revoked_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    integration = relationship("Integration", back_populates="ingest_keys")

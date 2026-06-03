@@ -73,8 +73,23 @@ export interface Integration {
   sync_phase?: "fetching_traces" | "processing_traces" | "fetching_scores" | "processing_scores";
   sync_message?: string;
   sync_since?: string;
+  last_received_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface IngestKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  last_used_at?: string;
+  revoked_at?: string;
+  created_at: string;
+}
+
+// Returned only on creation — carries the one-time plaintext key.
+export interface IngestKeyCreated extends IngestKey {
+  key: string;
 }
 
 export interface CreateIntegrationBody {

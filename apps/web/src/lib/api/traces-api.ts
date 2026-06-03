@@ -8,6 +8,8 @@ import type {
   Integration,
   CreateIntegrationBody,
   UpdateIntegrationBody,
+  IngestKey,
+  IngestKeyCreated,
   TraceListResponse,
   ThreadListResponse,
   TraceDetail,
@@ -71,6 +73,20 @@ export const triggerSync = async (id: string, body?: { since?: string; update_ex
 
 export const stopSync = (id: string) =>
   request<{ message: string }>(`/api/integrations/${id}/sync/stop`, { method: "POST" });
+
+// --- Ingest keys (first-party tracing) ---
+
+export const getIngestKeys = (integrationId: string) =>
+  request<{ data: IngestKey[] }>(`/api/integrations/${integrationId}/ingest-keys`);
+
+export const createIngestKey = (integrationId: string, name: string) =>
+  request<IngestKeyCreated>(`/api/integrations/${integrationId}/ingest-keys`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+
+export const revokeIngestKey = (integrationId: string, keyId: string) =>
+  request<void>(`/api/integrations/${integrationId}/ingest-keys/${keyId}`, { method: "DELETE" });
 
 // --- Traces ---
 

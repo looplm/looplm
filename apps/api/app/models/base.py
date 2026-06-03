@@ -15,6 +15,7 @@ class IntegrationType(str, enum.Enum):
     langfuse = "langfuse"
     langsmith = "langsmith"
     json_file = "json_file"
+    looplm = "looplm"  # first-party push-based tracing (SDK → ingest endpoint)
 
 
 class SyncStatus(str, enum.Enum):

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -16,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db
+from app.models.integrations import IngestKey, Integration
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
@@ -26,7 +29,12 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
+INGEST_KEY_PREFIX = "llm_sk_"
+
 bearer_scheme = HTTPBearer()
+# Separate scheme for machine clients (SDKs) pushing traces. auto_error returns
+# 401 on a missing/garbled Authorization header before our handler runs.
+ingest_bearer_scheme = HTTPBearer(auto_error=True)
 
 
 def hash_password(plain: str) -> str:
@@ -140,6 +148,70 @@ async def get_current_project(
     if not project:
         raise HTTPException(status_code=400, detail="No projects found. Create a project first.")
     return project
+
+
+# ── Ingest keys (machine auth for the first-party tracing SDK) ──────────
+
+def hash_ingest_key(token: str) -> str:
+    """Return the sha256 hex digest used to look up / store an ingest key."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def generate_ingest_key() -> tuple[str, str, str]:
+    """Mint a new ingest key.
+
+    Returns ``(plaintext, key_hash, key_prefix)``. The plaintext is shown to the
+    user exactly once; only the hash and a short display prefix are persisted.
+    """
+    plaintext = INGEST_KEY_PREFIX + secrets.token_urlsafe(32)
+    return plaintext, hash_ingest_key(plaintext), plaintext[: len(INGEST_KEY_PREFIX) + 4]
+
+
+async def get_ingest_context(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(ingest_bearer_scheme)],
+    db: AsyncSession = Depends(get_db),
+) -> tuple[Integration, Project]:
+    """Resolve (Integration, Project) from an ingest key — no user/JWT involved.
+
+    Used by the push-based ingest endpoint. 401 on missing/invalid/revoked key.
+    """
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or revoked ingest key"
+    )
+    token = credentials.credentials
+    if not token.startswith(INGEST_KEY_PREFIX):
+        raise unauthorized
+
+    result = await db.execute(
+        select(IngestKey).where(
+            IngestKey.key_hash == hash_ingest_key(token),
+            IngestKey.revoked_at.is_(None),
+        )
+    )
+    key = result.scalar_one_or_none()
+    if key is None:
+        raise unauthorized
+
+    result = await db.execute(select(Integration).where(Integration.id == key.integration_id))
+    integration = result.scalar_one_or_none()
+    if integration is None:
+        raise unauthorized
+
+    result = await db.execute(select(Project).where(Project.id == integration.project_id))
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise unauthorized
+
+    # Throttled liveness: avoid writing on every request under high throughput.
+    now = datetime.now(timezone.utc)
+    last_used = key.last_used_at
+    if last_used is not None and last_used.tzinfo is None:
+        last_used = last_used.replace(tzinfo=timezone.utc)
+    if last_used is None or (now - last_used).total_seconds() > 60:
+        key.last_used_at = now
+        await db.flush()
+
+    return integration, project
 
 
 async def _load_member(

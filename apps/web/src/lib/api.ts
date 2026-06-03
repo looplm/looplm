@@ -21,6 +21,8 @@ export type {
   Integration,
   CreateIntegrationBody,
   UpdateIntegrationBody,
+  IngestKey,
+  IngestKeyCreated,
   TraceListResponse,
   TraceListItem,
   ThreadSummary,

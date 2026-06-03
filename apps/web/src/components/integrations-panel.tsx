@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getIntegrations, createIntegration, updateIntegration, deleteIntegration, triggerSync, stopSync, getImportHistory, type Integration, type JsonImportItem } from "@/lib/api";
 import { IntegrationCard } from "@/components/integration-card";
+import { LooplmTracingCard } from "@/components/ingest-keys-panel";
 import { ImportHistoryTable } from "@/components/import-history-table";
 
 const emptyForm = { type: "langfuse", name: "", api_key: "", public_key: "", base_url: "", project: "" };
@@ -206,6 +207,7 @@ export default function IntegrationsPanel() {
               >
                 <option value="langfuse">Langfuse</option>
                 <option value="langsmith">LangSmith</option>
+                <option value="looplm">LoopLM Tracing (SDK)</option>
               </select>
             </div>
             <div>
@@ -233,28 +235,32 @@ export default function IntegrationsPanel() {
                 />
               </div>
             )}
-            <div>
-              <label className="block text-sm text-gray-500 dark:text-slate-400 mb-1">
-                {form.type === "langfuse" ? "Secret Key" : "API Key"}{editingId ? " (leave blank to keep current)" : ""}
-              </label>
-              <input
-                required={!editingId}
-                type="password"
-                value={form.api_key}
-                onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-                className="w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg text-sm"
-                placeholder={form.type === "langfuse" ? "sk-lf-..." : ""}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-500 dark:text-slate-400 mb-1">Base URL (optional)</label>
-              <input
-                value={form.base_url}
-                onChange={(e) => setForm({ ...form, base_url: e.target.value })}
-                className="w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg text-sm"
-                placeholder="https://cloud.langfuse.com"
-              />
-            </div>
+            {form.type !== "looplm" && (
+              <div>
+                <label className="block text-sm text-gray-500 dark:text-slate-400 mb-1">
+                  {form.type === "langfuse" ? "Secret Key" : "API Key"}{editingId ? " (leave blank to keep current)" : ""}
+                </label>
+                <input
+                  required={!editingId}
+                  type="password"
+                  value={form.api_key}
+                  onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+                  className="w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg text-sm"
+                  placeholder={form.type === "langfuse" ? "sk-lf-..." : ""}
+                />
+              </div>
+            )}
+            {form.type !== "looplm" && (
+              <div>
+                <label className="block text-sm text-gray-500 dark:text-slate-400 mb-1">Base URL (optional)</label>
+                <input
+                  value={form.base_url}
+                  onChange={(e) => setForm({ ...form, base_url: e.target.value })}
+                  className="w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg text-sm"
+                  placeholder="https://cloud.langfuse.com"
+                />
+              </div>
+            )}
             {form.type === "langsmith" && (
               <div>
                 <label className="block text-sm text-gray-500 dark:text-slate-400 mb-1">Project Name (optional)</label>
@@ -291,19 +297,28 @@ export default function IntegrationsPanel() {
       ) : !showForm && (
         <div className="grid grid-cols-1 gap-6">
           {integrations.map((i) => (
-            <IntegrationCard
-              key={i.id}
-              integration={i}
-              updateExisting={updateExisting[i.id] ?? true}
-              customSinceDate={customSinceDate[i.id] || ""}
-              onEdit={openEditForm}
-              onDelete={handleDelete}
-              onSyncPreset={handleSyncPreset}
-              onSync={handleSync}
-              onStopSync={handleStopSync}
-              onUpdateExistingChange={(checked) => setUpdateExisting({ ...updateExisting, [i.id]: checked })}
-              onCustomSinceDateChange={(date) => setCustomSinceDate({ ...customSinceDate, [i.id]: date })}
-            />
+            i.type === "looplm" ? (
+              <LooplmTracingCard
+                key={i.id}
+                integration={i}
+                onEdit={openEditForm}
+                onDelete={handleDelete}
+              />
+            ) : (
+              <IntegrationCard
+                key={i.id}
+                integration={i}
+                updateExisting={updateExisting[i.id] ?? true}
+                customSinceDate={customSinceDate[i.id] || ""}
+                onEdit={openEditForm}
+                onDelete={handleDelete}
+                onSyncPreset={handleSyncPreset}
+                onSync={handleSync}
+                onStopSync={handleStopSync}
+                onUpdateExistingChange={(checked) => setUpdateExisting({ ...updateExisting, [i.id]: checked })}
+                onCustomSinceDateChange={(date) => setCustomSinceDate({ ...customSinceDate, [i.id]: date })}
+              />
+            )
           ))}
         </div>
       )}
