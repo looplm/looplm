@@ -20,7 +20,7 @@ import {
   type TestCaseCreateBody,
 } from "@/lib/api";
 import { evaluateFeedback, getFeedbackEvaluation, stopFeedbackEvaluation, getFeedbackEvaluatorConfig, updateFeedbackEvaluatorConfig } from "@/lib/api/feedback-api";
-import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions, getSuggestionRun, stopSuggestionRun } from "@/lib/api/evals-api";
+import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions, stopTopQuestionsAnalysis, getSuggestionRun, stopSuggestionRun } from "@/lib/api/evals-api";
 import type { TopQuestionsResponse, SuggestionRunResponse } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
@@ -173,6 +173,17 @@ export function useFeedbackPage() {
     }
   }
 
+  async function handleStopTopQuestions() {
+    if (!topQuestionsId || !topQuestionsRunning) return;
+    try {
+      await stopTopQuestionsAnalysis(topQuestionsId);
+      setTopQuestionsResult((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
+      toast.success("Analysis stopped");
+    } catch (err: any) {
+      toast.error("Failed to stop analysis", { description: err.message });
+    }
+  }
+
   // Polling loop for top questions analysis progress
   useEffect(() => {
     if (!topQuestionsId || !topQuestionsResult || !["pending", "running"].includes(topQuestionsResult.status)) return;
@@ -186,6 +197,8 @@ export function useFeedbackPage() {
         } else if (updated.status === "failed") {
           clearInterval(interval);
           toast.error("Analysis failed", { description: updated.error || "Unknown error" });
+        } else if (updated.status === "cancelled") {
+          clearInterval(interval);
         }
       } catch {
         clearInterval(interval);
@@ -547,6 +560,7 @@ export function useFeedbackPage() {
     handleEvaluate,
     handleAcceptSuggestion,
     handleAnalyzeTopQuestions,
+    handleStopTopQuestions,
     handleGenerateSuggestions: loadSuggestions,
     handleStopSuggestionRun,
   };

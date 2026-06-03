@@ -176,6 +176,12 @@ export const getTopQuestionsAnalysis = (analysisId: string) =>
 export const getLatestTopQuestions = () =>
   request<import("../api-types/data").TopQuestionsResponse>("/api/feedback/top-questions/latest");
 
+export const stopTopQuestionsAnalysis = (analysisId: string) =>
+  request<{ message: string; status: string }>(
+    `/api/feedback/top-questions/${analysisId}/stop`,
+    { method: "POST" }
+  );
+
 // --- Suggestions ---
 
 export const generateSuggestions = (params?: Record<string, string>) => {
