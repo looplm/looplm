@@ -37,7 +37,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.models.user import User  # noqa: F401 — ensure user table is created
     from app.models.project import Project  # noqa: F401 — ensure project table is created
     from app.models.admin_audit import AdminAudit  # noqa: F401 — ensure audit table is created
-    from app.models.github import GithubInstallation  # noqa: F401 — ensure table is created
+    from app.models.github import (  # noqa: F401 — ensure tables are created
+        GithubInstallation,
+        ProjectGithubApp,
+    )
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

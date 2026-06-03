@@ -44,7 +44,13 @@ async def resolve_project_repo(project: Project, db: AsyncSession) -> str | None
         )
     ).scalar_one_or_none()
     if installation and installation.repo_full_name:
+        creds = await github_app.resolve_creds(db, project.id)
+        if not github_app.is_enabled(creds):
+            raise github_app.GithubAppDisabledError(
+                "GitHub App is not configured for this project."
+            )
         cloned = await github_app.ensure_repo_clone(
+            creds,
             project_id=project.id,
             installation_id=installation.installation_id,
             repo_full_name=installation.repo_full_name,

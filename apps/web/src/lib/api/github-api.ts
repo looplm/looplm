@@ -62,3 +62,36 @@ export const selectProjectGithubInstallation = (body: {
 
 export const disconnectProjectGithubInstallation = () =>
   request<void>("/api/github/installation", { method: "DELETE" });
+
+/** Per-project GitHub App identity (the App id + OAuth client + signing key). */
+export interface GithubAppConfig {
+  configured: boolean;
+  source: "project" | "env" | null;
+  can_manage: boolean;
+  app_id: string | null;
+  app_name: string | null;
+  client_id: string | null;
+  has_client_secret: boolean;
+  has_private_key: boolean;
+}
+
+export interface GithubAppConfigInput {
+  app_id: string;
+  app_name?: string | null;
+  client_id: string;
+  /** Write-only. Leave blank when updating to keep the stored value. */
+  client_secret?: string;
+  private_key?: string;
+}
+
+export const getProjectGithubAppConfig = () =>
+  request<GithubAppConfig>("/api/github/app-config");
+
+export const saveProjectGithubAppConfig = (body: GithubAppConfigInput) =>
+  request<GithubAppConfig>("/api/github/app-config", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
+export const deleteProjectGithubAppConfig = () =>
+  request<void>("/api/github/app-config", { method: "DELETE" });
