@@ -54,7 +54,7 @@ async def resolve_project_repo(project: Project, db: AsyncSession) -> str | None
             project_id=project.id,
             installation_id=installation.installation_id,
             repo_full_name=installation.repo_full_name,
-            default_branch=installation.repo_default_branch,
+            default_branch=installation.repo_branch or installation.repo_default_branch,
         )
         return str(cloned)
 

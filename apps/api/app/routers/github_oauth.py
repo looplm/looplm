@@ -80,6 +80,7 @@ class SelectInstallationRequest(BaseModel):
     account_type: str
     repo_full_name: str
     repo_default_branch: str | None = None
+    repo_branch: str | None = None  # branch to sync; falls back to default when omitted
 
 
 class InstallationResponse(BaseModel):
@@ -88,6 +89,7 @@ class InstallationResponse(BaseModel):
     account_type: str
     repo_full_name: str | None
     repo_default_branch: str | None
+    repo_branch: str | None
 
     model_config = {"from_attributes": True}
 
@@ -266,6 +268,24 @@ async def list_repos(
     ]
 
 
+@router.get("/installations/{installation_id}/branches", response_model=list[str])
+async def list_branches(
+    installation_id: int,
+    repo_full_name: str,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    _user: User = Depends(get_current_user),
+) -> list[str]:
+    """List branch names for a repo, so the user can pick which one to sync."""
+    creds = await github_app.resolve_creds(db, project.id)
+    if not github_app.is_enabled(creds):
+        raise HTTPException(status_code=503, detail="GitHub App not configured")
+    try:
+        return await github_app.list_repo_branches(creds, installation_id, repo_full_name)
+    except github_app.GithubAppError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.get("/installation", response_model=InstallationResponse | None)
 async def get_installation(
     db: AsyncSession = Depends(get_db),
@@ -296,14 +316,25 @@ async def select_installation(
         )
     ).scalar_one_or_none()
 
+    # Default the sync branch to the repo's default when the caller doesn't pick one.
+    repo_branch = body.repo_branch or body.repo_default_branch
+
     if existing:
+        # A repo or branch change invalidates the existing clone (wrong checkout).
+        clone_stale = (
+            existing.repo_full_name != body.repo_full_name
+            or existing.repo_branch != repo_branch
+        )
         existing.installation_id = body.installation_id
         existing.account_login = body.account_login
         existing.account_type = body.account_type
         existing.repo_full_name = body.repo_full_name
         existing.repo_default_branch = body.repo_default_branch
+        existing.repo_branch = repo_branch
         existing.updated_at = datetime.now(timezone.utc)
         row = existing
+        if clone_stale:
+            github_app.remove_repo_clone(project.id)
     else:
         row = GithubInstallation(
             project_id=project.id,
@@ -312,6 +343,7 @@ async def select_installation(
             account_type=body.account_type,
             repo_full_name=body.repo_full_name,
             repo_default_branch=body.repo_default_branch,
+            repo_branch=repo_branch,
         )
         db.add(row)
 

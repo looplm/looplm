@@ -281,6 +281,38 @@ async def list_installation_repos(creds: GithubAppCreds, installation_id: int) -
     return repos
 
 
+async def list_repo_branches(
+    creds: GithubAppCreds, installation_id: int, repo_full_name: str
+) -> list[str]:
+    """List branch names for a repo accessible to the installation (paginated)."""
+    if "/" not in repo_full_name or ".." in repo_full_name:
+        raise GithubAppError(f"Invalid repo name: {repo_full_name!r}")
+    token = (await fetch_installation_token(creds, installation_id)).token
+    branches: list[str] = []
+    page = 1
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        while True:
+            resp = await client.get(
+                f"{settings.github_api_base_url}/repos/{repo_full_name}/branches",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                params={"per_page": 100, "page": page},
+            )
+            if resp.status_code >= 400:
+                raise GithubAppError(
+                    f"List branches failed ({resp.status_code}): {resp.text[:300]}"
+                )
+            data = resp.json()
+            branches.extend(b["name"] for b in data)
+            if len(data) < 100:
+                break
+            page += 1
+    return branches
+
+
 # ── Repo cloning ─────────────────────────────────────────────────
 
 

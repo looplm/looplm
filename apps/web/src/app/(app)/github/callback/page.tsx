@@ -5,12 +5,20 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   completeGithubCallback,
   listInstallationRepos,
+  listRepoBranches,
   selectProjectGithubInstallation,
   type GithubInstallationSummary,
   type GithubRepo,
 } from "@/lib/api";
 
-type Phase = "exchanging" | "pick-installation" | "pick-repo" | "saving" | "done" | "error";
+type Phase =
+  | "exchanging"
+  | "pick-installation"
+  | "pick-repo"
+  | "pick-branch"
+  | "saving"
+  | "done"
+  | "error";
 
 // OAuth `code` is single-use. React StrictMode runs effects twice in dev, which
 // would submit the same code to GitHub twice — the second submission always
@@ -89,6 +97,10 @@ export default function GithubCallbackPage() {
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
   const [filter, setFilter] = useState("");
+  const [selectedRepo, setSelectedRepo] = useState<GithubRepo | null>(null);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchFilter, setBranchFilter] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -149,14 +161,33 @@ export default function GithubCallbackPage() {
 
   async function handlePickRepo(repo: GithubRepo) {
     if (!selectedInstallation) return;
+    setSelectedRepo(repo);
+    setPhase("pick-branch");
+    setBranchesLoading(true);
+    setBranchFilter("");
+    setBranches([]);
+    try {
+      const list = await listRepoBranches(selectedInstallation.installation_id, repo.full_name);
+      setBranches(list);
+    } catch (e: unknown) {
+      setPhase("error");
+      setError(e instanceof Error ? e.message : "Failed to load branches.");
+    } finally {
+      setBranchesLoading(false);
+    }
+  }
+
+  async function handlePickBranch(branch: string) {
+    if (!selectedInstallation || !selectedRepo) return;
     setPhase("saving");
     try {
       await selectProjectGithubInstallation({
         installation_id: selectedInstallation.installation_id,
         account_login: selectedInstallation.account_login,
         account_type: selectedInstallation.account_type,
-        repo_full_name: repo.full_name,
-        repo_default_branch: repo.default_branch,
+        repo_full_name: selectedRepo.full_name,
+        repo_default_branch: selectedRepo.default_branch,
+        repo_branch: branch,
       });
       setPhase("done");
       // Hand control back to Settings so the user lands where they came from.
@@ -172,6 +203,12 @@ export default function GithubCallbackPage() {
     if (!q) return repos;
     return repos.filter((r) => r.full_name.toLowerCase().includes(q));
   }, [repos, filter]);
+
+  const filteredBranches = useMemo(() => {
+    const q = branchFilter.trim().toLowerCase();
+    if (!q) return branches;
+    return branches.filter((b) => b.toLowerCase().includes(q));
+  }, [branches, branchFilter]);
 
   return (
     <div className="max-w-2xl mx-auto p-8">
@@ -286,6 +323,84 @@ export default function GithubCallbackPage() {
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 shrink-0">
                                 <LockIcon className="w-3 h-3" />
                                 private
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {phase === "pick-branch" && selectedRepo && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-gray-500 dark:text-slate-400">
+                Pick the branch to sync from{" "}
+                <span className="font-mono text-gray-700 dark:text-slate-300">
+                  {selectedRepo.full_name}
+                </span>
+              </p>
+              <button
+                onClick={() => {
+                  setSelectedRepo(null);
+                  setBranches([]);
+                  setBranchFilter("");
+                  setPhase("pick-repo");
+                }}
+                className="text-xs text-indigo-500 hover:underline shrink-0"
+              >
+                Switch repo
+              </button>
+            </div>
+
+            {branchesLoading && (
+              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-slate-400">
+                <Spinner className="w-4 h-4" />
+                Loading branches…
+              </div>
+            )}
+
+            {!branchesLoading && branches.length === 0 && (
+              <div className="p-6 text-center text-sm text-gray-400 dark:text-slate-500 border border-dashed border-gray-200 dark:border-slate-800 rounded-lg">
+                No branches found for this repo.
+              </div>
+            )}
+
+            {!branchesLoading && branches.length > 0 && (
+              <>
+                {branches.length > 5 && (
+                  <input
+                    type="text"
+                    value={branchFilter}
+                    onChange={(e) => setBranchFilter(e.target.value)}
+                    placeholder="Filter branches…"
+                    className="w-full px-3 py-2 text-sm rounded-md bg-gray-50 dark:bg-slate-800/60 border border-gray-100 dark:border-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30"
+                  />
+                )}
+
+                <div className="max-h-96 overflow-y-auto -mx-1 px-1">
+                  {filteredBranches.length === 0 ? (
+                    <p className="text-sm text-gray-400 dark:text-slate-500 py-6 text-center">
+                      No branches match &ldquo;{branchFilter}&rdquo;.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {filteredBranches.map((b) => (
+                        <li key={b}>
+                          <button
+                            onClick={() => handlePickBranch(b)}
+                            className="group w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-left hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
+                          >
+                            <BranchIcon className="w-4 h-4 text-gray-400 group-hover:text-indigo-500 shrink-0" />
+                            <span className="font-mono text-sm truncate flex-1">{b}</span>
+                            {b === selectedRepo.default_branch && (
+                              <span className="px-2 py-0.5 rounded text-xs text-gray-500 dark:text-slate-400 bg-gray-100 dark:bg-slate-800 shrink-0">
+                                default
                               </span>
                             )}
                           </button>

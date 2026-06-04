@@ -75,7 +75,8 @@ class GithubInstallation(Base):
     account_login = Column(String(255), nullable=False)
     account_type = Column(String(32), nullable=False, server_default=text("'User'"))
     repo_full_name = Column(String(512), nullable=True)
-    repo_default_branch = Column(String(255), nullable=True)
+    repo_default_branch = Column(String(255), nullable=True)  # the repo's own default branch
+    repo_branch = Column(String(255), nullable=True)  # the branch chosen to sync (falls back to default)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 

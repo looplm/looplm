@@ -26,6 +26,7 @@ export interface GithubInstallation {
   account_type: string;
   repo_full_name: string | null;
   repo_default_branch: string | null;
+  repo_branch: string | null;
 }
 
 export const getGithubStatus = () => request<GithubStatus>("/api/github/status");
@@ -45,6 +46,11 @@ export const completeGithubCallback = (code: string, state: string) =>
 export const listInstallationRepos = (installationId: number) =>
   request<GithubRepo[]>(`/api/github/installations/${installationId}/repos`);
 
+export const listRepoBranches = (installationId: number, repoFullName: string) =>
+  request<string[]>(
+    `/api/github/installations/${installationId}/branches?repo_full_name=${encodeURIComponent(repoFullName)}`,
+  );
+
 export const getProjectGithubInstallation = () =>
   request<GithubInstallation | null>("/api/github/installation");
 
@@ -54,6 +60,7 @@ export const selectProjectGithubInstallation = (body: {
   account_type: string;
   repo_full_name: string;
   repo_default_branch: string | null;
+  repo_branch?: string | null;
 }) =>
   request<GithubInstallation>("/api/github/installation", {
     method: "POST",

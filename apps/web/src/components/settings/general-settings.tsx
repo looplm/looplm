@@ -9,7 +9,9 @@ import {
   getProjectGithubAppConfig,
   getProjectGithubInstallation,
   getUserSettings,
+  listRepoBranches,
   saveProjectGithubAppConfig,
+  selectProjectGithubInstallation,
   updateUserSettings,
   updateProject,
   type GithubAppConfig,
@@ -51,6 +53,12 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
   const [githubInstallation, setGithubInstallation] = useState<GithubInstallation | null>(null);
   const [githubBusy, setGithubBusy] = useState(false);
   const [githubError, setGithubError] = useState("");
+
+  // Inline branch switcher for an already-connected repo.
+  const [branchEditing, setBranchEditing] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchSaving, setBranchSaving] = useState(false);
 
   // GitHub App identity (per-project; admins only)
   const [appConfig, setAppConfig] = useState<GithubAppConfig | null>(null);
@@ -199,6 +207,50 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
       setGithubError(e instanceof Error ? e.message : "Failed to disconnect");
     } finally {
       setGithubBusy(false);
+    }
+  }
+
+  async function startEditBranch() {
+    const inst = githubInstallation;
+    if (!inst || !inst.repo_full_name) return;
+    setBranchEditing(true);
+    setBranchesLoading(true);
+    setGithubError("");
+    setBranches([]);
+    try {
+      const list = await listRepoBranches(inst.installation_id, inst.repo_full_name);
+      setBranches(list);
+    } catch (e: unknown) {
+      setGithubError(e instanceof Error ? e.message : "Failed to load branches");
+      setBranchEditing(false);
+    } finally {
+      setBranchesLoading(false);
+    }
+  }
+
+  async function handleChangeBranch(branch: string) {
+    const inst = githubInstallation;
+    if (!inst || !inst.repo_full_name || branch === inst.repo_branch) {
+      setBranchEditing(false);
+      return;
+    }
+    setBranchSaving(true);
+    setGithubError("");
+    try {
+      const updated = await selectProjectGithubInstallation({
+        installation_id: inst.installation_id,
+        account_login: inst.account_login,
+        account_type: inst.account_type,
+        repo_full_name: inst.repo_full_name,
+        repo_default_branch: inst.repo_default_branch,
+        repo_branch: branch,
+      });
+      setGithubInstallation(updated);
+      setBranchEditing(false);
+    } catch (e: unknown) {
+      setGithubError(e instanceof Error ? e.message : "Failed to change branch");
+    } finally {
+      setBranchSaving(false);
     }
   }
 
@@ -572,10 +624,48 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
             <div className="text-sm">
               <span className="text-gray-500 dark:text-slate-400">Connected repo:</span>{" "}
               <span className="font-mono">{githubInstallation.repo_full_name}</span>
-              <span className="text-gray-400 dark:text-slate-500">
-                {" · "}
-                {githubInstallation.repo_default_branch || "main"}
-              </span>
+            </div>
+            <div className="text-sm flex items-center gap-2">
+              <span className="text-gray-500 dark:text-slate-400">Syncing branch:</span>
+              {branchEditing ? (
+                branchesLoading ? (
+                  <span className="text-gray-400 dark:text-slate-500">Loading branches…</span>
+                ) : (
+                  <select
+                    autoFocus
+                    disabled={branchSaving}
+                    defaultValue={
+                      githubInstallation.repo_branch ||
+                      githubInstallation.repo_default_branch ||
+                      ""
+                    }
+                    onChange={(e) => handleChangeBranch(e.target.value)}
+                    className="px-2 py-1 text-sm font-mono rounded-md bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 disabled:opacity-50"
+                  >
+                    {branches.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                        {b === githubInstallation.repo_default_branch ? " (default)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                )
+              ) : (
+                <>
+                  <span className="font-mono">
+                    {githubInstallation.repo_branch ||
+                      githubInstallation.repo_default_branch ||
+                      "main"}
+                  </span>
+                  <button
+                    onClick={startEditBranch}
+                    disabled={githubBusy}
+                    className="text-xs text-indigo-500 hover:underline disabled:opacity-50"
+                  >
+                    Change branch
+                  </button>
+                </>
+              )}
             </div>
             <div className="flex gap-2">
               <button
