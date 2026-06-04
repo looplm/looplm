@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.config import settings
 from app.routers import (
-    admin, analysis, advisor, auth_router, costs_overview, dashboard, datasets, evaluations,
+    admin, analysis, analytics, advisor, auth_router, costs_overview, dashboard, datasets, evaluations,
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
     ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent, permissions,
     project_members, projects, prompts, route_analysis, trace_detail, traces, user_settings,
@@ -150,6 +150,7 @@ app.include_router(trace_detail.router)
 app.include_router(feedback.router)
 app.include_router(fixes.router)
 app.include_router(dashboard.router)
+app.include_router(analytics.router)
 app.include_router(analysis.router)
 app.include_router(langsmith.router)
 app.include_router(graph.router)

@@ -21,6 +21,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: "\u{1F4CA}" },
       { href: "/traces", label: "Traces", icon: "\u{1F50D}" },
+      { href: "/analytics", label: "Analytics", icon: "\u{1F4C8}" },
       { href: "/feedback", label: "Feedback", icon: "\u{1F4AC}" },
       { href: "/costs", label: "Costs", icon: "\u{1F4B0}" },
     ],

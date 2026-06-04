@@ -7,10 +7,10 @@ import { GlobalFiltersProvider } from "./global-filters-context";
 import GlobalFilterHeader from "./global-filter-header";
 import { PermissionsProvider, usePermissions } from "./permissions-context";
 
-const FILTER_PATHS = new Set(["/dashboard", "/traces", "/feedback", "/costs"]);
+const FILTER_PATHS = new Set(["/dashboard", "/traces", "/analytics", "/feedback", "/costs"]);
 
 const SECTION_ROUTES: Record<string, string[]> = {
-  observe: ["/dashboard", "/traces", "/feedback", "/costs"],
+  observe: ["/dashboard", "/traces", "/analytics", "/feedback", "/costs"],
   evaluate: ["/evaluations", "/evaluators", "/datasets"],
   improve: ["/advisor", "/routes", "/prompts"],
 };
@@ -18,6 +18,7 @@ const SECTION_ROUTES: Record<string, string[]> = {
 const ROUTE_TO_PAGE: Record<string, string> = {
   "/dashboard": "dashboard",
   "/traces": "traces",
+  "/analytics": "analytics",
   "/feedback": "feedback",
   "/costs": "costs",
   "/evaluations": "evaluations",

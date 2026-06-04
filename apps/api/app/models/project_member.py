@@ -11,7 +11,7 @@ from app.models.models import Base
 ALL_SECTIONS = ["observe", "evaluate", "improve"]
 
 SECTION_PAGES: dict[str, list[str]] = {
-    "observe": ["dashboard", "traces", "feedback", "costs"],
+    "observe": ["dashboard", "traces", "analytics", "feedback", "costs"],
     "evaluate": ["evaluations", "evaluators", "datasets"],
     "improve": ["advisor", "routes", "prompts"],
 }
