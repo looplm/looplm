@@ -117,11 +117,18 @@ class LangSmithConnector(BaseConnector):
             ))
         runs: list[dict[str, Any]] = []
         async with httpx.AsyncClient() as client:
-            session_filter: list[str] | None = None
+            # /runs/query requires at least one of session/id/trace/... — a bare
+            # start_time + is_root query is rejected. Scope to the configured
+            # project, or to every session in the workspace when none is set.
             if self.project:
                 project_id = await self._resolve_project_id(client, self.project)
-                if project_id:
-                    session_filter = [project_id]
+                session_filter = [project_id] if project_id else []
+            else:
+                session_filter = await self._resolve_all_session_ids(client)
+
+            if not session_filter:
+                logger.warning("LangSmith: no sessions found to query; nothing to sync")
+                return []
 
             # The API caps `limit` at 100 per request, so page with cursors until
             # we reach the caller's requested total (or run out of runs).
@@ -131,9 +138,8 @@ class LangSmithConnector(BaseConnector):
                     "is_root": True,
                     "start_time": since.isoformat(),
                     "limit": min(_PAGE_SIZE, limit - len(runs)),
+                    "session": session_filter,
                 }
-                if session_filter:
-                    query_body["session"] = session_filter
                 if cursor:
                     query_body["cursor"] = cursor
 
@@ -183,6 +189,23 @@ class LangSmithConnector(BaseConnector):
         if sessions:
             return str(sessions[0]["id"])
         return None
+
+    async def _resolve_all_session_ids(self, client: httpx.AsyncClient) -> list[str]:
+        """List every project (session) ID in the workspace.
+
+        Used when no specific project is configured, since /runs/query requires
+        a session (or other) filter and rejects an unscoped query.
+        """
+        resp = await self._request(
+            client,
+            "GET",
+            f"{self.api_url}/sessions",
+            timeout=10,
+        )
+        sessions = resp.json()
+        if not isinstance(sessions, list):
+            return []
+        return [str(s["id"]) for s in sessions if isinstance(s, dict) and s.get("id")]
 
     async def fetch_trace_detail(self, trace_id: str) -> dict[str, Any]:
         """Fetch a run and its child runs."""
