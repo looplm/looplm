@@ -74,6 +74,8 @@ export interface Integration {
   sync_message?: string;
   sync_since?: string;
   last_received_at?: string;
+  auto_sync_interval_minutes?: number | null;
+  next_sync_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -98,6 +100,7 @@ export interface CreateIntegrationBody {
   api_key: string;
   base_url?: string;
   config?: Record<string, unknown>;
+  auto_sync_interval_minutes?: number | null;
 }
 
 export interface UpdateIntegrationBody {
@@ -105,6 +108,7 @@ export interface UpdateIntegrationBody {
   api_key?: string;
   base_url?: string;
   config?: Record<string, unknown>;
+  auto_sync_interval_minutes?: number | null;
 }
 
 // --- Traces ---

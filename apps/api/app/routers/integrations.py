@@ -43,6 +43,14 @@ async def create_integration(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail={"error": {"code": "CONFLICT", "message": "Integration name already exists"}})
 
+    # Auto-sync default: new pull-based integrations sync hourly unless the
+    # client said otherwise. Push/import types (looplm, json_file) don't poll.
+    is_pullable = body.type in ("langfuse", "langsmith")
+    if "auto_sync_interval_minutes" in body.model_fields_set:
+        auto_sync_interval = body.auto_sync_interval_minutes if is_pullable else None
+    else:
+        auto_sync_interval = 60 if is_pullable else None
+
     integration = Integration(
         project_id=project.id,
         type=body.type,
@@ -51,6 +59,9 @@ async def create_integration(
         base_url=body.base_url,
         config=body.config,
         sync_status=SyncStatus.never,
+        auto_sync_interval_minutes=auto_sync_interval,
+        # Due immediately so the first auto-sync fires on the next poll tick.
+        next_sync_at=datetime.now(timezone.utc) if auto_sync_interval else None,
     )
     db.add(integration)
     await db.flush()
@@ -119,6 +130,13 @@ async def update_integration(
         integration.base_url = body.base_url
     if body.config is not None:
         integration.config = body.config
+
+    if "auto_sync_interval_minutes" in body.model_fields_set:
+        integration.auto_sync_interval_minutes = body.auto_sync_interval_minutes
+        # Apply the new schedule promptly: due now when enabled, cleared when off.
+        integration.next_sync_at = (
+            datetime.now(timezone.utc) if body.auto_sync_interval_minutes else None
+        )
 
     await db.flush()
     await db.refresh(integration)

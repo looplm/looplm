@@ -164,6 +164,16 @@ export default function IntegrationsPanel() {
     }
   };
 
+  const handleAutoSyncChange = async (id: string, intervalMinutes: number | null) => {
+    try {
+      await updateIntegration(id, { auto_sync_interval_minutes: intervalMinutes });
+      toast.success(intervalMinutes ? "Auto-sync scheduled" : "Auto-sync turned off");
+      load();
+    } catch (err: any) {
+      toast.error("Failed to update auto-sync", { description: err.message });
+    }
+  };
+
   const handleDelete = async (i: Integration) => {
     if (!confirm(`Delete "${i.name}"? All synced traces from this integration will be permanently removed.`)) return;
     try {
@@ -317,6 +327,7 @@ export default function IntegrationsPanel() {
                 onStopSync={handleStopSync}
                 onUpdateExistingChange={(checked) => setUpdateExisting({ ...updateExisting, [i.id]: checked })}
                 onCustomSinceDateChange={(date) => setCustomSinceDate({ ...customSinceDate, [i.id]: date })}
+                onAutoSyncChange={handleAutoSyncChange}
               />
             )
           ))}

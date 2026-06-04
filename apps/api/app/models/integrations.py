@@ -49,6 +49,12 @@ class Integration(Base):
     # trace was received via the ingest endpoint. Distinct from last_synced_at
     # (pull-based) so the two semantics don't collide.
     last_received_at = Column(DateTime(timezone=True))
+    # Auto-sync schedule (pull-based integrations only). NULL = disabled; a
+    # positive value = run a sync every N minutes. next_sync_at is the durable
+    # "due" marker — the poller advances it before each run so a failed sync
+    # backs off to the next interval instead of being retried every tick.
+    auto_sync_interval_minutes = Column(Integer)
+    next_sync_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 

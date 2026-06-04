@@ -74,8 +74,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.services.batch_poller import start_batch_poller, stop_batch_poller
     await start_batch_poller()
 
+    # Start auto-sync poller (scheduled trace syncs)
+    from app.services.sync_poller import start_sync_poller, stop_sync_poller
+    await start_sync_poller()
+
     yield
     # Shutdown
+    await stop_sync_poller()
     await stop_batch_poller()
     await engine.dispose()
 

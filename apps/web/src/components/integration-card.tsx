@@ -11,6 +11,19 @@ const PHASE_LABELS: Record<NonNullable<Integration["sync_phase"]>, string> = {
   processing_scores: "Processing scores",
 };
 
+// Preset auto-sync cadences. Values (minutes) must match ALLOWED_SYNC_INTERVALS
+// in the API; null = disabled.
+const AUTO_SYNC_OPTIONS: { label: string; value: number | null }[] = [
+  { label: "Off", value: null },
+  { label: "Every 15 min", value: 15 },
+  { label: "Every 30 min", value: 30 },
+  { label: "Hourly", value: 60 },
+  { label: "Every 3h", value: 180 },
+  { label: "Every 6h", value: 360 },
+  { label: "Every 12h", value: 720 },
+  { label: "Daily", value: 1440 },
+];
+
 function formatElapsed(startedAt: string, now: number): string {
   const diffMs = Math.max(0, now - new Date(startedAt).getTime());
   const totalSeconds = Math.floor(diffMs / 1000);
@@ -41,6 +54,7 @@ interface IntegrationCardProps {
   onStopSync: (id: string) => void;
   onUpdateExistingChange: (checked: boolean) => void;
   onCustomSinceDateChange: (date: string) => void;
+  onAutoSyncChange: (id: string, intervalMinutes: number | null) => void;
 }
 
 export function IntegrationCard({
@@ -54,6 +68,7 @@ export function IntegrationCard({
   onStopSync,
   onUpdateExistingChange,
   onCustomSinceDateChange,
+  onAutoSyncChange,
 }: IntegrationCardProps) {
   const isSyncing = i.sync_status === "syncing";
   const [now, setNow] = useState(() => Date.now());
@@ -83,6 +98,27 @@ export function IntegrationCard({
             <span>{i.base_url || "Default endpoint"}</span>
             {i.config?.project ? <span>Project: {String(i.config.project)}</span> : null}
             <span>Last synced: {i.last_synced_at ? new Date(i.last_synced_at).toLocaleString() : "Never"}</span>
+            <span className="flex items-center gap-1.5">
+              Auto-sync:
+              <select
+                value={i.auto_sync_interval_minutes ?? ""}
+                onChange={(e) =>
+                  onAutoSyncChange(i.id, e.target.value === "" ? null : Number(e.target.value))
+                }
+                className="px-2 py-0.5 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded text-xs"
+              >
+                {AUTO_SYNC_OPTIONS.map((opt) => (
+                  <option key={opt.label} value={opt.value ?? ""}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              {i.auto_sync_interval_minutes && i.next_sync_at && i.sync_status !== "syncing" ? (
+                <span className="text-gray-400 dark:text-slate-500">
+                  · next {new Date(i.next_sync_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              ) : null}
+            </span>
           </div>
         </div>
         <div className="flex gap-2">
