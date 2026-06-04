@@ -12,6 +12,7 @@ in-process for their TTL; no GitHub-issued secret is ever written to disk.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import shutil
@@ -295,12 +296,18 @@ def _repo_lock(project_id: UUID) -> asyncio.Lock:
 
 
 def _git_env_with_token(token: str) -> dict[str, str]:
-    """Build a git subprocess env that injects the auth header without touching disk."""
+    """Build a git subprocess env that injects the auth header without touching disk.
+
+    GitHub's git-over-HTTPS endpoint expects Basic auth with the username
+    ``x-access-token`` for installation tokens (the same scheme ``actions/checkout``
+    uses) — the ``Bearer`` scheme is rejected with "invalid credentials".
+    """
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_CONFIG_COUNT"] = "1"
     env["GIT_CONFIG_KEY_0"] = "http.https://github.com/.extraheader"
-    env["GIT_CONFIG_VALUE_0"] = f"Authorization: bearer {token}"
+    env["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {basic}"
     return env
 
 
@@ -341,7 +348,7 @@ async def ensure_repo_clone(
         raise GithubAppError(f"Invalid repo name: {repo_full_name!r}")
 
     branch = default_branch or "main"
-    clone_root = Path(settings.github_clone_dir) / str(project_id)
+    clone_root = _clone_root() / str(project_id)
     target = clone_root / repo_full_name.replace("/", "__")
 
     async with _repo_lock(project_id):
@@ -381,9 +388,19 @@ async def ensure_repo_clone(
         return target
 
 
+def _clone_root() -> Path:
+    """Resolve the configured clone dir, expanding ``~`` and env vars.
+
+    Lets `.env` use a writable home path (e.g. ``~/.looplm/repos``) for local
+    dev while production still mounts an absolute path like ``/var/looplm/repos``.
+    """
+    raw = os.path.expanduser(os.path.expandvars(settings.github_clone_dir))
+    return Path(raw)
+
+
 def remove_repo_clone(project_id: UUID) -> None:
     """Best-effort delete of a project's clone directory."""
-    clone_root = Path(settings.github_clone_dir) / str(project_id)
+    clone_root = _clone_root() / str(project_id)
     if clone_root.exists():
         shutil.rmtree(clone_root, ignore_errors=True)
 
