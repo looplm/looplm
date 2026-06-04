@@ -96,4 +96,43 @@ export function graderDisplayName(name: string, evaluatorMap: Record<string, Eva
   return evaluatorMap[name]?.display_name || name;
 }
 
+/** Display metadata for a root-cause category (label, badge classes, short blurb). */
+export interface RootCauseStyle {
+  label: string;
+  badge: string;
+  description: string;
+}
+
+const ROOT_CAUSE_STYLES: Record<string, RootCauseStyle> = {
+  retrieval: {
+    label: "Retrieval",
+    badge: "bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400",
+    description: "The retrieved context didn't contain what was needed to answer.",
+  },
+  generation: {
+    label: "Generation",
+    badge: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400",
+    description: "Context was sufficient, but the model's answer mishandled it.",
+  },
+  task_spec: {
+    label: "Task / spec",
+    badge: "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400",
+    description: "Answer looks grounded — likely an ambiguous question, ground-truth mismatch, or grader calibration issue.",
+  },
+  indeterminate: {
+    label: "Indeterminate",
+    badge: "bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400",
+    description: "Couldn't attribute the failure — often no retrieval context was captured.",
+  },
+};
+
+export function rootCauseStyle(category: string | null | undefined): RootCauseStyle | null {
+  if (!category) return null;
+  return ROOT_CAUSE_STYLES[category] ?? {
+    label: category,
+    badge: "bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400",
+    description: "",
+  };
+}
+
 export { formatScoreValue, formatScoreLabel } from "@/components/compare-runs-badges";

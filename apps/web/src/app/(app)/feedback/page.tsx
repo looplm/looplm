@@ -57,6 +57,7 @@ export default function FeedbackPage() {
     handleEvaluate,
     handleAcceptSuggestion,
     handleAnalyzeTopQuestions,
+    handleStopTopQuestions,
     handleGenerateSuggestions,
     handleStopSuggestionRun,
   } = useFeedbackPage();
@@ -81,6 +82,16 @@ export default function FeedbackPage() {
               className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {sugLoading ? "Generating..." : sugGenerated ? "Regenerate" : "Generate Test Cases"}
+            </button>
+          )}
+          {tab === "top-questions" && topQuestionsRunning && (
+            <button
+              onClick={handleStopTopQuestions}
+              disabled={!canEdit}
+              title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
+              className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Stop ({topQuestionsResult?.processed_questions ?? 0}/{topQuestionsResult?.total_questions ?? 0})
             </button>
           )}
           {tab === "top-questions" && !topQuestionsRunning && (

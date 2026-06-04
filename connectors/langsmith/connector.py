@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -14,6 +16,33 @@ from connectors.base import BaseConnector, ProgressCallback, SyncProgress
 logger = logging.getLogger(__name__)
 
 LANGSMITH_API_URL = "https://api.smith.langchain.com"
+
+# LangSmith's /runs/query caps `limit` at 100 per request; larger pulls must paginate.
+_PAGE_SIZE = 100
+# Throttle between pages so a large sync drips rather than bursts at the rate limiter.
+_INTER_PAGE_DELAY = 0.25
+# Retry behaviour for rate limits (429) and transient upstream errors.
+_RETRY_STATUS = {429, 502, 503, 504}
+_MAX_RETRIES = 5
+_INITIAL_BACKOFF = 1.0
+_MAX_BACKOFF = 30.0
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a Retry-After header (delta-seconds or HTTP-date) into seconds."""
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        retry_dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if retry_dt is None:
+        return None
+    return max(0.0, (retry_dt - datetime.now(retry_dt.tzinfo)).total_seconds())
 
 
 class LangSmithConnector(BaseConnector):
@@ -39,6 +68,41 @@ class LangSmithConnector(BaseConnector):
             logger.error("LangSmith health check failed: %s", e)
             return False
 
+    async def _request(
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Issue a request, retrying on rate limits and transient upstream errors.
+
+        On a 429 the server's Retry-After header is honored exactly; otherwise we
+        back off exponentially with jitter. After exhausting retries the last
+        response's status is raised.
+        """
+        for attempt in range(_MAX_RETRIES + 1):
+            resp = await client.request(method, url, headers=self._headers, **kwargs)
+            if resp.status_code not in _RETRY_STATUS or attempt == _MAX_RETRIES:
+                resp.raise_for_status()
+                return resp
+            retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+            if retry_after is None:
+                retry_after = min(_MAX_BACKOFF, _INITIAL_BACKOFF * (2**attempt))
+            backoff = retry_after + random.uniform(0, retry_after * 0.25)
+            logger.warning(
+                "LangSmith %s %s -> %d; retrying in %.1fs (attempt %d/%d)",
+                method,
+                url,
+                resp.status_code,
+                backoff,
+                attempt + 1,
+                _MAX_RETRIES,
+            )
+            await asyncio.sleep(backoff)
+        # Unreachable: the loop returns or raises on its final iteration.
+        raise RuntimeError("LangSmith request retries exhausted")
+
     async def fetch_traces(
         self,
         since: datetime,
@@ -51,26 +115,59 @@ class LangSmithConnector(BaseConnector):
                 phase="fetching_traces",
                 message=f"Querying LangSmith for traces since {since.date().isoformat()}",
             ))
-        runs = []
+        runs: list[dict[str, Any]] = []
         async with httpx.AsyncClient() as client:
-            query_body: dict[str, Any] = {
-                "is_root": True,
-                "start_time": since.isoformat(),
-                "limit": limit,
-            }
+            # /runs/query requires at least one of session/id/trace/... — a bare
+            # start_time + is_root query is rejected. Scope to the configured
+            # project, or to every session in the workspace when none is set.
             if self.project:
                 project_id = await self._resolve_project_id(client, self.project)
-                if project_id:
-                    query_body["session"] = [project_id]
-            resp = await client.post(
-                f"{self.api_url}/runs/query",
-                headers=self._headers,
-                json=query_body,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            runs = data.get("runs", data) if isinstance(data, dict) else data
+                session_filter = [project_id] if project_id else []
+            else:
+                session_filter = await self._resolve_all_session_ids(client)
+
+            if not session_filter:
+                logger.warning("LangSmith: no sessions found to query; nothing to sync")
+                return []
+
+            # The API caps `limit` at 100 per request, so page with cursors until
+            # we reach the caller's requested total (or run out of runs).
+            cursor: str | None = None
+            while len(runs) < limit:
+                query_body: dict[str, Any] = {
+                    "is_root": True,
+                    "start_time": since.isoformat(),
+                    "limit": min(_PAGE_SIZE, limit - len(runs)),
+                    "session": session_filter,
+                }
+                if cursor:
+                    query_body["cursor"] = cursor
+
+                resp = await self._request(
+                    client,
+                    "POST",
+                    f"{self.api_url}/runs/query",
+                    json=query_body,
+                    timeout=30,
+                )
+                data = resp.json()
+                page = data.get("runs", data) if isinstance(data, dict) else data
+                if not page:
+                    break
+                runs.extend(page)
+
+                if on_progress is not None:
+                    await on_progress(SyncProgress(
+                        phase="fetching_traces",
+                        message=f"Fetched {len(runs)} traces",
+                        current=len(runs),
+                    ))
+
+                cursors = data.get("cursors", {}) if isinstance(data, dict) else {}
+                cursor = cursors.get("next")
+                if not cursor:
+                    break
+                await asyncio.sleep(_INTER_PAGE_DELAY)
         if on_progress is not None:
             await on_progress(SyncProgress(
                 phase="fetching_traces",
@@ -81,41 +178,58 @@ class LangSmithConnector(BaseConnector):
 
     async def _resolve_project_id(self, client: httpx.AsyncClient, project_name: str) -> str | None:
         """Look up a LangSmith project (session) ID by name."""
-        resp = await client.get(
+        resp = await self._request(
+            client,
+            "GET",
             f"{self.api_url}/sessions",
-            headers=self._headers,
             params={"name": project_name},
             timeout=10,
         )
-        resp.raise_for_status()
         sessions = resp.json()
         if sessions:
             return str(sessions[0]["id"])
         return None
 
+    async def _resolve_all_session_ids(self, client: httpx.AsyncClient) -> list[str]:
+        """List every project (session) ID in the workspace.
+
+        Used when no specific project is configured, since /runs/query requires
+        a session (or other) filter and rejects an unscoped query.
+        """
+        resp = await self._request(
+            client,
+            "GET",
+            f"{self.api_url}/sessions",
+            timeout=10,
+        )
+        sessions = resp.json()
+        if not isinstance(sessions, list):
+            return []
+        return [str(s["id"]) for s in sessions if isinstance(s, dict) and s.get("id")]
+
     async def fetch_trace_detail(self, trace_id: str) -> dict[str, Any]:
         """Fetch a run and its child runs."""
         async with httpx.AsyncClient() as client:
             # Get the root run
-            resp = await client.get(
+            resp = await self._request(
+                client,
+                "GET",
                 f"{self.api_url}/runs/{trace_id}",
-                headers=self._headers,
                 timeout=30,
             )
-            resp.raise_for_status()
             run = resp.json()
 
             # Get child runs with cursor-based pagination (API max is 100 per page)
             all_children: list[dict[str, Any]] = []
-            body: dict[str, Any] = {"trace": trace_id, "is_root": False, "limit": 100}
+            body: dict[str, Any] = {"trace": trace_id, "is_root": False, "limit": _PAGE_SIZE}
             while True:
-                children_resp = await client.post(
+                children_resp = await self._request(
+                    client,
+                    "POST",
                     f"{self.api_url}/runs/query",
-                    headers=self._headers,
                     json=body,
                     timeout=30,
                 )
-                children_resp.raise_for_status()
                 children_data = children_resp.json()
                 runs = children_data.get("runs", children_data) if isinstance(children_data, dict) else children_data
                 if not runs:
@@ -125,6 +239,7 @@ class LangSmithConnector(BaseConnector):
                 if not cursors.get("next"):
                     break
                 body["cursor"] = cursors["next"]
+                await asyncio.sleep(_INTER_PAGE_DELAY)
 
             run["child_runs"] = all_children
             return run

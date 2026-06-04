@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -182,6 +183,36 @@ async def get_top_questions_analysis(
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     return _build_response(analysis)
+
+
+@router.post(
+    "/top-questions/{analysis_id}/stop",
+    dependencies=[require_write("observe", "feedback")],
+)
+async def stop_top_questions_analysis(
+    analysis_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Cancel an in-progress top questions analysis."""
+    from app.models.feedback_eval import TopQuestionsAnalysis
+
+    analysis = await db.get(TopQuestionsAnalysis, analysis_id)
+    if not analysis or analysis.project_id != project.id:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    if analysis.status not in ("pending", "running"):
+        return {"message": "Analysis already finished", "status": analysis.status}
+
+    # Cancel the background task
+    task = _top_questions_tasks.pop(analysis_id, None)
+    if task and not task.done():
+        task.cancel()
+
+    analysis.status = "cancelled"
+    analysis.completed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {"message": "Analysis stopped", "status": "cancelled"}
 
 
 def _build_response(analysis) -> TopQuestionsResponse:

@@ -26,6 +26,7 @@ export interface GithubInstallation {
   account_type: string;
   repo_full_name: string | null;
   repo_default_branch: string | null;
+  repo_branch: string | null;
 }
 
 export const getGithubStatus = () => request<GithubStatus>("/api/github/status");
@@ -45,6 +46,11 @@ export const completeGithubCallback = (code: string, state: string) =>
 export const listInstallationRepos = (installationId: number) =>
   request<GithubRepo[]>(`/api/github/installations/${installationId}/repos`);
 
+export const listRepoBranches = (installationId: number, repoFullName: string) =>
+  request<string[]>(
+    `/api/github/installations/${installationId}/branches?repo_full_name=${encodeURIComponent(repoFullName)}`,
+  );
+
 export const getProjectGithubInstallation = () =>
   request<GithubInstallation | null>("/api/github/installation");
 
@@ -54,6 +60,7 @@ export const selectProjectGithubInstallation = (body: {
   account_type: string;
   repo_full_name: string;
   repo_default_branch: string | null;
+  repo_branch?: string | null;
 }) =>
   request<GithubInstallation>("/api/github/installation", {
     method: "POST",
@@ -62,3 +69,36 @@ export const selectProjectGithubInstallation = (body: {
 
 export const disconnectProjectGithubInstallation = () =>
   request<void>("/api/github/installation", { method: "DELETE" });
+
+/** Per-project GitHub App identity (the App id + OAuth client + signing key). */
+export interface GithubAppConfig {
+  configured: boolean;
+  source: "project" | "env" | null;
+  can_manage: boolean;
+  app_id: string | null;
+  app_name: string | null;
+  client_id: string | null;
+  has_client_secret: boolean;
+  has_private_key: boolean;
+}
+
+export interface GithubAppConfigInput {
+  app_id: string;
+  app_name?: string | null;
+  client_id: string;
+  /** Write-only. Leave blank when updating to keep the stored value. */
+  client_secret?: string;
+  private_key?: string;
+}
+
+export const getProjectGithubAppConfig = () =>
+  request<GithubAppConfig>("/api/github/app-config");
+
+export const saveProjectGithubAppConfig = (body: GithubAppConfigInput) =>
+  request<GithubAppConfig>("/api/github/app-config", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
+export const deleteProjectGithubAppConfig = () =>
+  request<void>("/api/github/app-config", { method: "DELETE" });

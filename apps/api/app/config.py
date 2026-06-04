@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # Sync — overall timeout (seconds) for one background sync run
     sync_timeout_seconds: int = 1800
 
+    # First-party tracing ingest (push-based SDK → /api/v1/ingest)
+    ingest_enabled: bool = True
+    ingest_max_batch: int = 100          # max traces accepted per ingest request
+    ingest_max_spans_per_trace: int = 1000
+
     # Auto-grading
     auto_grade_enabled: bool = False
     auto_grade_interval_minutes: int = 5

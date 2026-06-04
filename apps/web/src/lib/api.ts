@@ -21,6 +21,8 @@ export type {
   Integration,
   CreateIntegrationBody,
   UpdateIntegrationBody,
+  IngestKey,
+  IngestKeyCreated,
   TraceListResponse,
   TraceListItem,
   ThreadSummary,
@@ -41,6 +43,9 @@ export type {
   BottleneckResponse,
   Suggestion,
   AdvisorResponse,
+  AdvisorRunResponse,
+  AdvisorRunTrigger,
+  AdvisorProgressLogEntry,
   PromptItem,
   PromptListResponse,
   AntiPattern,
@@ -67,6 +72,7 @@ export type {
   ConversationTurn,
   EvalResultItem,
   EvalResultSummary,
+  RootCauseDetail,
   GraderResultSummary,
   EvalRunDetail,
   EvalRunStats,
@@ -99,6 +105,11 @@ export type {
   CostOverviewTrendPoint,
   ModelCostItem,
   ServiceCostItem,
+  RequestOutcome,
+  RequestClusterTheme,
+  RequestClustersResponse,
+  RetrievalSource,
+  RetrievalActivityPoint,
 } from "./api-types";
 
 // Re-export all functions from domain modules
@@ -113,5 +124,6 @@ export * from "./api/datasets-api";
 export * from "./api/code-agent-api";
 export * from "./api/github-api";
 export * from "./api/costs-api";
+export * from "./api/analytics-api";
 export * from "./api/version";
 export * from "./api/admin";

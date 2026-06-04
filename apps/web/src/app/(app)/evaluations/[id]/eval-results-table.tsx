@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { EvalResultSummary, EvaluatorItem } from "@/lib/api";
-import { sortGraderEntries, graderDisplayName } from "./eval-utils";
+import { sortGraderEntries, graderDisplayName, rootCauseStyle } from "./eval-utils";
 
 type SortColumn = "test_id" | "result" | "summary" | "graders";
 type SortDirection = "asc" | "desc";
@@ -186,6 +186,7 @@ export function EvalResultsTable({
                     const skipped = active.filter(([, g]) => g.skipped);
                     const passed = active.filter(([, g]) => g.pass && !g.skipped);
                     const needsInfo = result.failure_pattern === "needs_more_info";
+                    const rc = result.pass ? null : rootCauseStyle(result.root_cause);
                     return (
                       <div className="flex gap-1 flex-wrap">
                         {needsInfo && (
@@ -194,6 +195,14 @@ export function EvalResultsTable({
                             title="Assistant asked a clarifying question instead of answering"
                           >
                             Needs more info
+                          </span>
+                        )}
+                        {rc && (
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded text-sm font-medium ${rc.badge}`}
+                            title={rc.description}
+                          >
+                            {rc.label}
                           </span>
                         )}
                         {failed.map(([name, g]) => (

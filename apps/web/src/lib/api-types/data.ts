@@ -174,7 +174,7 @@ export interface TopQuestionTheme {
 
 export interface TopQuestionsResponse {
   id: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
   error?: string;
   total_questions: number;
   processed_questions: number;

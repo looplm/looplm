@@ -12,10 +12,11 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.config import settings
 from app.routers import (
-    admin, analysis, advisor, auth_router, costs_overview, dashboard, datasets, evaluations,
+    admin, analysis, analytics, advisor, auth_router, costs_overview, dashboard, datasets, evaluations,
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
-    integrations, langsmith, llm_costs, code_agent, permissions, project_members, projects,
-    prompts, route_analysis, trace_detail, traces, user_settings, version,
+    ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent, permissions,
+    project_members, projects, prompts, route_analysis, trace_detail, traces, user_settings,
+    version,
 )
 
 logger = logging.getLogger("looplm")
@@ -36,7 +37,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.models.user import User  # noqa: F401 — ensure user table is created
     from app.models.project import Project  # noqa: F401 — ensure project table is created
     from app.models.admin_audit import AdminAudit  # noqa: F401 — ensure audit table is created
-    from app.models.github import GithubInstallation  # noqa: F401 — ensure table is created
+    from app.models.github import (  # noqa: F401 — ensure tables are created
+        GithubInstallation,
+        ProjectGithubApp,
+    )
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -70,8 +74,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.services.batch_poller import start_batch_poller, stop_batch_poller
     await start_batch_poller()
 
+    # Start auto-sync poller (scheduled trace syncs)
+    from app.services.sync_poller import start_sync_poller, stop_sync_poller
+    await start_sync_poller()
+
     yield
     # Shutdown
+    await stop_sync_poller()
     await stop_batch_poller()
     await engine.dispose()
 
@@ -139,15 +148,19 @@ app.include_router(version.router)
 app.include_router(auth_router.router)
 app.include_router(projects.router)
 app.include_router(integrations.router)
+app.include_router(ingest_keys.router)
+app.include_router(ingest.router)
 app.include_router(traces.router)
 app.include_router(trace_detail.router)
 app.include_router(feedback.router)
 app.include_router(fixes.router)
 app.include_router(dashboard.router)
+app.include_router(analytics.router)
 app.include_router(analysis.router)
 app.include_router(langsmith.router)
 app.include_router(graph.router)
 app.include_router(route_analysis.router)
+app.include_router(issues.router)
 app.include_router(advisor.router)
 app.include_router(prompts.router)
 app.include_router(evaluations.router)

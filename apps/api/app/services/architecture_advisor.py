@@ -137,8 +137,10 @@ async def analyze_architecture(
     # Persist to database
     row = AdvisorAnalysis(
         integration_id=integration_id,
+        project_id=project_id,
         suggestions=[s.model_dump() for s in suggestions],
         analyzed_at=analyzed_at,
+        status="completed",
     )
     db.add(row)
     await db.commit()
@@ -150,10 +152,18 @@ async def get_latest_suggestions(
     integration_id: UUID,
     db: AsyncSession,
 ) -> AdvisorResponse | None:
-    """Return the most recent advisor analysis for an integration."""
+    """Return the most recent *completed* advisor analysis for an integration.
+
+    In-flight / failed async repo runs are skipped so a pending or failed run
+    never shadows the last good set of suggestions. Legacy rows have a NULL
+    status and are treated as completed.
+    """
     stmt = (
         select(AdvisorAnalysis)
-        .where(AdvisorAnalysis.integration_id == integration_id)
+        .where(
+            AdvisorAnalysis.integration_id == integration_id,
+            (AdvisorAnalysis.status == "completed") | (AdvisorAnalysis.status.is_(None)),
+        )
         .order_by(AdvisorAnalysis.analyzed_at.desc())
         .limit(1)
     )

@@ -15,6 +15,7 @@ class IntegrationType(str, enum.Enum):
     langfuse = "langfuse"
     langsmith = "langsmith"
     json_file = "json_file"
+    looplm = "looplm"  # first-party push-based tracing (SDK → ingest endpoint)
 
 
 class SyncStatus(str, enum.Enum):
@@ -61,4 +62,28 @@ class CodeSuggestionType(str, enum.Enum):
 class CodeSuggestionStatus(str, enum.Enum):
     pending = "pending"
     applied = "applied"
+    dismissed = "dismissed"
+
+
+class SignalType(str, enum.Enum):
+    """Kinds of production signal that can feed issue detection."""
+
+    explicit_failure = "explicit_failure"   # trace status == failure / error span
+    eval_failure = "eval_failure"           # auto-grade / online evaluator failed
+    negative_feedback = "negative_feedback"  # low user feedback score
+    anomaly = "anomaly"                     # latency / token / step-count outlier
+
+
+class IssueSeverity(str, enum.Enum):
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
+class IssueStatus(str, enum.Enum):
+    open = "open"
+    diagnosing = "diagnosing"
+    resolving = "resolving"
+    resolved = "resolved"
+    recurring = "recurring"   # was resolved, then the pattern came back
     dismissed = "dismissed"

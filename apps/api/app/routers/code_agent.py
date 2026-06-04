@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,7 +14,6 @@ from app.auth import get_current_project, get_current_user, require_section, req
 from app.db import async_session, get_db
 from app.models.evaluations import EvalRun
 from app.models.code_agent import OpenCodeAnalysis
-from app.models.github import GithubInstallation
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.code_agent import (
@@ -30,6 +28,7 @@ from app.services.code_agent_service import (
     get_analysis,
     update_suggestion_status,
 )
+from app.services.repo_resolver import RepoPathError, resolve_project_repo
 
 logger = logging.getLogger(__name__)
 
@@ -69,44 +68,18 @@ async def trigger_code_agent_analysis(
     # Resolve repo path. Explicit local path wins; otherwise materialize the
     # project's linked GitHub repo (if any) into a managed clone.
     ps = dict(project.settings or {})
-    repo_path = ps.get("code_agent_repo_path")
-    if repo_path:
-        p = Path(repo_path)
-        if not p.exists() or not p.is_dir():
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "code": "INVALID_PATH",
-                        "message": f"Repository path does not exist or is not a directory: {repo_path}",
-                    }
-                },
-            )
-    else:
-        installation = (
-            await db.execute(
-                select(GithubInstallation).where(GithubInstallation.project_id == project.id)
-            )
-        ).scalar_one_or_none()
-        if installation and installation.repo_full_name:
-            try:
-                cloned = await github_app.ensure_repo_clone(
-                    project_id=project.id,
-                    installation_id=installation.installation_id,
-                    repo_full_name=installation.repo_full_name,
-                    default_branch=installation.repo_default_branch,
-                )
-                repo_path = str(cloned)
-            except (github_app.GithubAppDisabledError, github_app.GithubAppError) as exc:
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "error": {
-                            "code": "GITHUB_CLONE_FAILED",
-                            "message": str(exc),
-                        }
-                    },
-                ) from exc
+    try:
+        repo_path = await resolve_project_repo(project, db)
+    except RepoPathError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_PATH", "message": str(exc)}},
+        ) from exc
+    except (github_app.GithubAppDisabledError, github_app.GithubAppError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": {"code": "GITHUB_CLONE_FAILED", "message": str(exc)}},
+        ) from exc
 
     file_patterns = (
         (body.file_patterns if body and body.file_patterns else None)

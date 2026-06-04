@@ -8,6 +8,8 @@ import type {
   Integration,
   CreateIntegrationBody,
   UpdateIntegrationBody,
+  IngestKey,
+  IngestKeyCreated,
   TraceListResponse,
   ThreadListResponse,
   TraceDetail,
@@ -18,6 +20,8 @@ import type {
   RouteAnalysisResponse,
   BottleneckResponse,
   AdvisorResponse,
+  AdvisorRunResponse,
+  AdvisorRunTrigger,
 } from "../api-types";
 import { cachedRequest, invalidateCache, request } from "./client";
 
@@ -71,6 +75,20 @@ export const triggerSync = async (id: string, body?: { since?: string; update_ex
 
 export const stopSync = (id: string) =>
   request<{ message: string }>(`/api/integrations/${id}/sync/stop`, { method: "POST" });
+
+// --- Ingest keys (first-party tracing) ---
+
+export const getIngestKeys = (integrationId: string) =>
+  request<{ data: IngestKey[] }>(`/api/integrations/${integrationId}/ingest-keys`);
+
+export const createIngestKey = (integrationId: string, name: string) =>
+  request<IngestKeyCreated>(`/api/integrations/${integrationId}/ingest-keys`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+
+export const revokeIngestKey = (integrationId: string, keyId: string) =>
+  request<void>(`/api/integrations/${integrationId}/ingest-keys/${keyId}`, { method: "DELETE" });
 
 // --- Traces ---
 
@@ -137,11 +155,25 @@ export const getRouteBottlenecks = (integrationId: string) =>
 
 // --- Advisor ---
 
-export const triggerAdvisorAnalysis = (integrationId: string, extraContext = "") =>
-  request<AdvisorResponse>(`/api/advisor/${integrationId}/analyze`, {
+// Graph-only path (use_repo=false) returns AdvisorResponse; repo path returns a
+// pending trigger (202) that the caller polls via getAdvisorRun.
+export const triggerAdvisorAnalysis = (
+  integrationId: string,
+  extraContext = "",
+  useRepo = false,
+) =>
+  request<AdvisorResponse | AdvisorRunTrigger>(`/api/advisor/${integrationId}/analyze`, {
     method: "POST",
-    body: JSON.stringify({ extra_context: extraContext }),
+    body: JSON.stringify({ extra_context: extraContext, use_repo: useRepo }),
   });
 
 export const getAdvisorSuggestions = (integrationId: string) =>
   request<AdvisorResponse>(`/api/advisor/${integrationId}/suggestions`);
+
+export const getAdvisorRun = (integrationId: string) =>
+  request<AdvisorRunResponse>(`/api/advisor/${integrationId}/run`);
+
+export const cancelAdvisorRun = (integrationId: string) =>
+  request<{ status: string; analysis_id: string }>(`/api/advisor/${integrationId}/cancel`, {
+    method: "POST",
+  });
