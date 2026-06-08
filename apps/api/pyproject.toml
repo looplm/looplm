@@ -23,6 +23,8 @@ alembic = ">=1.13.0"
 celery = ">=5.4.0"
 langfuse = ">=2.0.0"
 langsmith = ">=0.1.0"
+azure-search-documents = ">=11.5.0"
+aiohttp = ">=3.9.0"  # async HTTP transport for the azure-search aio clients
 pydantic-ai-slim = {version = ">=1.0.0", extras = ["openai", "anthropic"]}
 looplm-connectors = {path = "../../connectors", develop = true}
 
