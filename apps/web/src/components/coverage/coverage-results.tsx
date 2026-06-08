@@ -4,9 +4,11 @@ import { useMemo, useState } from "react";
 
 import { StatCard } from "@/components/eval-shared";
 import {
+  BALANCE_LABEL,
+  BALANCE_PILL,
   BAND_ACCENT,
   chunkCoverageBand,
-  HIGH_IMPACT_SHARE,
+  testBalance,
 } from "@/components/coverage/coverage-bands";
 import type {
   CoverageResults,
@@ -36,6 +38,7 @@ export function CoverageResultsView({
 }) {
   const maxCount = results.rows.reduce((m, r) => Math.max(m, r.indexed_count), 0) || 1;
   const totalDocs = results.total_docs || 0;
+  const totalCases = results.rows.reduce((s, r) => s + r.covering_cases, 0);
   const chunkBand = chunkCoverageBand(results.doc_coverage_pct);
   const [noteFor, setNoteFor] = useState<PartitionIssue | null>(null);
 
@@ -99,7 +102,16 @@ export function CoverageResultsView({
               const ack = ackByValue.get(r.value);
               const share = totalDocs > 0 ? (r.indexed_count / totalDocs) * 100 : 0;
               const shareLabel = share >= 1 ? `${Math.round(share)}%` : `${share.toFixed(1)}%`;
-              const highImpact = !r.covered && share >= HIGH_IMPACT_SHARE;
+              const testShare = totalCases > 0 ? (r.covering_cases / totalCases) * 100 : 0;
+              const balance = testBalance({
+                indexedCount: r.indexed_count,
+                coveringCases: r.covering_cases,
+                totalDocs,
+                totalCases,
+              });
+              const balanceTitle = `${shareLabel} of content vs ${
+                testShare >= 1 ? Math.round(testShare) : testShare.toFixed(1)
+              }% of tests`;
               return (
                 <tr
                   key={r.value}
@@ -108,18 +120,8 @@ export function CoverageResultsView({
                   }`}
                 >
                   <td className="px-4 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium truncate max-w-[320px]" title={r.value}>
-                        {r.value || <span className="italic text-gray-400">(empty)</span>}
-                      </span>
-                      {highImpact && (
-                        <span
-                          className="inline-block px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
-                          title={`${shareLabel} of the index is in this value and it has no eval coverage`}
-                        >
-                          high-impact gap
-                        </span>
-                      )}
+                    <div className="font-medium truncate max-w-[320px]" title={r.value}>
+                      {r.value || <span className="italic text-gray-400">(empty)</span>}
                     </div>
                     <div className="mt-1 h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden max-w-[320px]">
                       <div
@@ -165,7 +167,29 @@ export function CoverageResultsView({
                       {shareLabel} of index
                     </div>
                   </td>
-                  <td className="px-4 py-2 text-right tabular-nums">{r.covering_cases}</td>
+                  <td className="px-4 py-2 text-right">
+                    <div className="tabular-nums">{r.covering_cases}</div>
+                    {balance.status !== "none" && balance.status !== "balanced" && (
+                      <div className="mt-0.5 flex flex-col items-end gap-0.5" title={balanceTitle}>
+                        <span
+                          className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-medium ${BALANCE_PILL[balance.status]}`}
+                        >
+                          {BALANCE_LABEL[balance.status]}
+                        </span>
+                        <span className="text-[11px] text-gray-400 dark:text-slate-500">
+                          fair share ≈ {Math.round(balance.expected)}
+                        </span>
+                      </div>
+                    )}
+                    {balance.status === "balanced" && (
+                      <div
+                        className="mt-0.5 text-[11px] text-green-600 dark:text-green-400"
+                        title={balanceTitle}
+                      >
+                        balanced
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-center">{r.covered ? "✅" : "❌"}</td>
                 </tr>
               );
