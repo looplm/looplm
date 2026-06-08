@@ -3,6 +3,11 @@
 import { useMemo, useState } from "react";
 
 import { StatCard } from "@/components/eval-shared";
+import {
+  BAND_ACCENT,
+  chunkCoverageBand,
+  HIGH_IMPACT_SHARE,
+} from "@/components/coverage/coverage-bands";
 import type {
   CoverageResults,
   PartitionAcknowledgement,
@@ -30,6 +35,8 @@ export function CoverageResultsView({
   onUndoAcknowledge: (id: string) => void;
 }) {
   const maxCount = results.rows.reduce((m, r) => Math.max(m, r.indexed_count), 0) || 1;
+  const totalDocs = results.total_docs || 0;
+  const chunkBand = chunkCoverageBand(results.doc_coverage_pct);
   const [noteFor, setNoteFor] = useState<PartitionIssue | null>(null);
 
   const issueByValue = useMemo(() => {
@@ -59,6 +66,7 @@ export function CoverageResultsView({
           label="Chunk coverage"
           value={`${results.doc_coverage_pct}%`}
           sub="share of indexed chunks in covered values"
+          accent={BAND_ACCENT[chunkBand]}
         />
         <StatCard
           label="Gaps"
@@ -89,6 +97,9 @@ export function CoverageResultsView({
             {results.rows.map((r) => {
               const issue = issueByValue.get(r.value);
               const ack = ackByValue.get(r.value);
+              const share = totalDocs > 0 ? (r.indexed_count / totalDocs) * 100 : 0;
+              const shareLabel = share >= 1 ? `${Math.round(share)}%` : `${share.toFixed(1)}%`;
+              const highImpact = !r.covered && share >= HIGH_IMPACT_SHARE;
               return (
                 <tr
                   key={r.value}
@@ -97,8 +108,18 @@ export function CoverageResultsView({
                   }`}
                 >
                   <td className="px-4 py-2">
-                    <div className="font-medium truncate max-w-[320px]" title={r.value}>
-                      {r.value || <span className="italic text-gray-400">(empty)</span>}
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate max-w-[320px]" title={r.value}>
+                        {r.value || <span className="italic text-gray-400">(empty)</span>}
+                      </span>
+                      {highImpact && (
+                        <span
+                          className="inline-block px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+                          title={`${shareLabel} of the index is in this value and it has no eval coverage`}
+                        >
+                          high-impact gap
+                        </span>
+                      )}
                     </div>
                     <div className="mt-1 h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden max-w-[320px]">
                       <div
@@ -140,6 +161,9 @@ export function CoverageResultsView({
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums">
                     {r.indexed_count.toLocaleString()}
+                    <div className="text-[11px] text-gray-400 dark:text-slate-500">
+                      {shareLabel} of index
+                    </div>
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums">{r.covering_cases}</td>
                   <td className="px-4 py-2 text-center">{r.covered ? "✅" : "❌"}</td>

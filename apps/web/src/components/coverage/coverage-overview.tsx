@@ -3,6 +3,11 @@
 import { useState } from "react";
 
 import { ConfirmModal } from "@/components/confirm-modal";
+import {
+  BAND_LABEL,
+  BAND_PILL,
+  chunkCoverageBand,
+} from "@/components/coverage/coverage-bands";
 import type { CoverageCategoryOverview } from "@/lib/api";
 
 function timeAgo(iso: string): string {
@@ -58,7 +63,7 @@ export function CoverageOverview({
           <tr className="border-b border-gray-100 dark:border-slate-800 text-left text-xs text-gray-500 dark:text-slate-400">
             <th className="px-4 py-2 font-medium">Category</th>
             <th className="px-4 py-2 font-medium">Value coverage</th>
-            <th className="px-4 py-2 font-medium text-right">Chunk %</th>
+            <th className="px-4 py-2 font-medium">Chunk coverage</th>
             <th className="px-4 py-2 font-medium text-right">Gaps</th>
             <th className="px-4 py-2 font-medium text-right">Issues</th>
             <th className="px-4 py-2 font-medium">Last run</th>
@@ -68,6 +73,8 @@ export function CoverageOverview({
         <tbody>
           {categories.map((c) => {
             const pct = c.latest.value_coverage_pct ?? 0;
+            const chunkPct = c.latest.doc_coverage_pct ?? 0;
+            const band = chunkCoverageBand(c.latest.doc_coverage_pct);
             return (
               <tr key={c.partition_key} className="border-b border-gray-50 dark:border-slate-800/50">
                 <td className="px-4 py-3 font-medium">{c.partition_key}</td>
@@ -86,7 +93,16 @@ export function CoverageOverview({
                     {c.latest.covered_values}/{c.latest.total_values} values
                   </div>
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">{c.latest.doc_coverage_pct ?? 0}%</td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="tabular-nums">{chunkPct}%</span>
+                    <span
+                      className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-medium ${BAND_PILL[band]}`}
+                    >
+                      {BAND_LABEL[band]}
+                    </span>
+                  </div>
+                </td>
                 <td className="px-4 py-3 text-right tabular-nums">
                   {c.latest.gaps > 0 ? (
                     <span className="text-red-600 dark:text-red-400">{c.latest.gaps}</span>
