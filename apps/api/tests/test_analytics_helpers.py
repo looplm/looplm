@@ -1,7 +1,10 @@
 """Tests for analytics helpers: merged-theme resolution and retrieval-source labels."""
 
 from app.routers.dataset_helpers import extract_retrieval_sources
-from app.routers.top_questions_worker import resolve_merged_source_themes
+from app.routers.top_questions_worker import (
+    attribute_merged_themes,
+    resolve_merged_source_indices,
+)
 
 
 # ── Merge resolution (fixes the all-zero heatmap) ──────────────────
@@ -16,21 +19,45 @@ CHUNKS = [
 def test_resolve_by_source_indices_survives_renaming():
     # Merge renamed "Order issues" + "Order delays" → "Ordering" but kept indices.
     merged = {"theme": "Ordering", "source_indices": [0, 2]}
-    out = resolve_merged_source_themes(merged, CHUNKS)
-    items = [i for ct in out for i in ct["items"]]
-    assert sorted(items) == [1, 2, 4, 5]
+    assert resolve_merged_source_indices(merged, CHUNKS) == [0, 2]
+
+
+def test_resolve_coerces_string_indices():
+    assert resolve_merged_source_indices({"source_indices": ["0", "2"]}, CHUNKS) == [0, 2]
 
 
 def test_resolve_falls_back_to_name_when_indices_missing():
     merged = {"theme": "login problems"}  # different case, no indices
-    out = resolve_merged_source_themes(merged, CHUNKS)
-    assert [ct["theme"] for ct in out] == ["Login problems"]
+    assert resolve_merged_source_indices(merged, CHUNKS) == [1]
 
 
 def test_resolve_ignores_out_of_range_indices():
-    merged = {"theme": "X", "source_indices": [0, 99, -1]}
-    out = resolve_merged_source_themes(merged, CHUNKS)
-    assert out == [CHUNKS[0]]
+    assert resolve_merged_source_indices({"source_indices": [0, 99, -1]}, CHUNKS) == [0]
+
+
+def test_attribute_is_lossless_when_indices_present():
+    merged = [{"theme": "Ordering", "source_indices": [0, 2]}]
+    out = attribute_merged_themes(merged, CHUNKS)
+    # Merged theme keeps 0+2; the unclaimed "Login problems" is appended standalone.
+    assert [idxs for _, idxs in out] == [[0, 2], [1]]
+
+
+def test_attribute_drops_empty_merge_and_recovers_via_standalone():
+    # Model renamed everything and gave no usable indices → no merge resolves;
+    # every chunk theme must still surface (no data lost), just un-merged.
+    merged = [{"theme": "Totally Different Label"}]
+    out = attribute_merged_themes(merged, CHUNKS)
+    assert sorted(i for _, idxs in out for i in idxs) == [0, 1, 2]
+
+
+def test_attribute_no_double_claim():
+    merged = [
+        {"theme": "A", "source_indices": [0, 1]},
+        {"theme": "B", "source_indices": [1, 2]},  # 1 already claimed by A
+    ]
+    out = attribute_merged_themes(merged, CHUNKS)
+    claimed = [i for _, idxs in out for i in idxs]
+    assert sorted(claimed) == [0, 1, 2]  # each chunk attributed exactly once
 
 
 # ── Retrieval source labels (fixes identical domain rows) ──────────

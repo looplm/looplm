@@ -20,7 +20,7 @@ from app.routers.top_questions_worker import (
     TOP_QUESTIONS_MERGE_PROMPT,
     TOP_QUESTIONS_SYSTEM_PROMPT,
     _parse_json_array,
-    resolve_merged_source_themes,
+    attribute_merged_themes,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,17 +214,15 @@ async def run_request_cluster_analysis(
                     request_metadata={"analysis_id": str(analysis_id), "phase": "merge"},
                 )
 
-                # Re-aggregate member items per merged theme (by source_indices, with
-                # a name-match fallback) so every theme keeps its outcome cross-tab and
-                # example trace ids — even when the merge step renamed it.
-                for t in _parse_json_array(text):
-                    items = []
-                    for ct in resolve_merged_source_themes(t, all_chunk_themes):
-                        items.extend(ct.get("items", []))
+                # Attribute each merged theme to its source chunk themes by index
+                # (lossless: renamed/garbled merges fall back to standalone chunk
+                # themes) so every theme keeps its real outcome cross-tab.
+                for t, indices in attribute_merged_themes(_parse_json_array(text), all_chunk_themes):
+                    items: list[dict] = []
+                    for i in indices:
+                        items.extend(all_chunk_themes[i].get("items", []))
                     themes.append({
                         "theme": t.get("theme", "Unknown"),
-                        # len(items) is the true member count; fall back to the LLM's
-                        # claimed count only when we couldn't recover any members.
                         "count": len(items) or t.get("count", 0),
                         "summary_question": t.get("summary_question", ""),
                         "trace_ids": _trace_ids(items),

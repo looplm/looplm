@@ -48,28 +48,69 @@ TOP_QUESTIONS_MERGE_PROMPT = (
 )
 
 
-def resolve_merged_source_themes(
-    merged_theme: dict, all_chunk_themes: list[dict]
-) -> list[dict]:
-    """Recover the original chunk themes that a merged theme was built from.
+def _coerce_index(value: object, n: int) -> int | None:
+    """Coerce an LLM-supplied source index to a valid ``0 <= i < n`` int, or None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        idx = value
+    elif isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        idx = int(value.strip())
+    else:
+        return None
+    return idx if 0 <= idx < n else None
 
-    Prefers the LLM's ``source_indices`` (robust — survives renaming); falls back
-    to case-insensitive theme-name matching when indices are missing or invalid.
-    Callers aggregate whatever they need (member items, sentiment, …) from the
-    returned chunk themes.
+
+def resolve_merged_source_indices(
+    merged_theme: dict, all_chunk_themes: list[dict]
+) -> list[int]:
+    """Indices of the chunk themes a merged theme was built from.
+
+    Prefers the LLM's ``source_indices`` (robust — survives renaming, tolerates
+    string indices); falls back to case-insensitive theme-name matching.
     """
+    n = len(all_chunk_themes)
+    out: list[int] = []
     src_indices = merged_theme.get("source_indices")
-    if isinstance(src_indices, list) and src_indices:
-        matched = [
-            all_chunk_themes[i]
-            for i in src_indices
-            if isinstance(i, int) and 0 <= i < len(all_chunk_themes)
-        ]
-        if matched:
-            return matched
+    if isinstance(src_indices, list):
+        for raw in src_indices:
+            idx = _coerce_index(raw, n)
+            if idx is not None and idx not in out:
+                out.append(idx)
+    if out:
+        return out
     # Fallback: match by theme name (handles models that ignore source_indices).
     target = (merged_theme.get("theme") or "").lower().strip()
-    return [ct for ct in all_chunk_themes if (ct.get("theme") or "").lower().strip() == target]
+    return [
+        i for i, ct in enumerate(all_chunk_themes)
+        if (ct.get("theme") or "").lower().strip() == target
+    ]
+
+
+def attribute_merged_themes(
+    merged: list[dict], all_chunk_themes: list[dict]
+) -> list[tuple[dict, list[int]]]:
+    """Map merged themes to their source chunk-theme indices, losslessly.
+
+    Returns ``(merged_theme, indices)`` pairs. Merged themes that resolve to no
+    source chunk (e.g. the model omitted/garbled ``source_indices`` and renaming
+    defeats the name fallback) are dropped, and any chunk theme left unclaimed is
+    appended as a standalone theme — so no member data is ever lost. Worst case
+    (model ignores ``source_indices`` entirely) degrades to the original,
+    un-merged chunk themes rather than empty rows.
+    """
+    out: list[tuple[dict, list[int]]] = []
+    claimed: set[int] = set()
+    for t in merged:
+        indices = [i for i in resolve_merged_source_indices(t, all_chunk_themes) if i not in claimed]
+        if not indices:
+            continue
+        claimed.update(indices)
+        out.append((t, indices))
+    for i, ct in enumerate(all_chunk_themes):
+        if i not in claimed:
+            out.append((ct, [i]))
+    return out
 
 
 def _parse_json_array(text: str) -> list[dict]:
@@ -278,21 +319,20 @@ async def run_top_questions_analysis(
                     request_metadata={"analysis_id": str(analysis_id), "phase": "merge"},
                 )
 
-                merged = _parse_json_array(text)
-
                 # Re-aggregate each merged theme's questions + sentiment from its source
-                # chunk themes (by source_indices, with a name-match fallback) so renamed
-                # merged themes don't lose their data.
-                for t in merged:
-                    members = resolve_merged_source_themes(t, all_chunk_themes)
+                # chunk themes by index (lossless — renamed/garbled merges fall back to
+                # standalone chunk themes) so no data is dropped.
+                for t, indices in attribute_merged_themes(_parse_json_array(text), all_chunk_themes):
+                    members = [all_chunk_themes[i] for i in indices]
                     positive = sum(m.get("feedback_sentiment", {}).get("positive", 0) for m in members)
                     negative = sum(m.get("feedback_sentiment", {}).get("negative", 0) for m in members)
                     all_questions: list = []
                     for m in members:
                         all_questions.extend(m.get("all_questions", []))
+                    count = sum(m.get("count", 0) for m in members) or t.get("count", 0)
                     themes.append({
                         "theme": t.get("theme", "Unknown"),
-                        "count": t.get("count", 0),
+                        "count": count,
                         "summary_question": t.get("summary_question", ""),
                         "all_questions": all_questions,
                         "feedback_sentiment": {"positive": positive, "negative": negative},
