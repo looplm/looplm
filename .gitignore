@@ -41,6 +41,10 @@ coverage/
 htmlcov/
 .pytest_cache/
 
+# …but the RAG Coverage feature's source dirs are NOT test-coverage output
+!apps/web/src/app/(app)/coverage/
+!apps/web/src/components/coverage/
+
 # Local databases
 *.db
 *.sqlite

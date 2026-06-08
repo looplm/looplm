@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import async_session, get_db
 from app.encryption import encrypt_api_key
 from app.index_providers.registry import build_index_provider
@@ -40,7 +40,11 @@ from app.schemas.index_providers import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/rag-coverage", tags=["rag-coverage"])
+router = APIRouter(
+    prefix="/api/rag-coverage",
+    tags=["rag-coverage"],
+    dependencies=[require_section("evaluate", "coverage")],
+)
 
 # Track background coverage tasks so they aren't garbage-collected mid-run.
 _coverage_tasks: dict[UUID, asyncio.Task] = {}
@@ -69,7 +73,12 @@ async def _get_provider_or_404(
 
 # ── Provider CRUD ──────────────────────────────────────────────────────────
 
-@router.post("/providers", response_model=IndexProviderResponse, status_code=201)
+@router.post(
+    "/providers",
+    response_model=IndexProviderResponse,
+    status_code=201,
+    dependencies=[require_write("evaluate", "coverage")],
+)
 async def create_provider(
     body: IndexProviderCreate,
     db: AsyncSession = Depends(get_db),
@@ -113,7 +122,11 @@ async def list_providers(
     return IndexProviderListResponse(data=result.scalars().all())
 
 
-@router.patch("/providers/{provider_id}", response_model=IndexProviderResponse)
+@router.patch(
+    "/providers/{provider_id}",
+    response_model=IndexProviderResponse,
+    dependencies=[require_write("evaluate", "coverage")],
+)
 async def update_provider(
     provider_id: UUID,
     body: IndexProviderUpdate,
@@ -134,7 +147,11 @@ async def update_provider(
     return provider
 
 
-@router.delete("/providers/{provider_id}", status_code=204)
+@router.delete(
+    "/providers/{provider_id}",
+    status_code=204,
+    dependencies=[require_write("evaluate", "coverage")],
+)
 async def delete_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -192,7 +209,12 @@ async def list_partition_keys(
 
 # ── Coverage analysis ───────────────────────────────────────────────────────
 
-@router.post("/analyze", response_model=AnalyzeResponse, status_code=202)
+@router.post(
+    "/analyze",
+    response_model=AnalyzeResponse,
+    status_code=202,
+    dependencies=[require_write("evaluate", "coverage")],
+)
 async def analyze(
     body: AnalyzeRequest,
     db: AsyncSession = Depends(get_db),
