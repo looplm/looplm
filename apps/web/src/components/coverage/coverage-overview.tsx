@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+
+import { ConfirmModal } from "@/components/confirm-modal";
 import type { CoverageCategoryOverview } from "@/lib/api";
 
 function timeAgo(iso: string): string {
@@ -36,6 +39,8 @@ export function CoverageOverview({
   onView: (runId: string) => void;
   onRerun: (partitionKey: string) => void;
 }) {
+  const [confirmRerun, setConfirmRerun] = useState<string | null>(null);
+
   if (categories.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-gray-200 dark:border-slate-700 p-8 text-center text-sm text-gray-500 dark:text-slate-400">
@@ -46,8 +51,9 @@ export function CoverageOverview({
   }
 
   return (
-    <div className="rounded-xl border border-gray-100 dark:border-slate-800 overflow-hidden">
-      <table className="w-full text-sm">
+    <>
+      <div className="rounded-xl border border-gray-100 dark:border-slate-800 overflow-hidden">
+        <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-100 dark:border-slate-800 text-left text-xs text-gray-500 dark:text-slate-400">
             <th className="px-4 py-2 font-medium">Category</th>
@@ -101,14 +107,14 @@ export function CoverageOverview({
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   <button
                     onClick={() => onView(c.latest.id)}
-                    className="px-2.5 py-1 rounded-lg text-xs bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700"
+                    className="px-2.5 py-1 rounded-lg text-xs bg-indigo-600 text-white hover:bg-indigo-500"
                   >
                     View
                   </button>
                   {canEdit && (
                     <button
-                      onClick={() => onRerun(c.partition_key)}
-                      className="ml-2 px-2.5 py-1 rounded-lg text-xs bg-indigo-600 text-white hover:bg-indigo-500"
+                      onClick={() => setConfirmRerun(c.partition_key)}
+                      className="ml-2 px-2.5 py-1 rounded-lg text-xs bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700"
                     >
                       Re-run
                     </button>
@@ -119,6 +125,20 @@ export function CoverageOverview({
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+
+      {confirmRerun && (
+        <ConfirmModal
+          title="Re-run analysis?"
+          message={`This starts a fresh coverage analysis for "${confirmRerun}" — it makes new API/LLM calls and adds a new run to the history. Continue?`}
+          confirmLabel="Re-run"
+          onConfirm={() => {
+            onRerun(confirmRerun);
+            setConfirmRerun(null);
+          }}
+          onCancel={() => setConfirmRerun(null)}
+        />
+      )}
+    </>
   );
 }
