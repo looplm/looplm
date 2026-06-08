@@ -127,6 +127,8 @@ export type {
   PartitionIssueSeverity,
   PartitionAcknowledgement,
   AcknowledgementCreateBody,
+  CoverageRunSummary,
+  CoverageCategoryOverview,
 } from "./api-types";
 
 // Re-export all functions from domain modules

@@ -123,8 +123,40 @@ class CoverageRunResponse(BaseModel):
         )
 
 
-class CoverageRunListResponse(BaseModel):
-    data: list[CoverageRunResponse]
+class CoverageRunSummary(BaseModel):
+    """Lightweight projection of a run for lists/overview (no rows/suggestions)."""
+
+    id: UUID
+    provider_id: UUID
+    partition_key: str
+    status: str
+    value_coverage_pct: Optional[float] = None
+    doc_coverage_pct: Optional[float] = None
+    total_values: int = 0
+    covered_values: int = 0
+    gaps: int = 0
+    issue_count: int = 0
+    suggestion_count: int = 0
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+
+class CoverageRunSummaryListResponse(BaseModel):
+    data: list[CoverageRunSummary]
+
+
+class CoverageCategoryOverview(BaseModel):
+    """Latest coverage for one partition key, with a trend vs the previous run."""
+
+    partition_key: str
+    latest: CoverageRunSummary
+    value_coverage_delta: Optional[float] = None  # percentage points vs previous run
+    doc_coverage_delta: Optional[float] = None
+    previous_run_at: Optional[datetime] = None
+
+
+class CoverageOverviewResponse(BaseModel):
+    data: list[CoverageCategoryOverview]
 
 
 class AnalyzeResponse(BaseModel):

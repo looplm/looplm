@@ -117,6 +117,30 @@ export interface CoverageRun {
   created_at: string;
 }
 
+export interface CoverageRunSummary {
+  id: string;
+  provider_id: string;
+  partition_key: string;
+  status: CoverageRunStatus;
+  value_coverage_pct?: number | null;
+  doc_coverage_pct?: number | null;
+  total_values: number;
+  covered_values: number;
+  gaps: number;
+  issue_count: number;
+  suggestion_count: number;
+  created_at: string;
+  completed_at?: string | null;
+}
+
+export interface CoverageCategoryOverview {
+  partition_key: string;
+  latest: CoverageRunSummary;
+  value_coverage_delta?: number | null;
+  doc_coverage_delta?: number | null;
+  previous_run_at?: string | null;
+}
+
 export interface StartAnalysisBody {
   provider_id: string;
   partition_key: string;

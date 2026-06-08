@@ -35,8 +35,11 @@ from app.schemas.index_providers import (
     AcknowledgementResponse,
     AnalyzeRequest,
     AnalyzeResponse,
-    CoverageRunListResponse,
+    CoverageCategoryOverview,
+    CoverageOverviewResponse,
     CoverageRunResponse,
+    CoverageRunSummary,
+    CoverageRunSummaryListResponse,
     IndexProviderCreate,
     IndexProviderListResponse,
     IndexProviderResponse,
@@ -267,19 +270,92 @@ async def analyze(
     return AnalyzeResponse(run_id=run_id, status="pending")
 
 
-@router.get("/runs", response_model=CoverageRunListResponse)
+def _summary_from_run(run: CoverageRun) -> CoverageRunSummary:
+    """Headline projection of a run — derived from the stored results blob."""
+    res = run.results or {}
+    total_values = int(res.get("total_values") or 0)
+    covered_values = int(res.get("covered_values") or 0)
+    return CoverageRunSummary(
+        id=run.id,
+        provider_id=run.provider_id,
+        partition_key=run.partition_key,
+        status=run.status,
+        value_coverage_pct=res.get("value_coverage_pct"),
+        doc_coverage_pct=res.get("doc_coverage_pct"),
+        total_values=total_values,
+        covered_values=covered_values,
+        gaps=max(0, total_values - covered_values),
+        issue_count=len(res.get("issues") or []),
+        suggestion_count=len(run.suggestions or []),
+        created_at=run.created_at,
+        completed_at=run.completed_at,
+    )
+
+
+@router.get("/runs", response_model=CoverageRunSummaryListResponse)
 async def list_runs(
+    provider_id: UUID | None = None,
+    partition_key: str | None = None,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
+    query = select(CoverageRun).where(CoverageRun.project_id == project.id)
+    if provider_id is not None:
+        query = query.where(CoverageRun.provider_id == provider_id)
+    if partition_key is not None:
+        query = query.where(CoverageRun.partition_key == partition_key)
+    result = await db.execute(query.order_by(CoverageRun.created_at.desc()))
+    return CoverageRunSummaryListResponse(
+        data=[_summary_from_run(r) for r in result.scalars().all()]
+    )
+
+
+@router.get("/overview", response_model=CoverageOverviewResponse)
+async def overview(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Latest coverage per analyzed partition key (with trend vs the previous run)."""
     result = await db.execute(
         select(CoverageRun)
-        .where(CoverageRun.project_id == project.id)
+        .where(
+            CoverageRun.project_id == project.id,
+            CoverageRun.provider_id == provider_id,
+            CoverageRun.status == "completed",
+        )
         .order_by(CoverageRun.created_at.desc())
     )
-    return CoverageRunListResponse(
-        data=[CoverageRunResponse.from_row(r) for r in result.scalars().all()]
-    )
+    runs = list(result.scalars().all())
+
+    by_key: dict[str, list[CoverageRun]] = {}
+    for r in runs:
+        by_key.setdefault(r.partition_key, []).append(r)  # already newest-first
+
+    categories: list[CoverageCategoryOverview] = []
+    for key, key_runs in by_key.items():
+        latest = _summary_from_run(key_runs[0])
+        prev = key_runs[1] if len(key_runs) > 1 else None
+        value_delta = doc_delta = None
+        prev_at = None
+        if prev is not None:
+            prev_sum = _summary_from_run(prev)
+            prev_at = prev.created_at
+            if latest.value_coverage_pct is not None and prev_sum.value_coverage_pct is not None:
+                value_delta = round(latest.value_coverage_pct - prev_sum.value_coverage_pct, 1)
+            if latest.doc_coverage_pct is not None and prev_sum.doc_coverage_pct is not None:
+                doc_delta = round(latest.doc_coverage_pct - prev_sum.doc_coverage_pct, 1)
+        categories.append(
+            CoverageCategoryOverview(
+                partition_key=key,
+                latest=latest,
+                value_coverage_delta=value_delta,
+                doc_coverage_delta=doc_delta,
+                previous_run_at=prev_at,
+            )
+        )
+    categories.sort(key=lambda c: c.latest.created_at, reverse=True)
+    return CoverageOverviewResponse(data=categories)
 
 
 @router.get("/runs/{run_id}", response_model=CoverageRunResponse)

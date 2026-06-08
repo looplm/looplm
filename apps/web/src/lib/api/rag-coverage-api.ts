@@ -5,7 +5,9 @@
 import type {
   AcknowledgementCreateBody,
   AnalyzeResponse,
+  CoverageCategoryOverview,
   CoverageRun,
+  CoverageRunSummary,
   IndexProvider,
   IndexProviderCreateBody,
   IndexProviderUpdateBody,
@@ -57,8 +59,16 @@ export const startCoverageAnalysis = (body: StartAnalysisBody) =>
 export const getCoverageRun = (runId: string) =>
   request<CoverageRun>(`/api/rag-coverage/runs/${runId}`);
 
-export const listCoverageRuns = () =>
-  request<{ data: CoverageRun[] }>("/api/rag-coverage/runs");
+export const listCoverageRuns = (providerId: string, partitionKey?: string) => {
+  const params = new URLSearchParams({ provider_id: providerId });
+  if (partitionKey) params.set("partition_key", partitionKey);
+  return request<{ data: CoverageRunSummary[] }>(`/api/rag-coverage/runs?${params.toString()}`);
+};
+
+export const getCoverageOverview = (providerId: string) =>
+  request<{ data: CoverageCategoryOverview[] }>(
+    `/api/rag-coverage/overview?provider_id=${encodeURIComponent(providerId)}`,
+  );
 
 // --- Acknowledgements (partition-quality memory) ---
 

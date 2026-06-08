@@ -7,12 +7,16 @@ import {
   createAcknowledgement,
   deleteAcknowledgement,
   getAcknowledgements,
+  getCoverageOverview,
   getCoverageRun,
   getDatasets,
   getIndexProviders,
   getPartitionKeys,
+  listCoverageRuns,
   startCoverageAnalysis,
+  type CoverageCategoryOverview,
   type CoverageRun,
+  type CoverageRunSummary,
   type IndexProvider,
   type PartitionAcknowledgement,
   type PartitionKey,
@@ -32,6 +36,8 @@ export function useCoverage() {
   const [run, setRun] = useState<CoverageRun | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [acknowledgements, setAcknowledgements] = useState<PartitionAcknowledgement[]>([]);
+  const [overview, setOverview] = useState<CoverageCategoryOverview[]>([]);
+  const [history, setHistory] = useState<CoverageRunSummary[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadProviders = useCallback(async () => {
@@ -53,10 +59,42 @@ export function useCoverage() {
     }
   }, []);
 
+  // Overview (latest per category) + full run history, scoped to the provider.
+  const refreshLists = useCallback(async () => {
+    if (!providerId) {
+      setOverview([]);
+      setHistory([]);
+      return;
+    }
+    try {
+      const [ov, hist] = await Promise.all([
+        getCoverageOverview(providerId),
+        listCoverageRuns(providerId),
+      ]);
+      setOverview(ov.data);
+      setHistory(hist.data);
+    } catch {
+      /* non-fatal */
+    }
+  }, [providerId]);
+
   useEffect(() => {
     loadProviders();
     loadDatasets();
   }, [loadProviders, loadDatasets]);
+
+  useEffect(() => {
+    refreshLists();
+  }, [refreshLists]);
+
+  const openRun = useCallback(async (runId: string) => {
+    try {
+      const full = await getCoverageRun(runId);
+      setRun(full);
+    } catch (err) {
+      toast.error("Failed to open run", { description: String(err) });
+    }
+  }, []);
 
   // Load partition keys whenever the selected provider changes.
   useEffect(() => {
@@ -109,6 +147,7 @@ export function useCoverage() {
               setAnalyzing(false);
               if (updated.status === "completed") {
                 toast.success("Coverage analysis complete");
+                refreshLists();
               } else {
                 toast.error("Analysis failed", { description: updated.error || "Unknown error" });
               }
@@ -124,7 +163,7 @@ export function useCoverage() {
         toast.error("Failed to start analysis", { description: String(err) });
       }
     },
-    [providerId, stopPolling],
+    [providerId, stopPolling, refreshLists],
   );
 
   // Acknowledgements ("intentional" memory) for the completed run's partition.
@@ -193,5 +232,9 @@ export function useCoverage() {
     acknowledgements,
     addAcknowledgement,
     removeAcknowledgement,
+    overview,
+    history,
+    openRun,
+    refreshLists,
   };
 }
