@@ -18,6 +18,20 @@ class IntegrationType(str, enum.Enum):
     looplm = "looplm"  # first-party push-based tracing (SDK → ingest endpoint)
 
 
+class IndexProviderType(str, enum.Enum):
+    """Retrieval-index backends looplm can read a corpus from for coverage.
+
+    Only ``azure_search`` is implemented today; the others are reserved so the
+    enum/migration are stable as backends are added (each needs a
+    BaseIndexProvider subclass + a branch in the registry factory).
+    """
+
+    azure_search = "azure_search"
+    pinecone = "pinecone"
+    qdrant = "qdrant"
+    pgvector = "pgvector"
+
+
 class SyncStatus(str, enum.Enum):
     idle = "idle"
     syncing = "syncing"

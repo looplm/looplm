@@ -110,6 +110,25 @@ export type {
   RequestClustersResponse,
   RetrievalSource,
   RetrievalActivityPoint,
+  IndexProvider,
+  IndexProviderCreateBody,
+  IndexProviderUpdateBody,
+  TestConnectionResult,
+  PartitionKey,
+  CoverageRow,
+  CoverageResults,
+  CoverageSuggestion,
+  CoverageRun,
+  CoverageRunStatus,
+  StartAnalysisBody,
+  AnalyzeResponse,
+  PartitionIssue,
+  PartitionIssueKind,
+  PartitionIssueSeverity,
+  PartitionAcknowledgement,
+  AcknowledgementCreateBody,
+  CoverageRunSummary,
+  CoverageCategoryOverview,
 } from "./api-types";
 
 // Re-export all functions from domain modules
@@ -125,5 +144,6 @@ export * from "./api/code-agent-api";
 export * from "./api/github-api";
 export * from "./api/costs-api";
 export * from "./api/analytics-api";
+export * from "./api/rag-coverage-api";
 export * from "./api/version";
 export * from "./api/admin";

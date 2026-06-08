@@ -2,6 +2,7 @@
 
 from app.models.base import *          # noqa: F401,F403
 from app.models.integrations import *  # noqa: F401,F403
+from app.models.index_providers import *  # noqa: F401,F403
 from app.models.analysis import *      # noqa: F401,F403
 from app.models.issues import *        # noqa: F401,F403
 from app.models.prompts import *       # noqa: F401,F403
