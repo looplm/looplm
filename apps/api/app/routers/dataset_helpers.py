@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from app.models.models import FeedbackScore, Span, TestCase, Trace
 from app.schemas.datasets import TestCaseItem, TestCaseSuggestion
@@ -413,6 +414,55 @@ def extract_retrieval_source_urls(span_output: Any) -> list[str]:
         seen.add(url)
         urls.append(url)
     return urls
+
+
+def _source_label(raw_url: str, src: dict) -> str:
+    """Human-readable label for a retrieved source.
+
+    Prefers an explicit title/name on the source, then the original URL's last
+    path segment (e.g. a Confluence page-title slug, which normalization strips
+    from the canonical URL), falling back to the host. This keeps rows
+    distinguishable when many sources share one base domain.
+    """
+    for key in ("title", "name", "label"):
+        value = src.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    parsed = urlparse(raw_url)
+    segments = [s for s in parsed.path.split("/") if s]
+    if segments:
+        last = unquote(segments[-1].replace("+", " ")).strip()
+        if last:
+            return last
+    return parsed.netloc or raw_url
+
+
+def extract_retrieval_sources(span_output: Any) -> list[dict]:
+    """Like :func:`extract_retrieval_source_urls` but also returns a display label.
+
+    Returns de-duplicated ``{"url", "label"}`` dicts (canonical URL for counting,
+    label for display) preserving original order.
+    """
+    if not isinstance(span_output, dict):
+        return []
+    sources = span_output.get("sources")
+    if not isinstance(sources, list):
+        return []
+    seen: set[str] = set()
+    out: list[dict] = []
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        raw_url = src.get("url")
+        if not isinstance(raw_url, str):
+            continue
+        raw_url = raw_url.strip()
+        url = _normalize_source_url(raw_url)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        out.append({"url": url, "label": _source_label(raw_url, src)})
+    return out
 
 
 def build_suggestions(

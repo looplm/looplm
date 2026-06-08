@@ -18,7 +18,7 @@ from app.db import async_session, get_db
 from app.models.models import FeedbackScore, Integration, Span, SpanType, Trace
 from app.models.project import Project
 from app.models.user import User
-from app.routers.dataset_helpers import extract_retrieval_source_urls
+from app.routers.dataset_helpers import extract_retrieval_sources
 from app.routers.request_clusters_worker import (
     _request_cluster_tasks,
     run_request_cluster_analysis,
@@ -286,12 +286,22 @@ async def get_retrieval_sources(
     ).all()
 
     counter: Counter[str] = Counter()
+    label_by_url: dict[str, str] = {}
     for (output,) in rows:
-        for url in extract_retrieval_source_urls(output):
+        for src in extract_retrieval_sources(output):
+            url = src["url"]
             counter[url] += 1
+            # Keep the first non-trivial label seen for each canonical URL.
+            if url not in label_by_url and src["label"] and src["label"] != url:
+                label_by_url[url] = src["label"]
 
     return [
-        RetrievalSource(url=url, domain=urlparse(url).netloc or url, count=count)
+        RetrievalSource(
+            url=url,
+            domain=urlparse(url).netloc or url,
+            label=label_by_url.get(url) or urlparse(url).netloc or url,
+            count=count,
+        )
         for url, count in counter.most_common(limit)
     ]
 

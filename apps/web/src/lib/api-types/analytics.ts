@@ -33,6 +33,7 @@ export interface RequestClustersResponse {
 export interface RetrievalSource {
   url: string;
   domain: string;
+  label: string;
   count: number;
 }
 
