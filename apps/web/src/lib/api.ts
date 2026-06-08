@@ -129,6 +129,13 @@ export type {
   AcknowledgementCreateBody,
   CoverageRunSummary,
   CoverageCategoryOverview,
+  IssueStatus,
+  IssueSeverity,
+  IssueListItem,
+  IssueEvidenceItem,
+  IssueEventItem,
+  IssueDetail,
+  IssueDetectResponse,
 } from "./api-types";
 
 // Re-export all functions from domain modules
@@ -145,5 +152,6 @@ export * from "./api/github-api";
 export * from "./api/costs-api";
 export * from "./api/analytics-api";
 export * from "./api/rag-coverage-api";
+export * from "./api/issues-api";
 export * from "./api/version";
 export * from "./api/admin";

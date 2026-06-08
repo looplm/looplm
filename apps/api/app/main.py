@@ -78,8 +78,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.services.sync_poller import start_sync_poller, stop_sync_poller
     await start_sync_poller()
 
+    # Start behavioral signal classifier poller (gated by signal_classify_enabled)
+    from app.services.signal_classifier_poller import (
+        start_signal_classifier_poller,
+        stop_signal_classifier_poller,
+    )
+    await start_signal_classifier_poller()
+
+    # Start autonomous issue detection poller (gated by issue_detection_enabled)
+    from app.services.issue_poller import start_issue_poller, stop_issue_poller
+    await start_issue_poller()
+
     yield
     # Shutdown
+    await stop_issue_poller()
+    await stop_signal_classifier_poller()
     await stop_sync_poller()
     await stop_batch_poller()
     await engine.dispose()

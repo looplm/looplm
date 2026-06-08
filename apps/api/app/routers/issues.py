@@ -24,13 +24,17 @@ from app.models.models import IssueStatus
 from app.models.project import Project
 from app.models.user import User
 from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
-from app.services.engine.engine_service import detect_issues
+from app.services.engine.engine_service import detect_issues, diagnose_issues
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/issues", tags=["issues"])
 
 _SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
+
+# How many issues to diagnose synchronously in the detect request. Kept small so
+# the request stays fast; the background poller diagnoses the remainder.
+_INLINE_DIAGNOSE_LIMIT = 3
 
 
 # ── Schemas ────────────────────────────────────────────────────────
@@ -39,6 +43,7 @@ class DetectResponse(BaseModel):
     signals: int
     issues_created: int
     issues_updated: int
+    issues_diagnosed: int
     used_llm: bool
 
 
@@ -71,6 +76,7 @@ class EventItem(BaseModel):
 class IssueDetail(IssueListItem):
     description: str | None
     root_cause: str | None
+    suggested_fix: str | None
     integration_id: UUID | None
     created_at: datetime
     updated_at: datetime
@@ -97,8 +103,30 @@ async def run_detection(
         # No analysis LLM configured — still run, using deterministic clustering.
         llm = None
 
-    result = await detect_issues(db, project.id, since=since, llm=llm)
-    return DetectResponse(used_llm=llm is not None, **result)
+    # Detection is the core result. If it fails, surface a real (non-sanitized)
+    # message so the UI can show what went wrong.
+    try:
+        result = await detect_issues(db, project.id, since=since, llm=llm)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Issue detection failed for project %s", project.id)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Detection failed: {exc}") from exc
+
+    # Diagnosis is best-effort enrichment: bounded inline (the background poller
+    # handles the rest) and never allowed to fail the detection response.
+    diagnosed = 0
+    try:
+        diag = await diagnose_issues(db, project.id, llm=llm, limit=_INLINE_DIAGNOSE_LIMIT)
+        diagnosed = diag["diagnosed"]
+    except Exception:  # noqa: BLE001
+        logger.exception("Issue diagnosis failed (detection results still returned)")
+        await db.rollback()
+
+    return DetectResponse(
+        used_llm=llm is not None,
+        issues_diagnosed=diagnosed,
+        **result,
+    )
 
 
 @router.get("", response_model=list[IssueListItem])
@@ -131,6 +159,7 @@ async def get_issue(
         **_to_list_item(issue).model_dump(),
         description=issue.description,
         root_cause=issue.root_cause,
+        suggested_fix=issue.suggested_fix,
         integration_id=issue.integration_id,
         created_at=issue.created_at,
         updated_at=issue.updated_at,

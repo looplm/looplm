@@ -38,6 +38,7 @@ const NAV_GROUPS = [
   {
     label: "IMPROVE",
     items: [
+      { href: "/issues", label: "Issues", icon: "\u{1F6A8}" },
       { href: "/advisor", label: "Advisor", icon: "\u{1F9E0}" },
       { href: "/routes", label: "Routes", icon: "\u{1F5FA}\uFE0F" },
       { href: "/prompts", label: "Prompts", icon: "\u{1F4DD}" },

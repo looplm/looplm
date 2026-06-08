@@ -1,5 +1,6 @@
 """Dashboard endpoints."""
 
+import math
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -26,11 +27,95 @@ from app.schemas.dashboard import (
     DashboardTotals,
     FeedbackSummary,
     FixesStats,
+    LatencyPercentiles,
+    RegressionFlag,
+    ThreadMetrics,
     TopFailure,
     TrendPoint,
 )
 
+# A metric must worsen by at least this fraction vs the previous window to flag.
+_REGRESSION_MIN_REL = 0.25
+
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[require_section("observe", "dashboard")])
+
+
+def _percentile(sorted_vals: list[int], pct: float) -> int | None:
+    """Linear-interpolated percentile over a pre-sorted list.
+
+    Computed in Python (not via SQL ``percentile_cont``) so it works
+    identically on Postgres and the SQLite test database.
+    """
+    if not sorted_vals:
+        return None
+    if len(sorted_vals) == 1:
+        return int(sorted_vals[0])
+    k = (len(sorted_vals) - 1) * (pct / 100.0)
+    f = math.floor(k)
+    c = math.ceil(k)
+    if f == c:
+        return int(sorted_vals[int(k)])
+    lower = sorted_vals[f] * (c - k)
+    upper = sorted_vals[c] * (k - f)
+    return int(round(lower + upper))
+
+
+def _compute_latency(durations: list[int]) -> LatencyPercentiles:
+    """Latency percentiles from raw trace durations (ms)."""
+    s = sorted(int(d) for d in durations)
+    return LatencyPercentiles(
+        count=len(s),
+        p50_ms=_percentile(s, 50),
+        p95_ms=_percentile(s, 95),
+        p99_ms=_percentile(s, 99),
+    )
+
+
+def _regression_flag(
+    metric: str, label: str, current: float, previous: float
+) -> RegressionFlag:
+    """Build a regression flag for a 'higher is worse' metric vs the prior window."""
+    if previous > 0:
+        change = (current - previous) / previous
+    else:
+        # No prior baseline: only flag if the current value appeared from nothing.
+        change = 1.0 if current > 0 else 0.0
+    return RegressionFlag(
+        metric=metric,
+        label=label,
+        current=round(current, 4),
+        previous=round(previous, 4),
+        change_pct=round(change, 4),
+        regressed=previous > 0 and change >= _REGRESSION_MIN_REL,
+    )
+
+
+def _compute_regressions(
+    *, cur_failure_rate: float, prev_failure_rate: float, cur_p95: int | None, prev_p95: int | None
+) -> list[RegressionFlag]:
+    flags = [
+        _regression_flag("failure_rate", "Failure rate", cur_failure_rate, prev_failure_rate),
+        _regression_flag("latency_p95", "p95 latency", float(cur_p95 or 0), float(prev_p95 or 0)),
+    ]
+    return [f for f in flags if f.regressed]
+
+
+def _compute_thread_metrics(rows: list[tuple[int, int]]) -> ThreadMetrics:
+    """Conversation metrics from per-thread ``(trace_count, failure_count)`` rows."""
+    lengths = sorted(int(c) for c, _ in rows)
+    total = len(rows)
+    multi = sum(1 for n in lengths if n > 1)
+    with_failure = [(c, f) for c, f in rows if f > 0]
+    # Of threads that hit a failure, how many continued past it (a retry)?
+    retried = sum(1 for c, f in with_failure if c > f)
+    return ThreadMetrics(
+        total_threads=total,
+        multi_turn_threads=multi,
+        multi_turn_rate=round(multi / total, 3) if total else 0.0,
+        avg_thread_length=round(sum(lengths) / total, 2) if total else 0.0,
+        p95_thread_length=_percentile(lengths, 95) or 0,
+        retry_rate=round(retried / len(with_failure), 3) if with_failure else 0.0,
+    )
 
 
 @router.get("/stats", response_model=DashboardStatsResponse)
@@ -249,6 +334,54 @@ async def get_dashboard_stats(
     ).where(FixSuggestion.analysis_id.in_(user_analysis_ids))
     fix_row = (await db.execute(fix_q)).one()
 
+    # Latency percentiles — tails reveal problems that the average hides.
+    dur_vals = (
+        await db.execute(
+            select(Trace.duration_ms).where(*base_filter, Trace.duration_ms.isnot(None))
+        )
+    ).scalars().all()
+    latency = _compute_latency(list(dur_vals))
+
+    # Thread (conversation) metrics — group the windowed traces by thread_id.
+    thread_q = (
+        select(
+            func.count(Trace.id).label("cnt"),
+            func.count(Trace.id).filter(Trace.status == TraceStatus.failure).label("failures"),
+        )
+        .where(*base_filter, Trace.thread_id.isnot(None))
+        .group_by(Trace.thread_id)
+    )
+    thread_rows = (await db.execute(thread_q)).all()
+    threads = _compute_thread_metrics([(int(r.cnt), int(r.failures or 0)) for r in thread_rows])
+
+    # Regression check vs the immediately-preceding window of equal length.
+    window = now - start
+    prev_start = start - window
+    # base_filter[0:2] are the current-window time bounds; reuse the rest verbatim.
+    prev_filter = [Trace.start_time >= prev_start, Trace.start_time < start, *base_filter[2:]]
+    prev_totals = (
+        await db.execute(
+            select(
+                func.count(Trace.id).label("total"),
+                func.count(Trace.id).filter(Trace.status == TraceStatus.failure).label("failures"),
+            ).where(*prev_filter)
+        )
+    ).one()
+    prev_total = prev_totals.total or 0
+    prev_failure_rate = round((prev_totals.failures or 0) / prev_total, 3) if prev_total else 0.0
+    prev_dur_vals = (
+        await db.execute(
+            select(Trace.duration_ms).where(*prev_filter, Trace.duration_ms.isnot(None))
+        )
+    ).scalars().all()
+    prev_p95 = _percentile(sorted(int(d) for d in prev_dur_vals), 95)
+    regressions = _compute_regressions(
+        cur_failure_rate=failure_rate,
+        prev_failure_rate=prev_failure_rate,
+        cur_p95=latency.p95_ms,
+        prev_p95=prev_p95,
+    )
+
     return DashboardStatsResponse(
         period=DashboardPeriod(start=start, end=now),
         totals=DashboardTotals(
@@ -275,4 +408,7 @@ async def get_dashboard_stats(
             positive_rate=positive_rate,
             no_feedback_traces=no_feedback_traces,
         ),
+        latency=latency,
+        threads=threads,
+        regressions=regressions,
     )

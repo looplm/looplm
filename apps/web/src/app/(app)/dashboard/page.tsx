@@ -101,11 +101,32 @@ export default function DashboardPage() {
     );
   }
 
-  const { totals, top_failures, feedback } = stats;
+  const { totals, top_failures, feedback, latency, threads } = stats;
+  const fmtMs = (ms: number | null) =>
+    ms == null ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
 
   return (
     <div>
       <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
+
+      {/* Regression banner — metrics that worsened vs the previous window */}
+      {stats.regressions.length > 0 && (
+        <div className="mb-8 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 p-4">
+          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">
+            ⚠️ Regression vs previous period
+          </p>
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            {stats.regressions.map((r) => (
+              <span key={r.metric} className="text-sm text-amber-800 dark:text-amber-200">
+                {r.label}: <span className="font-semibold">+{(r.change_pct * 100).toFixed(0)}%</span>
+                <span className="text-amber-600 dark:text-amber-400/80">
+                  {" "}({r.previous} → {r.current})
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -132,6 +153,61 @@ export default function DashboardPage() {
             <p className={`text-3xl font-bold ${s.color || ""}`}>{s.value}</p>
           </div>
         ))}
+      </div>
+
+      {/* Latency distribution + conversation metrics */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6">
+          <h2 className="text-lg font-semibold mb-4">
+            Latency
+            <Tooltip content="Trace duration percentiles. Tail latency (p95/p99) reveals problems the average hides.">
+              <InfoIcon />
+            </Tooltip>
+          </h2>
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label: "p50", value: fmtMs(latency.p50_ms) },
+              { label: "p95", value: fmtMs(latency.p95_ms) },
+              { label: "p99", value: fmtMs(latency.p99_ms) },
+            ].map((s) => (
+              <div key={s.label}>
+                <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide">{s.label}</p>
+                <p className="text-2xl font-bold">{s.value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400 dark:text-slate-500 mt-3">
+            Across {latency.count.toLocaleString()} traces with a recorded duration.
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6">
+          <h2 className="text-lg font-semibold mb-4">
+            Conversations
+            <Tooltip content="Signals derived from grouping traces into threads — multi-turn share, length, and whether users retried after a failure.">
+              <InfoIcon />
+            </Tooltip>
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[
+              { label: "Multi-turn", value: `${(threads.multi_turn_rate * 100).toFixed(0)}%`, tooltip: "Share of threads with more than one trace" },
+              { label: "Avg length", value: threads.avg_thread_length.toFixed(1), tooltip: "Average traces per thread" },
+              { label: "p95 length", value: String(threads.p95_thread_length), tooltip: "95th-percentile thread length" },
+              { label: "Retry rate", value: `${(threads.retry_rate * 100).toFixed(0)}%`, color: "text-amber-500", tooltip: "Of threads that hit a failure, the share where the user continued (a retry)" },
+            ].map((s) => (
+              <div key={s.label}>
+                <p className="text-xs text-gray-500 dark:text-slate-400">
+                  {s.label}
+                  {s.tooltip && <Tooltip content={s.tooltip}><InfoIcon /></Tooltip>}
+                </p>
+                <p className={`text-2xl font-bold ${s.color || ""}`}>{s.value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400 dark:text-slate-500 mt-3">
+            Across {threads.total_threads.toLocaleString()} threads.
+          </p>
+        </div>
       </div>
 
       {/* Usage trends chart */}

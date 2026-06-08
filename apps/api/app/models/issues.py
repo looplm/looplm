@@ -66,8 +66,9 @@ class Issue(Base):
     signal_types = Column(JSONB, nullable=False, server_default=text("'[]'"))
     # Deterministic fallback key used to merge obvious duplicates without an LLM call.
     fingerprint = Column(String(256))
-    # Filled in by the (later) diagnosis step; harmless to carry now.
+    # Filled in by the diagnosis step.
     root_cause = Column(Text)
+    suggested_fix = Column(Text)
 
     trace_count = Column(Integer, nullable=False, server_default=text("0"))
     affected_pct = Column(Float, CheckConstraint("affected_pct >= 0 AND affected_pct <= 100"))
