@@ -12,7 +12,7 @@ const FILTER_PATHS = new Set(["/dashboard", "/traces", "/analytics", "/feedback"
 const SECTION_ROUTES: Record<string, string[]> = {
   observe: ["/dashboard", "/traces", "/analytics", "/feedback", "/costs"],
   evaluate: ["/evaluations", "/evaluators", "/datasets"],
-  improve: ["/advisor", "/routes", "/prompts"],
+  improve: ["/issues", "/advisor", "/routes", "/prompts"],
 };
 
 const ROUTE_TO_PAGE: Record<string, string> = {
@@ -24,6 +24,7 @@ const ROUTE_TO_PAGE: Record<string, string> = {
   "/evaluations": "evaluations",
   "/evaluators": "evaluators",
   "/datasets": "datasets",
+  "/issues": "issues",
   "/advisor": "advisor",
   "/routes": "routes",
   "/prompts": "prompts",

@@ -212,8 +212,11 @@ export default function AnalyticsPage() {
                           className="text-sm text-gray-700 dark:text-slate-200 hover:text-indigo-500 hover:underline truncate block"
                           title={s.url}
                         >
-                          {s.domain || s.url}
+                          {s.label || s.domain || s.url}
                         </a>
+                        {s.domain && s.label !== s.domain && (
+                          <p className="text-xs text-gray-400 dark:text-slate-500 truncate">{s.domain}</p>
+                        )}
                         <div className="mt-1 h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
                           <div className="h-full bg-indigo-500" style={{ width: `${(s.count / max) * 100}%` }} />
                         </div>

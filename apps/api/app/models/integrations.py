@@ -108,6 +108,10 @@ class Trace(Base):
     )
     run_type = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    # Watermark for the behavioral signal classifier: NULL means not yet considered.
+    # Set once a trace has been classified (or deliberately sampled out) so the
+    # poller doesn't reconsider it.
+    signals_classified_at = Column(DateTime(timezone=True), nullable=True)
 
     integration = relationship("Integration", back_populates="traces")
     spans = relationship("Span", back_populates="trace", cascade="all, delete-orphan")

@@ -55,6 +55,7 @@ class RequestClustersResponse(BaseModel):
 class RetrievalSource(BaseModel):
     url: str
     domain: str
+    label: str
     count: int
 
 

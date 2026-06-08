@@ -13,7 +13,7 @@ ALL_SECTIONS = ["observe", "evaluate", "improve"]
 SECTION_PAGES: dict[str, list[str]] = {
     "observe": ["dashboard", "traces", "analytics", "feedback", "costs"],
     "evaluate": ["evaluations", "evaluators", "datasets", "coverage"],
-    "improve": ["advisor", "routes", "prompts"],
+    "improve": ["issues", "advisor", "routes", "prompts"],
 }
 
 ALL_PAGES = [page for pages in SECTION_PAGES.values() for page in pages]

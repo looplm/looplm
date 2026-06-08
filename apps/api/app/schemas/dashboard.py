@@ -53,6 +53,37 @@ class FeedbackSummary(BaseModel):
     no_feedback_traces: int
 
 
+class LatencyPercentiles(BaseModel):
+    """Trace duration distribution — tails matter more than the average."""
+
+    count: int
+    p50_ms: Optional[int] = None
+    p95_ms: Optional[int] = None
+    p99_ms: Optional[int] = None
+
+
+class ThreadMetrics(BaseModel):
+    """Conversation-level signals derived from grouping traces by thread_id."""
+
+    total_threads: int
+    multi_turn_threads: int
+    multi_turn_rate: float
+    avg_thread_length: float
+    p95_thread_length: int
+    retry_rate: float
+
+
+class RegressionFlag(BaseModel):
+    """A metric that got materially worse vs the immediately-preceding window."""
+
+    metric: str       # "failure_rate" | "latency_p95"
+    label: str        # human-readable
+    current: float
+    previous: float
+    change_pct: float  # relative change vs previous (e.g. 0.4 == +40%)
+    regressed: bool
+
+
 class DashboardPeriod(BaseModel):
     start: datetime
     end: datetime
@@ -65,3 +96,6 @@ class DashboardStatsResponse(BaseModel):
     trends: list[TrendPoint]
     fixes: FixesStats
     feedback: FeedbackSummary
+    latency: LatencyPercentiles
+    threads: ThreadMetrics
+    regressions: list[RegressionFlag]

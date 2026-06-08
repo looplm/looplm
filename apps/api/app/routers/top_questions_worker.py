@@ -32,18 +32,44 @@ TOP_QUESTIONS_SYSTEM_PROMPT = (
 
 TOP_QUESTIONS_MERGE_PROMPT = (
     "You are a question clustering analyst. You receive theme clusters from multiple batches "
-    "of user questions. Your job is to merge overlapping/duplicate themes, sum their counts, "
-    "and return the final top 10 themes.\n\n"
+    "of user questions, each with a numeric \"index\". Your job is to merge overlapping/duplicate "
+    "themes, sum their counts, and return the final top 10 themes.\n\n"
     "Instructions:\n"
     "1. Merge themes that cover the same topic (even if labeled differently).\n"
     "2. Sum the counts of merged themes.\n"
     "3. For each final theme, write a single summary_question that best captures the intent.\n"
-    "4. Return at most 10 themes sorted by count descending.\n\n"
+    "4. In \"source_indices\", list the index of EVERY input cluster you merged into that theme. "
+    "Each input index must appear in exactly one final theme — do not drop any.\n"
+    "5. Return at most 10 themes sorted by count descending.\n\n"
     "Return a JSON array:\n"
-    '[{"theme": "...", "count": N, "summary_question": "...", '
+    '[{"theme": "...", "count": N, "summary_question": "...", "source_indices": [0, 3, 7], '
     '"representative_questions": ["...", "...", "..."]}]\n\n'
     "Return ONLY the JSON array, no markdown or explanation."
 )
+
+
+def resolve_merged_source_themes(
+    merged_theme: dict, all_chunk_themes: list[dict]
+) -> list[dict]:
+    """Recover the original chunk themes that a merged theme was built from.
+
+    Prefers the LLM's ``source_indices`` (robust — survives renaming); falls back
+    to case-insensitive theme-name matching when indices are missing or invalid.
+    Callers aggregate whatever they need (member items, sentiment, …) from the
+    returned chunk themes.
+    """
+    src_indices = merged_theme.get("source_indices")
+    if isinstance(src_indices, list) and src_indices:
+        matched = [
+            all_chunk_themes[i]
+            for i in src_indices
+            if isinstance(i, int) and 0 <= i < len(all_chunk_themes)
+        ]
+        if matched:
+            return matched
+    # Fallback: match by theme name (handles models that ignore source_indices).
+    target = (merged_theme.get("theme") or "").lower().strip()
+    return [ct for ct in all_chunk_themes if (ct.get("theme") or "").lower().strip() == target]
 
 
 def _parse_json_array(text: str) -> list[dict]:
@@ -219,8 +245,21 @@ async def run_top_questions_analysis(
                     analysis.processed_questions = min(processed, len(questions))
                     await db.commit()
 
-                # Phase 2: Merge chunk themes
-                merge_input = json.dumps(all_chunk_themes, indent=2, default=str)
+                # Phase 2: Merge chunk themes. Send an indexed, trimmed view (drop the
+                # bulky question lists) so the LLM can reference clusters by index.
+                merge_input = json.dumps(
+                    [
+                        {
+                            "index": idx,
+                            "theme": ct["theme"],
+                            "count": ct["count"],
+                            "summary_question": ct.get("summary_question", ""),
+                        }
+                        for idx, ct in enumerate(all_chunk_themes)
+                    ],
+                    indent=2,
+                    default=str,
+                )
                 text, usage = await llm_service.tracked_chat_completion(
                     messages=[
                         {"role": "system", "content": TOP_QUESTIONS_MERGE_PROMPT},
@@ -241,25 +280,22 @@ async def run_top_questions_analysis(
 
                 merged = _parse_json_array(text)
 
-                # Build lookup from chunk themes for sentiment and questions
-                chunk_data: dict[str, dict] = {}
-                for ct in all_chunk_themes:
-                    theme_key = ct["theme"].lower().strip()
-                    if theme_key not in chunk_data:
-                        chunk_data[theme_key] = {"positive": 0, "negative": 0, "all_questions": []}
-                    chunk_data[theme_key]["positive"] += ct.get("feedback_sentiment", {}).get("positive", 0)
-                    chunk_data[theme_key]["negative"] += ct.get("feedback_sentiment", {}).get("negative", 0)
-                    chunk_data[theme_key]["all_questions"].extend(ct.get("all_questions", []))
-
+                # Re-aggregate each merged theme's questions + sentiment from its source
+                # chunk themes (by source_indices, with a name-match fallback) so renamed
+                # merged themes don't lose their data.
                 for t in merged:
-                    theme_key = t.get("theme", "").lower().strip()
-                    cd = chunk_data.get(theme_key, {"positive": 0, "negative": 0, "all_questions": []})
+                    members = resolve_merged_source_themes(t, all_chunk_themes)
+                    positive = sum(m.get("feedback_sentiment", {}).get("positive", 0) for m in members)
+                    negative = sum(m.get("feedback_sentiment", {}).get("negative", 0) for m in members)
+                    all_questions: list = []
+                    for m in members:
+                        all_questions.extend(m.get("all_questions", []))
                     themes.append({
                         "theme": t.get("theme", "Unknown"),
                         "count": t.get("count", 0),
                         "summary_question": t.get("summary_question", ""),
-                        "all_questions": cd["all_questions"],
-                        "feedback_sentiment": {"positive": cd["positive"], "negative": cd["negative"]},
+                        "all_questions": all_questions,
+                        "feedback_sentiment": {"positive": positive, "negative": negative},
                     })
 
             # Assign ranks and store results

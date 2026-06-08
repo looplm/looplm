@@ -34,6 +34,7 @@ from app.models.models import (
     Integration,
     SignalType,
     Trace,
+    TraceSignal,
     TraceStatus,
 )
 
@@ -107,7 +108,52 @@ async def collect_signals(
     signals += await _eval_failures(db, project_id, ids, since)
     signals += await _negative_feedback(db, ids, since)
     signals += await _latency_anomalies(db, ids, since)
+    signals += await _behavioral_signals(db, ids, since)
     return signals
+
+
+# Human-readable phrasing for the LLM-classified behavioral signal types.
+_BEHAVIORAL_LABEL = {
+    SignalType.refusal: "Assistant refused the request",
+    SignalType.user_frustration: "User frustration",
+    SignalType.task_incomplete: "Task left incomplete",
+    SignalType.loop: "Agent stuck in a loop",
+}
+
+
+async def _behavioral_signals(
+    db: AsyncSession, ids: list[UUID], since: datetime | None
+) -> list[Signal]:
+    """Behavioral signals (refusal/frustration/…) classified onto traces by the LLM."""
+    query = (
+        select(TraceSignal, Trace)
+        .join(Trace, TraceSignal.trace_id == Trace.id)
+        .where(Trace.integration_id.in_(ids))
+    )
+    if since:
+        query = query.where(TraceSignal.created_at > since)
+    query = query.order_by(TraceSignal.created_at.desc()).limit(PER_SOURCE_LIMIT)
+
+    rows = (await db.execute(query)).all()
+    out: list[Signal] = []
+    for sig, trace in rows:
+        label = _BEHAVIORAL_LABEL.get(sig.signal_type, sig.signal_type.value)
+        name = trace.name or "trace"
+        summary = f"{label} on '{name}'"
+        if sig.detail:
+            summary += f": {sig.detail}"
+        out.append(
+            Signal(
+                signal_type=sig.signal_type,
+                summary=_truncate(summary),
+                occurred_at=trace.start_time or trace.created_at,
+                trace_id=trace.id,
+                detail=sig.detail,
+                fingerprint_hint=f"behavioral:{sig.signal_type.value}",
+                meta={"confidence": sig.confidence},
+            )
+        )
+    return out
 
 
 async def _explicit_failures(

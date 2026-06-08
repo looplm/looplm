@@ -86,6 +86,21 @@ class SignalType(str, enum.Enum):
     eval_failure = "eval_failure"           # auto-grade / online evaluator failed
     negative_feedback = "negative_feedback"  # low user feedback score
     anomaly = "anomaly"                     # latency / token / step-count outlier
+    # Behavioral signals classified by an LLM over the trace's input/output.
+    refusal = "refusal"                     # assistant declined / refused the request
+    user_frustration = "user_frustration"   # user re-asked or expressed dissatisfaction
+    task_incomplete = "task_incomplete"     # agent stopped without completing the request
+    loop = "loop"                           # agent repeated the same step / got stuck
+
+
+# Behavioral signal types — the subset classified by the LLM signal classifier
+# (the others are derived from status / evals / feedback / latency by rules).
+BEHAVIORAL_SIGNAL_TYPES = (
+    SignalType.refusal,
+    SignalType.user_frustration,
+    SignalType.task_incomplete,
+    SignalType.loop,
+)
 
 
 class IssueSeverity(str, enum.Enum):

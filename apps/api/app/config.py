@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     auto_grade_batch_size: int = 20
     auto_grade_min_output_length: int = 50
 
+    # Behavioral signal classification (LLM-labels traces with refusal/frustration/etc.)
+    signal_classify_enabled: bool = False     # off by default — it spends LLM tokens
+    signal_classify_interval_minutes: int = 10
+    signal_classify_batch_size: int = 20      # max LLM classifications per tick
+    signal_classify_scan_limit: int = 400     # candidate traces scanned per tick
+    signal_classify_sample_pct: int = 20      # % of non-failure traces to classify
+
+    # Autonomous issue detection (clusters signals into issues on a schedule)
+    issue_detection_enabled: bool = False     # off by default
+    issue_detection_interval_minutes: int = 30
+    issue_detection_window_days: int = 7
+
     # SMTP (optional — used for sending invitation emails)
     smtp_host: str = ""
     smtp_port: int = 587

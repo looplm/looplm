@@ -20,6 +20,7 @@ from app.routers.top_questions_worker import (
     TOP_QUESTIONS_MERGE_PROMPT,
     TOP_QUESTIONS_SYSTEM_PROMPT,
     _parse_json_array,
+    resolve_merged_source_themes,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,9 +181,18 @@ async def run_request_cluster_analysis(
                     analysis.processed_requests = min(processed, len(requests))
                     await db.commit()
 
-                # Phase 2: merge chunk themes. Strip member items before sending to the LLM.
+                # Phase 2: merge chunk themes. Send an indexed, item-stripped view so
+                # the LLM can reference each input cluster by index in source_indices.
                 merge_input = json.dumps(
-                    [{k: v for k, v in ct.items() if k != "items"} for ct in all_chunk_themes],
+                    [
+                        {
+                            "index": idx,
+                            "theme": ct["theme"],
+                            "count": ct["count"],
+                            "summary_question": ct["summary_question"],
+                        }
+                        for idx, ct in enumerate(all_chunk_themes)
+                    ],
                     indent=2,
                     default=str,
                 )
@@ -204,17 +214,18 @@ async def run_request_cluster_analysis(
                     request_metadata={"analysis_id": str(analysis_id), "phase": "merge"},
                 )
 
-                # Re-aggregate member items by theme key so merged themes keep their
-                # outcome cross-tab and example trace ids.
-                by_key: dict[str, list[dict]] = {}
-                for ct in all_chunk_themes:
-                    by_key.setdefault(ct["theme"].lower().strip(), []).extend(ct["items"])
-
+                # Re-aggregate member items per merged theme (by source_indices, with
+                # a name-match fallback) so every theme keeps its outcome cross-tab and
+                # example trace ids — even when the merge step renamed it.
                 for t in _parse_json_array(text):
-                    items = by_key.get(t.get("theme", "").lower().strip(), [])
+                    items = []
+                    for ct in resolve_merged_source_themes(t, all_chunk_themes):
+                        items.extend(ct.get("items", []))
                     themes.append({
                         "theme": t.get("theme", "Unknown"),
-                        "count": t.get("count", len(items)),
+                        # len(items) is the true member count; fall back to the LLM's
+                        # claimed count only when we couldn't recover any members.
+                        "count": len(items) or t.get("count", 0),
                         "summary_question": t.get("summary_question", ""),
                         "trace_ids": _trace_ids(items),
                         "outcome": _tally_outcome(items),

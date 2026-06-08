@@ -54,6 +54,28 @@ export interface DashboardStats {
     positive_rate: number;
     no_feedback_traces: number;
   };
+  latency: {
+    count: number;
+    p50_ms: number | null;
+    p95_ms: number | null;
+    p99_ms: number | null;
+  };
+  threads: {
+    total_threads: number;
+    multi_turn_threads: number;
+    multi_turn_rate: number;
+    avg_thread_length: number;
+    p95_thread_length: number;
+    retry_rate: number;
+  };
+  regressions: {
+    metric: string;
+    label: string;
+    current: number;
+    previous: number;
+    change_pct: number;
+    regressed: boolean;
+  }[];
 }
 
 // --- Integrations ---
