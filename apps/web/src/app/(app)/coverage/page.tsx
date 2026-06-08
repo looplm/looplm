@@ -26,6 +26,9 @@ export default function CoveragePage() {
     analyze,
     loadProviders,
     loadDatasets,
+    acknowledgements,
+    addAcknowledgement,
+    removeAcknowledgement,
   } = useCoverage();
 
   const [managerOpen, setManagerOpen] = useState(false);
@@ -198,7 +201,13 @@ export default function CoveragePage() {
           {/* Results */}
           {run?.results && (
             <div className="mb-6">
-              <CoverageResultsView results={run.results} />
+              <CoverageResultsView
+                results={run.results}
+                acknowledgements={acknowledgements}
+                canEdit={canEdit}
+                onAcknowledge={addAcknowledgement}
+                onUndoAcknowledge={removeAcknowledgement}
+              />
             </div>
           )}
 

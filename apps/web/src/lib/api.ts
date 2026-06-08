@@ -122,6 +122,11 @@ export type {
   CoverageRunStatus,
   StartAnalysisBody,
   AnalyzeResponse,
+  PartitionIssue,
+  PartitionIssueKind,
+  PartitionIssueSeverity,
+  PartitionAcknowledgement,
+  AcknowledgementCreateBody,
 } from "./api-types";
 
 // Re-export all functions from domain modules

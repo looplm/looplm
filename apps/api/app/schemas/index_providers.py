@@ -130,3 +130,25 @@ class CoverageRunListResponse(BaseModel):
 class AnalyzeResponse(BaseModel):
     run_id: UUID
     status: str = "pending"
+
+
+class AcknowledgementCreate(BaseModel):
+    provider_id: UUID
+    partition_key: str = Field(..., max_length=255)
+    partition_value: str
+    note: Optional[str] = None
+
+
+class AcknowledgementResponse(BaseModel):
+    id: UUID
+    provider_id: UUID
+    partition_key: str
+    partition_value: str
+    note: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AcknowledgementListResponse(BaseModel):
+    data: list[AcknowledgementResponse]

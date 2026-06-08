@@ -3,11 +3,13 @@
  */
 
 import type {
+  AcknowledgementCreateBody,
   AnalyzeResponse,
   CoverageRun,
   IndexProvider,
   IndexProviderCreateBody,
   IndexProviderUpdateBody,
+  PartitionAcknowledgement,
   PartitionKey,
   StartAnalysisBody,
   TestConnectionResult,
@@ -57,3 +59,21 @@ export const getCoverageRun = (runId: string) =>
 
 export const listCoverageRuns = () =>
   request<{ data: CoverageRun[] }>("/api/rag-coverage/runs");
+
+// --- Acknowledgements (partition-quality memory) ---
+
+export const getAcknowledgements = (providerId: string, partitionKey: string) =>
+  request<{ data: PartitionAcknowledgement[] }>(
+    `/api/rag-coverage/acknowledgements?provider_id=${encodeURIComponent(
+      providerId,
+    )}&partition_key=${encodeURIComponent(partitionKey)}`,
+  );
+
+export const createAcknowledgement = (body: AcknowledgementCreateBody) =>
+  request<PartitionAcknowledgement>("/api/rag-coverage/acknowledgements", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const deleteAcknowledgement = (id: string) =>
+  request<void>(`/api/rag-coverage/acknowledgements/${id}`, { method: "DELETE" });

@@ -48,6 +48,17 @@ export interface CoverageRow {
   covered: boolean;
 }
 
+export type PartitionIssueKind = "near_duplicate" | "tiny_bucket" | "empty_or_placeholder";
+export type PartitionIssueSeverity = "high" | "medium" | "low";
+
+export interface PartitionIssue {
+  kind: PartitionIssueKind;
+  value: string;
+  severity: PartitionIssueSeverity;
+  message: string;
+  related_values: string[];
+}
+
 export interface CoverageResults {
   partition_key: string;
   total_values: number;
@@ -57,6 +68,23 @@ export interface CoverageResults {
   value_coverage_pct: number;
   doc_coverage_pct: number;
   rows: CoverageRow[];
+  issues?: PartitionIssue[];
+}
+
+export interface PartitionAcknowledgement {
+  id: string;
+  provider_id: string;
+  partition_key: string;
+  partition_value: string;
+  note?: string | null;
+  created_at: string;
+}
+
+export interface AcknowledgementCreateBody {
+  provider_id: string;
+  partition_key: string;
+  partition_value: string;
+  note?: string;
 }
 
 export interface CoverageSuggestion {

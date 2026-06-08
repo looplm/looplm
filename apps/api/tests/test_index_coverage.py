@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 from app.index_providers.base import PartitionValue
-from app.index_providers.coverage import compute_coverage, coverage_fields_for
+from app.index_providers.coverage import (
+    CoverageRow,
+    compute_coverage,
+    coverage_fields_for,
+    detect_partition_issues,
+)
 
 
 def _pv(value: str, count: int) -> PartitionValue:
     return PartitionValue(value=value, doc_count=count)
+
+
+def _row(value: str, count: int) -> CoverageRow:
+    return CoverageRow(value=value, indexed_count=count, covering_cases=0, covered=False)
+
+
+def _issue_map(rows):
+    return {i.value: i for i in detect_partition_issues(rows)}
 
 
 # ── field mapping ──────────────────────────────────────────────
@@ -95,3 +108,63 @@ def test_to_dict_shape_is_json_serialisable():
         "covering_cases": 0,
         "covered": False,
     }
+    assert d["issues"] == []
+
+
+# ── partition-quality detection ────────────────────────────────
+
+def test_near_duplicate_flags_parenthetical_variant():
+    rows = [_row("FiBu", 331), _row("FiBu (Finanzbuchhaltung)", 7), _row("EDM", 7126)]
+    issues = _issue_map(rows)
+    assert "FiBu" not in issues  # canonical (larger) not flagged
+    dup = issues["FiBu (Finanzbuchhaltung)"]
+    assert dup.kind == "near_duplicate"
+    assert dup.severity == "high"
+    assert dup.related_values == ["FiBu"]
+    assert "EDM" not in issues
+
+
+def test_near_duplicate_flags_case_and_whitespace_variants():
+    rows = [_row("Netz", 800), _row("  netz ", 5), _row("Other", 800)]
+    issues = _issue_map(rows)
+    assert issues["  netz "].kind == "near_duplicate"
+    assert issues["  netz "].related_values == ["Netz"]
+
+
+def test_tiny_bucket_flagged_only_with_spread():
+    rows = [_row("A", 1000), _row("B", 900), _row("C", 3)]
+    issues = _issue_map(rows)
+    assert issues["C"].kind == "tiny_bucket"
+    assert issues["C"].severity == "low"
+    assert "A" not in issues and "B" not in issues
+
+
+def test_uniformly_small_distribution_not_flagged():
+    rows = [_row("A", 4), _row("B", 5), _row("C", 6)]
+    # median 5, threshold = max(10, 0.02*5)=10 → all below 10, but this would flag all;
+    # guard: tiny requires being far below median. Here counts ~ median, so none flagged.
+    issues = _issue_map(rows)
+    assert issues == {}
+
+
+def test_empty_and_placeholder_flagged():
+    rows = [_row("EDM", 500), _row("", 12), _row("unknown", 9), _row("N/A", 4)]
+    issues = _issue_map(rows)
+    assert issues[""].kind == "empty_or_placeholder"
+    assert issues["unknown"].kind == "empty_or_placeholder"
+    assert issues["N/A"].kind == "empty_or_placeholder"
+    assert "EDM" not in issues
+
+
+def test_near_duplicate_takes_precedence_over_tiny():
+    rows = [_row("FiBu", 500), _row("FiBu (alt)", 2), _row("X", 600)]
+    issues = _issue_map(rows)
+    # the 2-chunk variant is both a duplicate AND tiny → reported as near_duplicate only
+    assert issues["FiBu (alt)"].kind == "near_duplicate"
+
+
+def test_compute_coverage_includes_detected_issues():
+    dist = [_pv("FiBu", 331), _pv("FiBu (Finanzbuchhaltung)", 7)]
+    report = compute_coverage("team", dist, [])
+    kinds = {i.value: i.kind for i in report.issues}
+    assert kinds.get("FiBu (Finanzbuchhaltung)") == "near_duplicate"

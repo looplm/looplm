@@ -9,6 +9,7 @@ Two halves:
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,11 +21,18 @@ from app.db import async_session, get_db
 from app.encryption import encrypt_api_key
 from app.index_providers.registry import build_index_provider
 from app.models.base import IndexProviderType
-from app.models.index_providers import CoverageRun, IndexProvider
+from app.models.index_providers import (
+    CoverageRun,
+    IndexProvider,
+    PartitionAcknowledgement,
+)
 from app.models.project import Project
 from app.models.user import User
 from app.routers.rag_coverage_worker import run_coverage_analysis
 from app.schemas.index_providers import (
+    AcknowledgementCreate,
+    AcknowledgementListResponse,
+    AcknowledgementResponse,
     AnalyzeRequest,
     AnalyzeResponse,
     CoverageRunListResponse,
@@ -290,3 +298,88 @@ async def get_run(
     if run is None:
         raise _not_found("Coverage run")
     return CoverageRunResponse.from_row(run)
+
+
+# ── Acknowledgements (partition-quality "memory") ────────────────────────────
+
+@router.get("/acknowledgements", response_model=AcknowledgementListResponse)
+async def list_acknowledgements(
+    provider_id: UUID,
+    partition_key: str,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    result = await db.execute(
+        select(PartitionAcknowledgement).where(
+            PartitionAcknowledgement.project_id == project.id,
+            PartitionAcknowledgement.provider_id == provider_id,
+            PartitionAcknowledgement.partition_key == partition_key,
+        )
+    )
+    return AcknowledgementListResponse(data=result.scalars().all())
+
+
+@router.post(
+    "/acknowledgements",
+    response_model=AcknowledgementResponse,
+    status_code=201,
+    dependencies=[require_write("evaluate", "coverage")],
+)
+async def create_acknowledgement(
+    body: AcknowledgementCreate,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    # Upsert on (project, provider, partition_key, partition_value).
+    existing = (
+        await db.execute(
+            select(PartitionAcknowledgement).where(
+                PartitionAcknowledgement.project_id == project.id,
+                PartitionAcknowledgement.provider_id == body.provider_id,
+                PartitionAcknowledgement.partition_key == body.partition_key,
+                PartitionAcknowledgement.partition_value == body.partition_value,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.note = body.note
+        existing.updated_at = datetime.now(timezone.utc)
+        ack = existing
+    else:
+        ack = PartitionAcknowledgement(
+            project_id=project.id,
+            provider_id=body.provider_id,
+            partition_key=body.partition_key,
+            partition_value=body.partition_value,
+            note=body.note,
+            created_by=user.id,
+        )
+        db.add(ack)
+    await db.flush()
+    await db.refresh(ack)
+    return ack
+
+
+@router.delete(
+    "/acknowledgements/{ack_id}",
+    status_code=204,
+    dependencies=[require_write("evaluate", "coverage")],
+)
+async def delete_acknowledgement(
+    ack_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    ack = (
+        await db.execute(
+            select(PartitionAcknowledgement).where(
+                PartitionAcknowledgement.id == ack_id,
+                PartitionAcknowledgement.project_id == project.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if ack is None:
+        raise _not_found("Acknowledgement")
+    await db.delete(ack)
+    return None

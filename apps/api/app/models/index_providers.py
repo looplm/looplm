@@ -19,6 +19,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -85,3 +86,34 @@ class CoverageRun(Base):
 
     project = relationship("Project")
     provider = relationship("IndexProvider", back_populates="coverage_runs")
+
+
+class PartitionAcknowledgement(Base):
+    """User memory: a partition value flagged as a quality issue is actually
+    intentional. Mutes the flag on future runs; carries an optional note."""
+
+    __tablename__ = "partition_acknowledgements"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "provider_id",
+            "partition_key",
+            "partition_value",
+            name="uq_partition_ack",
+        ),
+        Index("idx_partition_acks_lookup", "project_id", "provider_id", "partition_key"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    provider_id = Column(
+        UUID(as_uuid=True), ForeignKey("index_providers.id", ondelete="CASCADE"), nullable=False
+    )
+    partition_key = Column(String(255), nullable=False)
+    partition_value = Column(Text, nullable=False)
+    note = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
