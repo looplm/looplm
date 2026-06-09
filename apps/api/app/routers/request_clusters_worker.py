@@ -136,17 +136,21 @@ async def run_request_cluster_analysis(
                 analysis.processed_requests = len(requests)
                 await db.commit()
             else:
-                chunks = [numbered[i : i + chunk_size] for i in range(0, len(numbered), chunk_size)]
                 request_slices = [requests[i : i + chunk_size] for i in range(0, len(requests), chunk_size)]
 
                 all_chunk_themes: list[dict] = []
                 processed = 0
 
-                for chunk_idx, chunk in enumerate(chunks):
+                for chunk_idx, chunk_requests in enumerate(request_slices):
+                    # Number each chunk locally (1-based within the slice) so the
+                    # indices the LLM returns line up with ``chunk_requests`` below.
+                    # (Slicing a globally-numbered list would hand the LLM indices
+                    # like 81..160 that all fall outside this 80-item slice.)
+                    chunk_numbered = [f"{i}. {r['request']}" for i, r in enumerate(chunk_requests, 1)]
                     text, usage = await llm_service.tracked_chat_completion(
                         messages=[
                             {"role": "system", "content": TOP_QUESTIONS_SYSTEM_PROMPT},
-                            {"role": "user", "content": "\n".join(chunk)},
+                            {"role": "user", "content": "\n".join(chunk_numbered)},
                         ],
                         temperature=0.1,
                     )
@@ -161,11 +165,10 @@ async def run_request_cluster_analysis(
                         request_metadata={
                             "analysis_id": str(analysis_id),
                             "chunk": chunk_idx + 1,
-                            "total_chunks": len(chunks),
+                            "total_chunks": len(request_slices),
                         },
                     )
 
-                    chunk_requests = request_slices[chunk_idx]
                     for t in _parse_json_array(text):
                         indices = t.get("question_indices", [])
                         items = [chunk_requests[i - 1] for i in indices if 1 <= i <= len(chunk_requests)]
@@ -176,7 +179,7 @@ async def run_request_cluster_analysis(
                             "items": items,
                         })
 
-                    processed += len(chunk)
+                    processed += len(chunk_requests)
                     analysis = await db.get(RequestClusterAnalysis, analysis_id)
                     analysis.processed_requests = min(processed, len(requests))
                     await db.commit()
