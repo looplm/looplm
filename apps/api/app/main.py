@@ -14,9 +14,9 @@ from app.config import settings
 from app.routers import (
     admin, analysis, analytics, advisor, auth_router, costs_overview, dashboard, datasets, evaluations,
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
-    ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent, permissions,
-    project_members, projects, prompts, rag_coverage, route_analysis, trace_detail, traces,
-    user_settings, version,
+    index_explorer, ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent,
+    permissions, project_members, projects, prompts, rag_coverage, route_analysis, trace_detail,
+    traces, user_settings, version,
 )
 
 logger = logging.getLogger("looplm")
@@ -181,6 +181,7 @@ app.include_router(evaluators.router)
 app.include_router(experiments.router)
 app.include_router(datasets.router)
 app.include_router(rag_coverage.router)
+app.include_router(index_explorer.router)
 app.include_router(imports.router)
 app.include_router(code_agent.router)
 app.include_router(github_oauth.router)

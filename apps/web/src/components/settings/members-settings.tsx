@@ -13,7 +13,7 @@ import {
 const ALL_SECTIONS = ["observe", "evaluate", "improve"] as const;
 
 const SECTION_PAGES: Record<string, string[]> = {
-  observe: ["dashboard", "traces", "analytics", "feedback", "costs"],
+  observe: ["dashboard", "traces", "analytics", "feedback", "costs", "data-sources"],
   evaluate: ["evaluations", "evaluators", "datasets"],
   improve: ["advisor", "routes", "prompts"],
 };

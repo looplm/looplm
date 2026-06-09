@@ -1,0 +1,193 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+
+import { getIndexExplorerProviders, getIndexSummary } from "@/lib/api";
+import type {
+  IndexProviderOption,
+  IndexSummary,
+} from "@/lib/api-types/index-explorer";
+import { StatCard } from "@/components/eval-shared";
+import { IndexTree } from "@/components/data-sources/index-tree";
+
+const inputCls =
+  "px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm";
+
+export default function DataSourcesPage() {
+  const [providers, setProviders] = useState<IndexProviderOption[]>([]);
+  const [providerId, setProviderId] = useState("");
+  const [providersLoading, setProvidersLoading] = useState(true);
+
+  const [summary, setSummary] = useState<IndexSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  // Ordered list of fields the tree groups by (top → bottom).
+  const [groupBy, setGroupBy] = useState<string[]>([]);
+
+  // Load providers once.
+  useEffect(() => {
+    getIndexExplorerProviders()
+      .then(({ data }) => {
+        setProviders(data);
+        if (data.length > 0) setProviderId(data[0].id);
+      })
+      .catch(() => {})
+      .finally(() => setProvidersLoading(false));
+  }, []);
+
+  // Load summary + default grouping when the provider changes.
+  useEffect(() => {
+    if (!providerId) return;
+    setSummaryLoading(true);
+    setSummaryError(null);
+    setSummary(null);
+    setGroupBy([]);
+    getIndexSummary(providerId)
+      .then((s) => {
+        setSummary(s);
+        if (s.partition_keys.length > 0) setGroupBy([s.partition_keys[0].key]);
+      })
+      .catch((e) => setSummaryError((e as Error).message))
+      .finally(() => setSummaryLoading(false));
+  }, [providerId]);
+
+  const keys = summary?.partition_keys ?? [];
+
+  function setLevel(idx: number, value: string) {
+    setGroupBy((prev) => {
+      if (value === "") return prev.slice(0, idx); // remove this level and any below
+      const next = [...prev];
+      next[idx] = value;
+      return next.slice(0, idx + 1); // changing a level drops deeper levels
+    });
+  }
+
+  function addLevel() {
+    const used = new Set(groupBy);
+    const nextKey = keys.find((k) => !used.has(k.key));
+    if (nextKey) setGroupBy((prev) => [...prev, nextKey.key]);
+  }
+
+  const canAddLevel = groupBy.length < keys.length && groupBy.length > 0;
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-3xl font-bold">Data Sources</h1>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
+            Explore what is currently in your connected retrieval index — drill down by source
+            type, space, or URL into the indexed documents.
+          </p>
+        </div>
+        {providers.length > 0 && (
+          <select
+            value={providerId}
+            onChange={(e) => setProviderId(e.target.value)}
+            className={inputCls}
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {providersLoading ? (
+        <p className="text-sm text-gray-400 dark:text-slate-500 py-8">Loading…</p>
+      ) : providers.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-200 dark:border-slate-700 p-8 text-center">
+          <p className="text-sm text-gray-500 dark:text-slate-400">
+            No index providers connected yet. Connect a retrieval index to explore its contents.
+          </p>
+          <Link
+            href="/coverage"
+            className="inline-block mt-3 px-3 py-2 rounded-lg text-sm bg-indigo-600 text-white hover:bg-indigo-500"
+          >
+            Connect an index
+          </Link>
+        </div>
+      ) : (
+        <>
+          {summaryError && (
+            <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg px-4 py-3 mb-6">
+              {summaryError}
+            </div>
+          )}
+
+          {/* Summary */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <StatCard
+              label="Documents in index"
+              value={summary ? summary.document_count.toLocaleString() : "—"}
+            />
+            <StatCard
+              label="Groupable fields"
+              value={summary ? summary.partition_keys.length : "—"}
+            />
+            <StatCard label="Provider" value={providers.find((p) => p.id === providerId)?.name ?? "—"} />
+          </div>
+
+          {/* Group-by composer */}
+          {!summaryLoading && keys.length > 0 && (
+            <div className="rounded-xl border border-gray-100 dark:border-slate-800 p-4 mb-4">
+              <div className="flex flex-wrap items-end gap-3">
+                {groupBy.map((g, idx) => (
+                  <label key={idx} className="flex flex-col gap-1">
+                    <span className="text-xs text-gray-500 dark:text-slate-400">
+                      {idx === 0 ? "Group by" : "then by"}
+                    </span>
+                    <select
+                      value={g}
+                      onChange={(e) => setLevel(idx, e.target.value)}
+                      className={inputCls}
+                    >
+                      {keys.map((k) => (
+                        <option key={k.key} value={k.key}>
+                          {k.label}
+                          {k.multivalued ? " (multi)" : ""}
+                        </option>
+                      ))}
+                      {idx > 0 && <option value="">— remove —</option>}
+                    </select>
+                  </label>
+                ))}
+                {canAddLevel && (
+                  <button
+                    onClick={addLevel}
+                    className="px-3 py-2 rounded-lg text-sm text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800"
+                  >
+                    + Add level
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {summaryLoading && (
+            <p className="text-sm text-gray-400 dark:text-slate-500 py-4">Loading index…</p>
+          )}
+
+          {!summaryLoading && keys.length === 0 && summary && (
+            <p className="text-sm text-gray-400 dark:text-slate-500 py-4">
+              This index exposes no groupable (facetable) fields.
+            </p>
+          )}
+
+          {!summaryLoading && providerId && groupBy.length > 0 && (
+            <IndexTree
+              key={`${providerId}:${groupBy.join(">")}`}
+              providerId={providerId}
+              groupBy={groupBy}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}

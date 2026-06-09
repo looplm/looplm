@@ -10,7 +10,7 @@ import { PermissionsProvider, usePermissions } from "./permissions-context";
 const FILTER_PATHS = new Set(["/dashboard", "/traces", "/analytics", "/feedback", "/costs"]);
 
 const SECTION_ROUTES: Record<string, string[]> = {
-  observe: ["/dashboard", "/traces", "/analytics", "/feedback", "/costs"],
+  observe: ["/dashboard", "/traces", "/analytics", "/feedback", "/data-sources", "/costs"],
   evaluate: ["/evaluations", "/evaluators", "/datasets"],
   improve: ["/issues", "/advisor", "/routes", "/prompts"],
 };
@@ -20,6 +20,7 @@ const ROUTE_TO_PAGE: Record<string, string> = {
   "/traces": "traces",
   "/analytics": "analytics",
   "/feedback": "feedback",
+  "/data-sources": "data-sources",
   "/costs": "costs",
   "/evaluations": "evaluations",
   "/evaluators": "evaluators",

@@ -23,6 +23,7 @@ const NAV_GROUPS = [
       { href: "/traces", label: "Traces", icon: "\u{1F50D}" },
       { href: "/analytics", label: "Analytics", icon: "\u{1F4C8}" },
       { href: "/feedback", label: "Feedback", icon: "\u{1F4AC}" },
+      { href: "/data-sources", label: "Data Sources", icon: "\u{1F5C2}️" },
       { href: "/costs", label: "Costs", icon: "\u{1F4B0}" },
     ],
   },

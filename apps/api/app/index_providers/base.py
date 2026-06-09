@@ -76,13 +76,27 @@ class BaseIndexProvider(ABC):
         ...
 
     @abstractmethod
-    async def get_partition_distribution(self, key: str) -> list[PartitionValue]:
-        """Return every value of ``key`` present in the corpus, with counts."""
+    async def get_partition_distribution(
+        self, key: str, filters: dict[str, str] | None = None
+    ) -> list[PartitionValue]:
+        """Return every value of ``key`` present in the corpus, with counts.
+
+        ``filters`` is an optional ``{field: value}`` map of ancestor constraints
+        AND-ed into the query — e.g. the distribution of ``space`` *within*
+        ``source_type == "confluence"``. ``None`` means the whole corpus.
+        """
         ...
 
     @abstractmethod
-    async def sample_documents(self, key: str, value: str, n: int) -> list[CorpusDoc]:
-        """Return up to ``n`` representative documents where ``key == value``."""
+    async def sample_documents(
+        self, key: str, value: str, n: int, filters: dict[str, str] | None = None
+    ) -> list[CorpusDoc]:
+        """Return up to ``n`` representative documents where ``key == value``.
+
+        ``filters`` is an optional ``{field: value}`` map of additional ancestor
+        constraints AND-ed with the ``key == value`` clause (used to scope a
+        sample to a full drill-down path). ``None`` means no extra constraints.
+        """
         ...
 
     async def aclose(self) -> None:

@@ -103,13 +103,35 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         keys.sort(key=lambda k: k.key)
         return keys
 
-    async def get_partition_distribution(self, key: str) -> list[PartitionValue]:
+    async def _build_filter(self, constraints: dict[str, str] | None) -> str | None:
+        """AND-join ``{field: value}`` constraints into a single OData filter.
+
+        Collection fields use the ``field/any(t: t eq 'v')`` form; scalars use
+        ``field eq 'v'``. Returns ``None`` when there are no constraints.
+        """
+        if not constraints:
+            return None
+        clauses: list[str] = []
+        for field_name, value in constraints.items():
+            info = await self._field(field_name)
+            esc = _odata_escape(value)
+            if info.is_collection:
+                clauses.append(f"{field_name}/any(t: t eq '{esc}')")
+            else:
+                clauses.append(f"{field_name} eq '{esc}'")
+        return " and ".join(clauses)
+
+    async def get_partition_distribution(
+        self, key: str, filters: dict[str, str] | None = None
+    ) -> list[PartitionValue]:
         info = await self._field(key)
         if not info.facetable:
             raise ValueError(f"Field '{key}' is not facetable and cannot be used as a partition key")
 
+        filter_expr = await self._build_filter(filters)
         results = await self._search_client.search(
             search_text="*",
+            filter=filter_expr,
             facets=[f"{key},count:{_MAX_FACET_VALUES}"],
             top=0,
             include_total_count=False,
@@ -124,7 +146,9 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         out.sort(key=lambda v: v.doc_count, reverse=True)
         return out
 
-    async def sample_documents(self, key: str, value: str, n: int) -> list[CorpusDoc]:
+    async def sample_documents(
+        self, key: str, value: str, n: int, filters: dict[str, str] | None = None
+    ) -> list[CorpusDoc]:
         info = await self._field(key)
         fields = await self._get_fields()
         esc = _odata_escape(value)
@@ -132,6 +156,10 @@ class AzureSearchIndexProvider(BaseIndexProvider):
             filter_expr = f"{key}/any(t: t eq '{esc}')"
         else:
             filter_expr = f"{key} eq '{esc}'"
+
+        ancestor_expr = await self._build_filter(filters)
+        if ancestor_expr:
+            filter_expr = f"({filter_expr}) and ({ancestor_expr})"
 
         select = [f for f in _PREFERRED_SAMPLE_FIELDS if f in fields]
         key_field = next((f.name for f in fields.values() if f.is_key), None)
