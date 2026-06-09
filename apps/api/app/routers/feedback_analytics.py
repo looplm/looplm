@@ -18,6 +18,7 @@ from app.models.models import FeedbackScore, Integration, Trace
 from app.models.project import Project
 from app.models.user import User
 from app.services.observe_filter import get_observe_trace_names
+from app.services.retrieval_config import get_retrieval_span_name
 from app.schemas.feedback import (
     FeedbackStatsResponse,
     FeedbackTrend,
@@ -325,7 +326,9 @@ async def generate_suggestions(
     rows = result.all()
 
     trace_ids = [trace.id for _fb, trace in rows if trace is not None]
-    trace_sources = await load_trace_source_urls(db, trace_ids)
+    trace_sources = await load_trace_source_urls(
+        db, trace_ids, get_retrieval_span_name(project)
+    )
     trace_messages = await load_trace_conversation_messages(db, trace_ids)
     suggestions = build_suggestions(rows, trace_sources=trace_sources)
 

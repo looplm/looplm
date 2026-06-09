@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
@@ -18,7 +18,10 @@ from app.db import async_session, get_db
 from app.models.models import FeedbackScore, Integration, Span, SpanType, Trace
 from app.models.project import Project
 from app.models.user import User
-from app.routers.dataset_helpers import extract_retrieval_sources
+from app.routers.dataset_helpers import (
+    extract_retrieval_source_urls,
+    extract_retrieval_sources,
+)
 from app.routers.request_clusters_worker import (
     _request_cluster_tasks,
     run_request_cluster_analysis,
@@ -30,9 +33,12 @@ from app.schemas.analytics import (
     RequestClustersResponse,
     RequestOutcome,
     RetrievalActivityPoint,
+    RetrievalActivityResponse,
     RetrievalSource,
+    SpanNameCount,
 )
 from app.services.observe_filter import get_observe_trace_names
+from app.services.retrieval_config import get_retrieval_span_name
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +274,7 @@ async def get_retrieval_sources(
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
-    """Most frequently retrieved sources, from ``retrieval-context`` span outputs."""
+    """Most frequently retrieved sources, from the project's retrieval-span outputs."""
     base_filter = _trace_base_filter(
         project,
         environment=environment,
@@ -277,11 +283,12 @@ async def get_retrieval_sources(
         start=from_date,
         end=to_date,
     )
+    span_name = get_retrieval_span_name(project)
     rows = (
         await db.execute(
             select(Span.output)
             .join(Trace, Span.trace_id == Trace.id)
-            .where(*base_filter, Span.name == "retrieval-context")
+            .where(*base_filter, Span.name == span_name)
         )
     ).all()
 
@@ -308,7 +315,7 @@ async def get_retrieval_sources(
 
 @router.get(
     "/retrieval/activity",
-    response_model=list[RetrievalActivityPoint],
+    response_model=RetrievalActivityResponse,
     dependencies=[require_section("observe", "analytics")],
 )
 async def get_retrieval_activity(
@@ -320,7 +327,8 @@ async def get_retrieval_activity(
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
-    """Daily retrieval-span volume + avg latency + token usage.
+    """Retrieval coverage (share of requests that retrieved at all), average
+    sources pulled per retrieving request, and a daily volume sparkline.
 
     Date bucketing is done in Python so the same query works on Postgres
     (production) and SQLite (tests) without dialect-specific date casts.
@@ -333,35 +341,75 @@ async def get_retrieval_activity(
         start=from_date,
         end=to_date,
     )
+    span_name = get_retrieval_span_name(project)
+
+    requests_total = (
+        await db.execute(select(func.count()).select_from(Trace).where(*base_filter))
+    ).scalar() or 0
+
     rows = (
         await db.execute(
-            select(Trace.start_time, Span.duration_ms, Span.tokens_in, Span.tokens_out)
+            select(Span.trace_id, Span.output, Trace.start_time)
             .join(Trace, Span.trace_id == Trace.id)
-            .where(*base_filter, Span.type == SpanType.retriever)
+            # Identify retrieval spans the same way the sources panel does — by the
+            # project's configured retrieval span name. The ``retriever`` span type
+            # is only set by the LangSmith connector (Langfuse maps its retrieval
+            # SPANs to ``chain``), so keep the type check too for LangSmith traces.
+            .where(
+                *base_filter,
+                or_(Span.name == span_name, Span.type == SpanType.retriever),
+            )
         )
     ).all()
 
-    buckets: dict[str, dict] = defaultdict(
-        lambda: {"count": 0, "dur": 0.0, "dur_n": 0, "tin": 0, "tout": 0}
-    )
-    for start_time, duration_ms, tokens_in, tokens_out in rows:
-        if start_time is None:
-            continue
-        b = buckets[start_time.date().isoformat()]
-        b["count"] += 1
-        if duration_ms is not None:
-            b["dur"] += duration_ms
-            b["dur_n"] += 1
-        b["tin"] += tokens_in or 0
-        b["tout"] += tokens_out or 0
+    daily_counts: dict[str, int] = defaultdict(int)
+    sources_by_trace: dict[str, set[str]] = defaultdict(set)
+    for trace_id, output, start_time in rows:
+        if start_time is not None:
+            daily_counts[start_time.date().isoformat()] += 1
+        for url in extract_retrieval_source_urls(output):
+            sources_by_trace[str(trace_id)].add(url)
 
-    return [
-        RetrievalActivityPoint(
-            date=date,
-            count=b["count"],
-            avg_latency_ms=round(b["dur"] / b["dur_n"], 1) if b["dur_n"] else 0.0,
-            tokens_in=b["tin"],
-            tokens_out=b["tout"],
+    requests_with_retrieval = len({str(r[0]) for r in rows})
+    coverage = requests_with_retrieval / requests_total if requests_total else 0.0
+    total_sources = sum(len(s) for s in sources_by_trace.values())
+    avg_sources = total_sources / requests_with_retrieval if requests_with_retrieval else 0.0
+
+    return RetrievalActivityResponse(
+        requests_total=requests_total,
+        requests_with_retrieval=requests_with_retrieval,
+        coverage=round(coverage, 4),
+        avg_sources_per_request=round(avg_sources, 2),
+        daily=[
+            RetrievalActivityPoint(date=date, count=count)
+            for date, count in sorted(daily_counts.items())
+        ],
+    )
+
+
+@router.get(
+    "/span-names",
+    response_model=list[SpanNameCount],
+    dependencies=[require_section("observe", "analytics")],
+)
+async def get_span_names(
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Distinct span names in the project with occurrence counts, most frequent
+    first — feeds the retrieval span-name picker."""
+    project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
+    rows = (
+        await db.execute(
+            select(Span.name, func.count().label("n"))
+            .join(Trace, Span.trace_id == Trace.id)
+            .where(
+                Trace.integration_id.in_(project_integration_ids),
+                Span.name.isnot(None),
+                Span.name != "",
+            )
+            .group_by(Span.name)
+            .order_by(func.count().desc())
         )
-        for date, b in sorted(buckets.items())
-    ]
+    ).all()
+    return [SpanNameCount(name=name, count=n) for name, n in rows]

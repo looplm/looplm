@@ -40,7 +40,17 @@ export interface RetrievalSource {
 export interface RetrievalActivityPoint {
   date: string;
   count: number;
-  avg_latency_ms: number;
-  tokens_in: number;
-  tokens_out: number;
+}
+
+export interface RetrievalActivityResponse {
+  requests_total: number;
+  requests_with_retrieval: number;
+  coverage: number; // 0..1
+  avg_sources_per_request: number;
+  daily: RetrievalActivityPoint[];
+}
+
+export interface SpanNameCount {
+  name: string;
+  count: number;
 }

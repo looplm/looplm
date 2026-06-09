@@ -5,8 +5,9 @@
 import { request } from "./client";
 import type {
   RequestClustersResponse,
-  RetrievalActivityPoint,
+  RetrievalActivityResponse,
   RetrievalSource,
+  SpanNameCount,
 } from "../api-types/analytics";
 
 export interface AnalyticsFilters {
@@ -52,6 +53,9 @@ export const getRetrievalSources = (filters: AnalyticsFilters, limit = 20) =>
   );
 
 export const getRetrievalActivity = (filters: AnalyticsFilters) =>
-  request<RetrievalActivityPoint[]>(
+  request<RetrievalActivityResponse>(
     `/api/analytics/retrieval/activity${buildQuery(filters)}`,
   );
+
+export const getSpanNames = () =>
+  request<SpanNameCount[]>("/api/analytics/span-names");

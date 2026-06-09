@@ -110,6 +110,8 @@ export type {
   RequestClustersResponse,
   RetrievalSource,
   RetrievalActivityPoint,
+  RetrievalActivityResponse,
+  SpanNameCount,
   IndexProvider,
   IndexProviderCreateBody,
   IndexProviderUpdateBody,

@@ -27,6 +27,8 @@ from app.schemas.datasets import (
 )
 from app.schemas.evaluations import PaginationInfo
 
+from app.services.retrieval_config import get_retrieval_span_name
+
 from .dataset_helpers import _tc_to_item, build_suggestions, load_trace_source_urls
 
 logger = logging.getLogger(__name__)
@@ -145,7 +147,9 @@ async def get_suggestions(
     rows = result.all()
 
     trace_ids = [trace.id for _fb, trace in rows if trace is not None]
-    trace_sources = await load_trace_source_urls(db, trace_ids)
+    trace_sources = await load_trace_source_urls(
+        db, trace_ids, get_retrieval_span_name(project)
+    )
     return build_suggestions(rows, trace_sources=trace_sources)
 
 

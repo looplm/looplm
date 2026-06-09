@@ -44,7 +44,14 @@ interface GlobalFiltersContextValue extends GlobalFilters {
   traceNamesSaving: boolean;
   traceNamesError: string | null;
   setTraceNames: (names: string[]) => Promise<void>;
+  // Persistent retrieval span-name (project setting) — which span the retrieval
+  // analytics panels treat as the RAG/retrieval step.
+  retrievalSpanName: string;
+  retrievalSpanNameSaving: boolean;
+  setRetrievalSpanName: (name: string) => Promise<void>;
 }
+
+export const DEFAULT_RETRIEVAL_SPAN_NAME = "retrieval-context";
 
 const GlobalFiltersContext = createContext<GlobalFiltersContextValue | null>(null);
 
@@ -75,6 +82,8 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
   const [traceNameOptions, setTraceNameOptions] = useState<string[]>([]);
   const [traceNamesSaving, setTraceNamesSaving] = useState(false);
   const [traceNamesError, setTraceNamesError] = useState<string | null>(null);
+  const [retrievalSpanName, setRetrievalSpanNameState] = useState(DEFAULT_RETRIEVAL_SPAN_NAME);
+  const [retrievalSpanNameSaving, setRetrievalSpanNameSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +95,8 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
         setCurrentProject(project);
         const names = project?.settings?.observe_trace_names;
         if (Array.isArray(names)) setTraceNamesState(names);
+        const spanName = project?.settings?.retrieval_span_name;
+        if (typeof spanName === "string" && spanName.trim()) setRetrievalSpanNameState(spanName);
       })
       .catch(() => {});
     getTraceNames()
@@ -116,6 +127,27 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
       setTraceNamesSaving(false);
     }
   }, [currentProject, traceNames]);
+
+  const setRetrievalSpanName = useCallback(async (next: string) => {
+    if (!currentProject || currentProject.role !== "owner") return;
+    const value = next.trim();
+    if (!value || value === retrievalSpanName) return;
+    const prev = retrievalSpanName;
+    setRetrievalSpanNameState(value);
+    setRetrievalSpanNameSaving(true);
+    try {
+      await updateProject(currentProject.id, {
+        settings: { retrieval_span_name: value },
+      });
+      setCurrentProject((p) =>
+        p ? { ...p, settings: { ...(p.settings || {}), retrieval_span_name: value } } : p,
+      );
+    } catch {
+      setRetrievalSpanNameState(prev);
+    } finally {
+      setRetrievalSpanNameSaving(false);
+    }
+  }, [currentProject, retrievalSpanName]);
 
   const setDateRange = useCallback((start: string, end: string) => {
     setStartDate(start);
@@ -187,6 +219,9 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
         traceNamesSaving,
         traceNamesError,
         setTraceNames,
+        retrievalSpanName,
+        retrievalSpanNameSaving,
+        setRetrievalSpanName,
       }}
     >
       {children}

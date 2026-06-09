@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models.models import EvalResult, EvalRun, Trace
+from app.models.project import Project
 from app.routers.evaluations import _compute_summaries
 from app.schemas.evaluations import EvalResultImport, GraderResult
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
@@ -105,6 +106,7 @@ class TraceGrader:
         self,
         traces: list[Trace],
         project_id: UUID,
+        retrieval_span_name: str | None = None,
     ) -> tuple[list[EvalResultImport], dict, list[LlmUsageInfo]]:
         """Grade a batch of traces, return (importable_results, meta, usages)."""
         results: list[EvalResultImport] = []
@@ -137,7 +139,7 @@ class TraceGrader:
                 )
 
             meta: dict[str, Any] = {"trace_id": str(trace.id), "trace_name": trace.name}
-            retrieval_context = _extract_retrieval_context(trace)
+            retrieval_context = _extract_retrieval_context(trace, retrieval_span_name)
             if retrieval_context:
                 meta["retrieval_context"] = retrieval_context
 
@@ -185,13 +187,22 @@ def _extract_text(data: Any) -> str:
     return str(data)
 
 
-def _extract_retrieval_context(trace: Trace) -> str | None:
-    """Extract retrieval context from trace spans (e.g. 'retrieval-context' chain span)."""
+def _extract_retrieval_context(trace: Trace, span_name: str | None = None) -> str | None:
+    """Extract retrieval context from trace spans.
+
+    Matches the project's configured retrieval span name (``span_name``) when
+    given, and also falls back to the ``*retrieval*context*`` name heuristic so
+    default-instrumented traces keep working.
+    """
     if not trace.spans:
         return None
 
+    target = (span_name or "").strip().lower()
     for span in trace.spans:
-        if span.name and "retrieval" in span.name.lower() and "context" in span.name.lower():
+        name = (span.name or "").lower()
+        if not name:
+            continue
+        if (target and name == target) or ("retrieval" in name and "context" in name):
             output = span.output
             if output is None:
                 continue
@@ -303,8 +314,15 @@ async def _auto_grade_loop(
                 )
 
                 from app.services.llm_usage_tracker import record_llm_usage
+                from app.services.retrieval_config import get_retrieval_span_name
 
-                results, meta, usages = await grader.grade_batch(eligible, project_id)
+                project = await db.get(Project, project_id)
+                retrieval_span_name = (
+                    get_retrieval_span_name(project) if project is not None else None
+                )
+                results, meta, usages = await grader.grade_batch(
+                    eligible, project_id, retrieval_span_name
+                )
 
                 for u in usages:
                     await record_llm_usage(
