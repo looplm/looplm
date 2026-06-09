@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 
 from app.models.models import FeedbackScore, Span, TestCase, Trace
 from app.schemas.datasets import TestCaseItem, TestCaseSuggestion
+from app.services.retrieval_config import DEFAULT_RETRIEVAL_SPAN_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -336,13 +337,14 @@ async def summarize_conversation(
 async def load_trace_source_urls(
     db: Any,
     trace_ids: list[Any],
+    span_name: str = DEFAULT_RETRIEVAL_SPAN_NAME,
 ) -> dict[str, list[str]]:
-    """Load retrieval-context span outputs for ``trace_ids`` and return a
+    """Load retrieval-span outputs for ``trace_ids`` and return a
     ``{str(trace_id): [url, ...]}`` map.
 
-    Looks for spans named ``retrieval-context`` (the agent's RAG step in our
-    observability traces). A single trace can have multiple — we merge them
-    in insertion order and de-duplicate URLs.
+    Looks for spans named ``span_name`` (the agent's RAG step — per-project
+    configurable, defaults to ``retrieval-context``). A single trace can have
+    multiple — we merge them in insertion order and de-duplicate URLs.
     """
     from sqlalchemy import select
 
@@ -353,7 +355,7 @@ async def load_trace_source_urls(
         await db.execute(
             select(Span.trace_id, Span.output)
             .where(Span.trace_id.in_(trace_ids))
-            .where(Span.name == "retrieval-context")
+            .where(Span.name == span_name)
             .order_by(Span.created_at)
         )
     ).all()

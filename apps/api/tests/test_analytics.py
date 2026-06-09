@@ -72,11 +72,79 @@ async def test_retrieval_activity(client, db_session, test_integration, headers)
     assert resp.status_code == 200
     data = resp.json()
 
-    # One retriever span per day across two days.
-    assert len(data) == 2
-    assert {p["date"] for p in data} == {"2025-01-01", "2025-01-02"}
-    assert all(p["count"] == 1 for p in data)
-    assert sum(p["tokens_in"] + p["tokens_out"] for p in data) == 95
+    # Both traces retrieved → full coverage; billing+plans / billing = 1.5 avg sources.
+    assert data["requests_total"] == 2
+    assert data["requests_with_retrieval"] == 2
+    assert data["coverage"] == 1.0
+    assert data["avg_sources_per_request"] == 1.5
+    # One retrieval span per day across two days.
+    assert {p["date"] for p in data["daily"]} == {"2025-01-01", "2025-01-02"}
+    assert all(p["count"] == 1 for p in data["daily"])
+
+
+async def _seed_custom_retrieval(db_session, integration, span_name):
+    """A trace whose retrieval step uses a non-default span name and the
+    ``chain`` type (mimicking the Langfuse connector, which never tags
+    retrieval spans as ``retriever``)."""
+    t = Trace(
+        id=uuid4(), integration_id=integration.id, external_id="c1", name="chat",
+        input={"messages": [{"role": "user", "content": "hi"}]},
+        start_time=datetime(2025, 2, 1, tzinfo=timezone.utc), status=TraceStatus.success,
+    )
+    db_session.add(t)
+    await db_session.flush()
+    db_session.add(
+        Span(
+            id=uuid4(), trace_id=t.id, name=span_name, type=SpanType.chain,
+            duration_ms=90, tokens_in=12, tokens_out=3, status="ok",
+            output={"sources": [{"url": "https://kb.example.com/article"}]},
+            created_at=datetime(2025, 2, 1, tzinfo=timezone.utc),
+        )
+    )
+    await db_session.commit()
+    return t
+
+
+@pytest.mark.asyncio
+async def test_span_names_endpoint(client, db_session, test_integration, headers):
+    await _seed_retrieval(db_session, test_integration)
+
+    resp = await client.get("/api/analytics/span-names", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    by_name = {s["name"]: s["count"] for s in data}
+    assert by_name["retrieval-context"] == 2
+
+
+@pytest.mark.asyncio
+async def test_retrieval_respects_configured_span_name(
+    client, db_session, test_integration, test_project, headers
+):
+    """A chain-typed span with a custom name is found once the project points its
+    retrieval setting at that name — and not under the default name."""
+    await _seed_custom_retrieval(db_session, test_integration, "rag_lookup")
+
+    # Default name finds nothing (the span is named rag_lookup, typed chain).
+    resp = await client.get("/api/analytics/retrieval/activity", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["requests_with_retrieval"] == 0
+    assert resp.json()["coverage"] == 0.0
+
+    # Point the project at the custom span name.
+    test_project.settings = {"retrieval_span_name": "rag_lookup"}
+    await db_session.commit()
+
+    resp = await client.get("/api/analytics/retrieval/activity", headers=headers)
+    assert resp.status_code == 200
+    activity = resp.json()
+    assert activity["requests_with_retrieval"] == 1
+    assert activity["coverage"] == 1.0
+    assert len(activity["daily"]) == 1 and activity["daily"][0]["count"] == 1
+
+    resp = await client.get("/api/analytics/retrieval/sources", headers=headers)
+    assert resp.status_code == 200
+    sources = resp.json()
+    assert {s["url"] for s in sources} == {"https://kb.example.com/article"}
 
 
 @pytest.mark.asyncio

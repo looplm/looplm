@@ -62,6 +62,26 @@ class RetrievalSource(BaseModel):
 class RetrievalActivityPoint(BaseModel):
     date: str
     count: int
-    avg_latency_ms: float
-    tokens_in: int
-    tokens_out: int
+
+
+class RetrievalActivityResponse(BaseModel):
+    """Retrieval coverage + reach, with a daily volume sparkline.
+
+    ``coverage`` is the share of requests that triggered a retrieval at all
+    (ungrounded answers are the failure mode worth surfacing); ``avg_sources_per_request``
+    is how many distinct sources a retrieving request pulls on average.
+    """
+
+    requests_total: int
+    requests_with_retrieval: int
+    coverage: float  # 0..1
+    avg_sources_per_request: float
+    daily: list[RetrievalActivityPoint]
+
+
+class SpanNameCount(BaseModel):
+    """A distinct span name and how often it occurs — feeds the retrieval
+    span-name picker so the user can point the retrieval panels at the right step."""
+
+    name: str
+    count: int

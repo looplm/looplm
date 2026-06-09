@@ -9,17 +9,29 @@ import {
   stopRequestClusters,
   getRetrievalSources,
   getRetrievalActivity,
+  getSpanNames,
   type AnalyticsFilters,
   type RequestClustersResponse,
   type RetrievalSource,
-  type RetrievalActivityPoint,
+  type RetrievalActivityResponse,
+  type SpanNameCount,
 } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import { HeatmapMatrix } from "./heatmap-matrix";
 
 export default function AnalyticsPage() {
-  const { startDate, endDate, environment, userFilterMode, filteredUsers, traceNames } =
-    useGlobalFilters();
+  const {
+    startDate,
+    endDate,
+    environment,
+    userFilterMode,
+    filteredUsers,
+    traceNames,
+    canEditTraceNames,
+    retrievalSpanName,
+    retrievalSpanNameSaving,
+    setRetrievalSpanName,
+  } = useGlobalFilters();
 
   const filters = useMemo<AnalyticsFilters>(() => {
     const f: AnalyticsFilters = {};
@@ -102,18 +114,44 @@ export default function AnalyticsPage() {
 
   // --- Retrieval insights ---
   const [sources, setSources] = useState<RetrievalSource[] | null>(null);
-  const [activity, setActivity] = useState<RetrievalActivityPoint[] | null>(null);
+  const [activity, setActivity] = useState<RetrievalActivityResponse | null>(null);
+  const [spanNames, setSpanNames] = useState<SpanNameCount[]>([]);
 
+  // Both panels resolve the retrieval step from the project's configured span
+  // name, so reload whenever that selection changes.
   const loadRetrieval = useCallback(() => {
     setSources(null);
     setActivity(null);
     getRetrievalSources(filters).then(setSources).catch(() => setSources([]));
-    getRetrievalActivity(filters).then(setActivity).catch(() => setActivity([]));
-  }, [filters]);
+    getRetrievalActivity(filters)
+      .then(setActivity)
+      .catch(() =>
+        setActivity({
+          requests_total: 0,
+          requests_with_retrieval: 0,
+          coverage: 0,
+          avg_sources_per_request: 0,
+          daily: [],
+        }),
+      );
+  }, [filters, retrievalSpanName]);
 
   useEffect(() => {
     loadRetrieval();
   }, [loadRetrieval]);
+
+  useEffect(() => {
+    getSpanNames().then(setSpanNames).catch(() => setSpanNames([]));
+  }, []);
+
+  // Keep the configured name selectable even if it has no spans in the project yet.
+  const spanNameOptions = useMemo(() => {
+    const opts = [...spanNames];
+    if (retrievalSpanName && !opts.some((o) => o.name === retrievalSpanName)) {
+      opts.unshift({ name: retrievalSpanName, count: 0 });
+    }
+    return opts;
+  }, [spanNames, retrievalSpanName]);
 
   const hasClusters = clusters?.status === "completed" && clusters.themes.length > 0;
 
@@ -190,7 +228,35 @@ export default function AnalyticsPage() {
       </section>
 
       {/* Retrieval insights */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <section>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <h2 className="text-lg font-semibold">Retrieval insights</h2>
+          <label className="flex items-center gap-2 text-sm text-gray-500 dark:text-slate-400">
+            <span>Retrieval step span</span>
+            <select
+              value={retrievalSpanName}
+              onChange={(e) => setRetrievalSpanName(e.target.value)}
+              disabled={!canEditTraceNames || retrievalSpanNameSaving}
+              title={
+                canEditTraceNames
+                  ? "Which span name represents your retrieval/RAG step"
+                  : "Only project owners can change this"
+              }
+              className="rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm text-gray-700 dark:text-slate-200 disabled:opacity-60 max-w-[20rem]"
+            >
+              {spanNameOptions.map((o) => (
+                <option key={o.name} value={o.name}>
+                  {o.name}
+                  {o.count > 0 ? ` (${o.count})` : ""}
+                </option>
+              ))}
+            </select>
+            {retrievalSpanNameSaving && (
+              <span className="text-xs text-gray-400 dark:text-slate-500">Saving…</span>
+            )}
+          </label>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
           <h2 className="text-lg font-semibold mb-3">Top retrieved sources</h2>
           <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-4">
@@ -233,60 +299,79 @@ export default function AnalyticsPage() {
         <div>
           <h2 className="text-lg font-semibold mb-3">Retrieval activity</h2>
           <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-4">
-            <RetrievalActivity points={activity} />
+            <RetrievalActivity data={activity} />
           </div>
+        </div>
         </div>
       </section>
     </div>
   );
 }
 
-function RetrievalActivity({ points }: { points: RetrievalActivityPoint[] | null }) {
+function RetrievalActivity({ data }: { data: RetrievalActivityResponse | null }) {
   const [hover, setHover] = useState<number | null>(null);
-  if (points === null) return <p className="text-sm text-gray-400 dark:text-slate-500">Loading...</p>;
-  if (points.length === 0)
-    return <p className="text-sm text-gray-400 dark:text-slate-500">No retrieval spans in this window.</p>;
+  if (data === null) return <p className="text-sm text-gray-400 dark:text-slate-500">Loading...</p>;
+  if (data.requests_total === 0)
+    return <p className="text-sm text-gray-400 dark:text-slate-500">No requests in this window.</p>;
 
+  const coveragePct = Math.round(data.coverage * 100);
+  const points = data.daily;
   const max = Math.max(1, ...points.map((p) => p.count));
-  const totals = points.reduce(
-    (acc, p) => ({ count: acc.count + p.count, tin: acc.tin + p.tokens_in, tout: acc.tout + p.tokens_out }),
-    { count: 0, tin: 0, tout: 0 },
-  );
 
   return (
     <div>
-      <div className="flex gap-[3px] items-end h-32 mb-2">
-        {points.map((p, i) => (
-          <div
-            key={p.date}
-            className="flex-1 relative flex flex-col justify-end"
-            style={{ minWidth: 4 }}
-            onMouseEnter={() => setHover(i)}
-            onMouseLeave={() => setHover(null)}
-          >
-            {hover === i && (
-              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-10 bg-gray-900 dark:bg-slate-700 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-lg pointer-events-none">
-                <div className="font-medium mb-1">{p.date}</div>
-                <div>{p.count} retrievals</div>
-                <div>{p.avg_latency_ms} ms avg</div>
-                <div>{p.tokens_in + p.tokens_out} tokens</div>
-              </div>
-            )}
-            <div
-              className="w-full rounded-t-sm bg-indigo-500 transition-opacity"
-              style={{
-                height: `${Math.round((p.count / max) * 100)}%`,
-                minHeight: p.count > 0 ? 4 : 0,
-                opacity: hover === null || hover === i ? 1 : 0.4,
-              }}
-            />
+      {/* Headline metrics: did retrieval happen, and how much did it pull? */}
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <div>
+          <div className="text-2xl font-semibold text-gray-900 dark:text-slate-100">{coveragePct}%</div>
+          <div className="text-xs text-gray-400 dark:text-slate-500">
+            requests grounded
+            <span className="text-gray-300 dark:text-slate-600">
+              {" "}({data.requests_with_retrieval.toLocaleString()}/{data.requests_total.toLocaleString()})
+            </span>
           </div>
-        ))}
+        </div>
+        <div>
+          <div className="text-2xl font-semibold text-gray-900 dark:text-slate-100">
+            {data.avg_sources_per_request.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+          </div>
+          <div className="text-xs text-gray-400 dark:text-slate-500">avg sources / request</div>
+        </div>
       </div>
-      <div className="flex justify-between text-[11px] text-gray-400 dark:text-slate-500">
-        <span>{totals.count} retrievals</span>
-        <span>{(totals.tin + totals.tout).toLocaleString()} tokens</span>
-      </div>
+
+      {points.length > 0 && (
+        <>
+          <div className="flex gap-[3px] items-end h-24 mb-2">
+            {points.map((p, i) => (
+              <div
+                key={p.date}
+                className="flex-1 relative flex flex-col justify-end"
+                style={{ minWidth: 4 }}
+                onMouseEnter={() => setHover(i)}
+                onMouseLeave={() => setHover(null)}
+              >
+                {hover === i && (
+                  <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-10 bg-gray-900 dark:bg-slate-700 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-lg pointer-events-none">
+                    <div className="font-medium mb-1">{p.date}</div>
+                    <div>{p.count} retrievals</div>
+                  </div>
+                )}
+                <div
+                  className="w-full rounded-t-sm bg-indigo-500 transition-opacity"
+                  style={{
+                    height: `${Math.round((p.count / max) * 100)}%`,
+                    minHeight: p.count > 0 ? 4 : 0,
+                    opacity: hover === null || hover === i ? 1 : 0.4,
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-gray-400 dark:text-slate-500">
+            Daily retrieval volume
+          </div>
+        </>
+      )}
     </div>
   );
 }

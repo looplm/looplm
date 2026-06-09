@@ -20,7 +20,7 @@ from app.routers.top_questions_worker import (
     TOP_QUESTIONS_MERGE_PROMPT,
     TOP_QUESTIONS_SYSTEM_PROMPT,
     _parse_json_array,
-    resolve_merged_source_themes,
+    attribute_merged_themes,
 )
 
 logger = logging.getLogger(__name__)
@@ -136,17 +136,21 @@ async def run_request_cluster_analysis(
                 analysis.processed_requests = len(requests)
                 await db.commit()
             else:
-                chunks = [numbered[i : i + chunk_size] for i in range(0, len(numbered), chunk_size)]
                 request_slices = [requests[i : i + chunk_size] for i in range(0, len(requests), chunk_size)]
 
                 all_chunk_themes: list[dict] = []
                 processed = 0
 
-                for chunk_idx, chunk in enumerate(chunks):
+                for chunk_idx, chunk_requests in enumerate(request_slices):
+                    # Number each chunk locally (1-based within the slice) so the
+                    # indices the LLM returns line up with ``chunk_requests`` below.
+                    # (Slicing a globally-numbered list would hand the LLM indices
+                    # like 81..160 that all fall outside this 80-item slice.)
+                    chunk_numbered = [f"{i}. {r['request']}" for i, r in enumerate(chunk_requests, 1)]
                     text, usage = await llm_service.tracked_chat_completion(
                         messages=[
                             {"role": "system", "content": TOP_QUESTIONS_SYSTEM_PROMPT},
-                            {"role": "user", "content": "\n".join(chunk)},
+                            {"role": "user", "content": "\n".join(chunk_numbered)},
                         ],
                         temperature=0.1,
                     )
@@ -161,11 +165,10 @@ async def run_request_cluster_analysis(
                         request_metadata={
                             "analysis_id": str(analysis_id),
                             "chunk": chunk_idx + 1,
-                            "total_chunks": len(chunks),
+                            "total_chunks": len(request_slices),
                         },
                     )
 
-                    chunk_requests = request_slices[chunk_idx]
                     for t in _parse_json_array(text):
                         indices = t.get("question_indices", [])
                         items = [chunk_requests[i - 1] for i in indices if 1 <= i <= len(chunk_requests)]
@@ -176,7 +179,7 @@ async def run_request_cluster_analysis(
                             "items": items,
                         })
 
-                    processed += len(chunk)
+                    processed += len(chunk_requests)
                     analysis = await db.get(RequestClusterAnalysis, analysis_id)
                     analysis.processed_requests = min(processed, len(requests))
                     await db.commit()
@@ -214,17 +217,15 @@ async def run_request_cluster_analysis(
                     request_metadata={"analysis_id": str(analysis_id), "phase": "merge"},
                 )
 
-                # Re-aggregate member items per merged theme (by source_indices, with
-                # a name-match fallback) so every theme keeps its outcome cross-tab and
-                # example trace ids — even when the merge step renamed it.
-                for t in _parse_json_array(text):
-                    items = []
-                    for ct in resolve_merged_source_themes(t, all_chunk_themes):
-                        items.extend(ct.get("items", []))
+                # Attribute each merged theme to its source chunk themes by index
+                # (lossless: renamed/garbled merges fall back to standalone chunk
+                # themes) so every theme keeps its real outcome cross-tab.
+                for t, indices in attribute_merged_themes(_parse_json_array(text), all_chunk_themes):
+                    items: list[dict] = []
+                    for i in indices:
+                        items.extend(all_chunk_themes[i].get("items", []))
                     themes.append({
                         "theme": t.get("theme", "Unknown"),
-                        # len(items) is the true member count; fall back to the LLM's
-                        # claimed count only when we couldn't recover any members.
                         "count": len(items) or t.get("count", 0),
                         "summary_question": t.get("summary_question", ""),
                         "trace_ids": _trace_ids(items),
