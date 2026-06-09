@@ -24,6 +24,7 @@ function suggestionToBody(s: CoverageSuggestion, index: number): TestCaseCreateB
     team_filter: s.team_filter || [],
     expected_source_types: s.expected_source_types || [],
     context_filters: s.context_filters || {},
+    has_summary: false,
     metadata: { source: "rag-coverage", partition_value: s.partition_value },
   };
 }

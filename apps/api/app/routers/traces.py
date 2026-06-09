@@ -1,12 +1,13 @@
 """Trace list/filter endpoints."""
 
+import base64
 import logging
 from datetime import datetime
 from math import ceil
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select, Text, cast
+from sqlalchemy import func, select, Text, cast, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -30,6 +31,21 @@ router = APIRouter(prefix="/api/traces", tags=["traces"], dependencies=[require_
 
 from .trace_threads import router as trace_threads_router
 router.include_router(trace_threads_router)
+
+
+def _encode_cursor(trace: Trace) -> str:
+    """Opaque keyset cursor for (start_time DESC, id DESC) pagination."""
+    raw = f"{trace.start_time.isoformat()}|{trace.id}"
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        start_str, id_str = raw.rsplit("|", 1)
+        return datetime.fromisoformat(start_str), UUID(id_str)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid pagination cursor") from exc
 
 
 @router.post("/import", status_code=201, dependencies=[require_write("observe", "traces")])
@@ -229,6 +245,7 @@ async def list_traces(
     offset: int | None = Query(None, ge=0),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
+    cursor: str | None = Query(None, description="Keyset cursor; when set, page/offset and total are ignored"),
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
@@ -304,12 +321,32 @@ async def list_traces(
         query = query.where(Trace.start_time < start_before)
         count_query = count_query.where(Trace.start_time < start_before)
 
-    total = (await db.execute(count_query)).scalar() or 0
-    total_pages = ceil(total / per_page) if total > 0 else 0
+    # Deterministic order: id breaks ties between same-start_time rows (required
+    # for stable keyset pagination, and correct for offset too).
+    query = query.order_by(Trace.start_time.desc(), Trace.id.desc())
 
-    query = query.order_by(Trace.start_time.desc()).offset((page - 1) * per_page).limit(per_page)
-    result = await db.execute(query)
-    traces = list(result.scalars().all())
+    next_cursor: str | None = None
+    has_more: bool | None = None
+    if cursor is not None:
+        # Keyset mode: skip the COUNT(*) and fetch one extra row to detect a next
+        # page. An empty cursor means "first page" (no seek); a non-empty cursor
+        # seeks past the last row of the previous page.
+        if cursor:
+            cur_start, cur_id = _decode_cursor(cursor)
+            query = query.where(tuple_(Trace.start_time, Trace.id) < (cur_start, cur_id))
+        result = await db.execute(query.limit(per_page + 1))
+        traces = list(result.scalars().all())
+        has_more = len(traces) > per_page
+        traces = traces[:per_page]
+        if has_more and traces:
+            next_cursor = _encode_cursor(traces[-1])
+        total = 0
+        total_pages = 0
+    else:
+        total = (await db.execute(count_query)).scalar() or 0
+        total_pages = ceil(total / per_page) if total > 0 else 0
+        result = await db.execute(query.offset((page - 1) * per_page).limit(per_page))
+        traces = list(result.scalars().all())
 
     # Batch-fetch child run counts for root traces
     if root_only and traces:
@@ -332,5 +369,12 @@ async def list_traces(
 
     return TraceListResponse(
         data=data,
-        pagination=PaginationInfo(page=page, per_page=per_page, total=total, total_pages=total_pages),
+        pagination=PaginationInfo(
+            page=page,
+            per_page=per_page,
+            total=total,
+            total_pages=total_pages,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        ),
     )

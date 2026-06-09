@@ -75,9 +75,9 @@ export function SuggestionConditions({ data }: { data: TestCaseSuggestion }) {
   return (
     <TestCaseConditions
       data={{
-        team_filter: data.team_filter,
-        tag_filter: data.tag_filter,
-        context_filters: data.context_filters,
+        team_filter: data.team_filter ?? [],
+        tag_filter: data.tag_filter ?? [],
+        context_filters: data.context_filters ?? {},
         message_count: data.message_count,
         has_summary: data.has_summary,
         metadata: {},

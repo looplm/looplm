@@ -9,6 +9,7 @@ import { CoverageOverview } from "@/components/coverage/coverage-overview";
 import { CoverageHistory } from "@/components/coverage/coverage-history";
 import { SuggestionList } from "@/components/coverage/suggestion-list";
 import { useCoverage } from "./use-coverage";
+import type { CoverageResults, CoverageSuggestion } from "@/lib/api-types/rag-coverage";
 
 const READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
 
@@ -258,7 +259,7 @@ export default function CoveragePage() {
               {run?.results && (
                 <div className="mb-6">
                   <CoverageResultsView
-                    results={run.results}
+                    results={run.results as unknown as CoverageResults}
                     acknowledgements={acknowledgements}
                     canEdit={canEdit}
                     onAcknowledge={addAcknowledgement}
@@ -270,14 +271,14 @@ export default function CoveragePage() {
               {/* Suggestions */}
               {run?.status === "completed" && (
                 <SuggestionList
-                  suggestions={run.suggestions}
+                  suggestions={(run.suggestions ?? []) as unknown as CoverageSuggestion[]}
                   datasets={datasets}
                   canEdit={canEdit}
                   onDatasetsChanged={loadDatasets}
                 />
               )}
 
-              {run?.status === "completed" && run.suggest && run.suggestions.length === 0 && (
+              {run?.status === "completed" && run.suggest && (run.suggestions?.length ?? 0) === 0 && (
                 <p className="text-sm text-gray-500 dark:text-slate-400">
                   No suggestions generated (no gaps, or no LLM configured — see Settings → General).
                 </p>

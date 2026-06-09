@@ -33,9 +33,23 @@ export default function TracesPage() {
   });
   const [traces, setTraces] = useState<TraceListItem[]>([]);
   const [threadData, setThreadData] = useState<ThreadListResponse | null>(null);
+  // Offset pagination — used by the threads view.
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
+  // Keyset pagination — used by the flat/runs views. `cursors` holds the cursor
+  // for each visited page ("" = first page); `cursorIdx` points at the current
+  // one, giving Prev/Next over a forward-only cursor.
+  const [cursors, setCursors] = useState<string[]>([""]);
+  const [cursorIdx, setCursorIdx] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [filters, setFilters] = useState<TraceFilterValues>(EMPTY_FILTERS);
+  const useKeyset = viewMode === "flat" || viewMode === "runs";
+
+  const resetPagination = useCallback(() => {
+    setPage(1);
+    setCursors([""]);
+    setCursorIdx(0);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const globalFilters = useGlobalFilters();
@@ -74,7 +88,13 @@ export default function TracesPage() {
 
   const load = () => {
     setError(null);
-    const params: Record<string, string> = { page: String(page), per_page: "50" };
+    const params: Record<string, string> = { per_page: "50" };
+    // Keyset views seek by cursor; the threads view still uses offset paging.
+    if (useKeyset) {
+      params.cursor = cursors[cursorIdx] ?? "";
+    } else {
+      params.page = String(page);
+    }
 
     // Multi-value filters: send comma-separated + mode
     if (filters.status.length > 0) {
@@ -105,25 +125,27 @@ export default function TracesPage() {
       params[key] = globalFilters.filteredUsers.join(",");
     }
 
-    if (viewMode === "flat") {
-      getTraces(params)
+    if (viewMode === "flat" || viewMode === "runs") {
+      const reqParams = viewMode === "runs" ? { ...params, root_only: "true" } : params;
+      getTraces(reqParams)
         .then((r) => {
           setTraces(r.data);
-          setTotalPages(r.pagination.total_pages);
-        })
-        .catch((e) => setError(e.message));
-    } else if (viewMode === "runs") {
-      getTraces({ ...params, root_only: "true" })
-        .then((r) => {
-          setTraces(r.data);
-          setTotalPages(r.pagination.total_pages);
+          setHasMore(Boolean(r.pagination.has_more));
+          // Stash the cursor for the *next* page so Next can advance.
+          if (r.pagination.next_cursor) {
+            const next = r.pagination.next_cursor;
+            setCursors((prev) => {
+              const head = prev.slice(0, cursorIdx + 1);
+              return [...head, next];
+            });
+          }
         })
         .catch((e) => setError(e.message));
     } else {
       getThreads(params)
         .then((r) => {
           setThreadData(r);
-          setTotalPages(r.pagination.total_pages);
+          setTotalPages(r.pagination.total_pages ?? 0);
         })
         .catch((e) => setError(e.message));
     }
@@ -131,7 +153,7 @@ export default function TracesPage() {
 
   useEffect(() => { localStorage.setItem("traces-view-mode", viewMode); }, [viewMode]);
 
-  useEffect(() => { load(); }, [page, viewMode, filters, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
+  useEffect(() => { load(); }, [page, cursorIdx, viewMode, filters, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
 
   const isEmpty = viewMode === "threads"
     ? !threadData || (threadData.data.length === 0 && threadData.standalone_traces.length === 0)
@@ -159,19 +181,19 @@ export default function TracesPage() {
           </button>
           <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700">
             <button
-              onClick={() => { setViewMode("flat"); setPage(1); }}
+              onClick={() => { setViewMode("flat"); resetPagination(); }}
               className={`px-3 py-1.5 text-sm ${viewMode === "flat" ? "bg-indigo-600 text-white" : "bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"}`}
             >
               Flat
             </button>
             <button
-              onClick={() => { setViewMode("runs"); setPage(1); }}
+              onClick={() => { setViewMode("runs"); resetPagination(); }}
               className={`px-3 py-1.5 text-sm ${viewMode === "runs" ? "bg-indigo-600 text-white" : "bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"}`}
             >
               Runs
             </button>
             <button
-              onClick={() => { setViewMode("threads"); setPage(1); }}
+              onClick={() => { setViewMode("threads"); resetPagination(); }}
               className={`px-3 py-1.5 text-sm ${viewMode === "threads" ? "bg-indigo-600 text-white" : "bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"}`}
             >
               Threads
@@ -189,8 +211,8 @@ export default function TracesPage() {
       <TraceFilters
         onFilterChange={useCallback((f: TraceFilterValues) => {
           setFilters(f);
-          setPage(1);
-        }, [])}
+          resetPagination();
+        }, [resetPagination])}
       />
 
       {error && (
@@ -238,12 +260,22 @@ export default function TracesPage() {
             </table>
           </div>
 
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-4 mt-6">
-              <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="px-3 py-1 bg-gray-100 dark:bg-slate-800 rounded text-sm disabled:opacity-50">&larr; Prev</button>
-              <span className="text-sm text-gray-500 dark:text-slate-400">Page {page} of {totalPages}</span>
-              <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="px-3 py-1 bg-gray-100 dark:bg-slate-800 rounded text-sm disabled:opacity-50">Next &rarr;</button>
-            </div>
+          {useKeyset ? (
+            (cursorIdx > 0 || hasMore) && (
+              <div className="flex items-center justify-center gap-4 mt-6">
+                <button disabled={cursorIdx <= 0} onClick={() => setCursorIdx((i) => Math.max(0, i - 1))} className="px-3 py-1 bg-gray-100 dark:bg-slate-800 rounded text-sm disabled:opacity-50">&larr; Prev</button>
+                <span className="text-sm text-gray-500 dark:text-slate-400">Page {cursorIdx + 1}</span>
+                <button disabled={!hasMore} onClick={() => setCursorIdx((i) => i + 1)} className="px-3 py-1 bg-gray-100 dark:bg-slate-800 rounded text-sm disabled:opacity-50">Next &rarr;</button>
+              </div>
+            )
+          ) : (
+            totalPages > 1 && (
+              <div className="flex items-center justify-center gap-4 mt-6">
+                <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="px-3 py-1 bg-gray-100 dark:bg-slate-800 rounded text-sm disabled:opacity-50">&larr; Prev</button>
+                <span className="text-sm text-gray-500 dark:text-slate-400">Page {page} of {totalPages}</span>
+                <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="px-3 py-1 bg-gray-100 dark:bg-slate-800 rounded text-sm disabled:opacity-50">Next &rarr;</button>
+              </div>
+            )
           )}
         </>
       )}

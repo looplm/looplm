@@ -288,7 +288,7 @@ export default function AggregateGraph({ data }: AggregateGraphProps) {
 
   useEffect(() => {
     const dark = isDarkRef.current;
-    const rawNodes: Node<AggregateNodeData>[] = data.nodes.map((n) => ({
+    const rawNodes: Node<AggregateNodeData>[] = (data.nodes ?? []).map((n) => ({
       id: n.id,
       type: "aggregateNode",
       position: { x: 0, y: 0 },
@@ -304,8 +304,8 @@ export default function AggregateGraph({ data }: AggregateGraphProps) {
       },
     }));
 
-    const maxWeight = Math.max(1, ...data.edges.map((e) => e.weight));
-    const rawEdges: Edge[] = data.edges.map((e, i) => {
+    const maxWeight = Math.max(1, ...(data.edges ?? []).map((e) => e.weight));
+    const rawEdges: Edge[] = (data.edges ?? []).map((e, i) => {
       const thickness = 1 + (e.weight / maxWeight) * 4;
       return {
         id: `ae-${i}-${e.source}-${e.target}`,

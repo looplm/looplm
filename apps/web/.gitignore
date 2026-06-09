@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# openapi — intermediate artifact for type codegen; schema.gen.ts is committed instead
+openapi.json

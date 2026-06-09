@@ -74,6 +74,13 @@ class Trace(Base):
         Index("idx_traces_start_time", text("start_time DESC")),
         Index("idx_traces_integration_status", "integration_id", "status"),
         Index("idx_traces_integration_start_time", "integration_id", text("start_time DESC")),
+        # Keyset pagination cursor: (integration_id, start_time DESC, id DESC).
+        Index(
+            "idx_traces_integration_start_time_id",
+            "integration_id",
+            text("start_time DESC"),
+            text("id DESC"),
+        ),
         Index("idx_traces_created_at", text("created_at DESC")),
         Index("idx_traces_thread_id", "thread_id", postgresql_where=text("thread_id IS NOT NULL")),
         Index("idx_traces_integration_thread_id", "integration_id", "thread_id"),

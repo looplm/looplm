@@ -24,9 +24,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Span, Trace
@@ -46,41 +46,52 @@ def strip_null_bytes(obj: Any) -> Any:
 
 
 async def _insert_spans(db: AsyncSession, trace_id: UUID, spans_list: list[dict[str, Any]]) -> None:
-    """Insert spans for a trace and resolve parent_span_id from external refs."""
-    ext_to_span_id: dict[str, UUID] = {}
-    for span_data in spans_list:
-        span = Span(
-            trace_id=trace_id,
-            external_id=span_data.get("external_id"),
-            name=span_data.get("name"),
-            type=span_data.get("type"),
-            input=span_data.get("input"),
-            output=span_data.get("output"),
-            model=span_data.get("model"),
-            tokens_in=span_data.get("tokens_in"),
-            tokens_out=span_data.get("tokens_out"),
-            duration_ms=span_data.get("duration_ms"),
-            status=span_data.get("status"),
-            error_message=span_data.get("error_message"),
-        )
-        db.add(span)
-        await db.flush()
-        if span_data.get("external_id"):
-            ext_to_span_id[span_data["external_id"]] = span.id
+    """Insert spans for a trace, resolving parent_span_id from external refs.
 
-    # Second pass: resolve parent_span_id now that every external_id is mapped.
+    Span ids are generated up front so parent links can be resolved in memory —
+    this lets us insert every span with one ``flush`` instead of one per span.
+    """
+    if not spans_list:
+        return
+
+    # Pre-assign an id to each span that carries an external_id, so a child span
+    # can reference its parent's id before any row is flushed.
+    ext_to_span_id: dict[str, UUID] = {
+        span_data["external_id"]: uuid4()
+        for span_data in spans_list
+        if span_data.get("external_id")
+    }
+
+    spans: list[Span] = []
     for span_data in spans_list:
+        ext = span_data.get("external_id")
         parent_ext = span_data.get("parent_external_id")
-        if (
-            parent_ext
-            and parent_ext in ext_to_span_id
-            and span_data.get("external_id") in ext_to_span_id
-        ):
-            await db.execute(
-                update(Span)
-                .where(Span.id == ext_to_span_id[span_data["external_id"]])
-                .values(parent_span_id=ext_to_span_id[parent_ext])
+        # Preserve prior behavior: only spans that have their own external_id get
+        # a parent link (parent resolution was previously keyed on that id).
+        parent_span_id = (
+            ext_to_span_id.get(parent_ext) if (ext and parent_ext in ext_to_span_id) else None
+        )
+        spans.append(
+            Span(
+                id=ext_to_span_id[ext] if ext else uuid4(),
+                trace_id=trace_id,
+                external_id=ext,
+                name=span_data.get("name"),
+                type=span_data.get("type"),
+                input=span_data.get("input"),
+                output=span_data.get("output"),
+                model=span_data.get("model"),
+                tokens_in=span_data.get("tokens_in"),
+                tokens_out=span_data.get("tokens_out"),
+                duration_ms=span_data.get("duration_ms"),
+                status=span_data.get("status"),
+                error_message=span_data.get("error_message"),
+                parent_span_id=parent_span_id,
             )
+        )
+
+    db.add_all(spans)
+    await db.flush()
 
 
 async def _insert_child_traces(
@@ -94,13 +105,16 @@ async def _insert_child_traces(
     if not child_traces_data:
         return
 
-    # Map from external_id to LoopLM UUID, seeded with the root.
+    # Map from external_id to LoopLM UUID, seeded with the root. New child ids
+    # are generated up front so a child can reference a parent processed earlier
+    # in this batch without flushing each row individually.
     ext_id_to_uuid: dict[str, UUID] = {normalized["external_id"]: root_trace.id}
     # Sort by start_time so parents are processed before their children.
     child_traces_data.sort(
         key=lambda c: c.get("start_time") or datetime.min.replace(tzinfo=timezone.utc)
     )
 
+    new_children: list[Trace] = []
     for child_data in child_traces_data:
         child_ext_id = child_data["external_id"]
         existing_child = await db.execute(
@@ -119,27 +133,33 @@ async def _insert_child_traces(
             ext_id_to_uuid.get(parent_ext_id, root_trace.id) if parent_ext_id else root_trace.id
         )
 
-        child_trace = Trace(
-            integration_id=integration_id,
-            external_id=child_ext_id,
-            name=child_data.get("name"),
-            input=child_data.get("input"),
-            output=child_data.get("output"),
-            trace_metadata=child_data.get("metadata", {}),
-            start_time=child_data.get("start_time") or normalized["start_time"],
-            end_time=child_data.get("end_time"),
-            duration_ms=child_data.get("duration_ms"),
-            status=child_data.get("status"),
-            error_message=child_data.get("error_message"),
-            run_type=child_data.get("run_type"),
-            parent_trace_id=parent_trace_id,
-            root_trace_id=root_trace.id,
-            thread_id=normalized.get("thread_id"),
-            user_id=normalized.get("user_id"),
+        child_id = uuid4()
+        new_children.append(
+            Trace(
+                id=child_id,
+                integration_id=integration_id,
+                external_id=child_ext_id,
+                name=child_data.get("name"),
+                input=child_data.get("input"),
+                output=child_data.get("output"),
+                trace_metadata=child_data.get("metadata", {}),
+                start_time=child_data.get("start_time") or normalized["start_time"],
+                end_time=child_data.get("end_time"),
+                duration_ms=child_data.get("duration_ms"),
+                status=child_data.get("status"),
+                error_message=child_data.get("error_message"),
+                run_type=child_data.get("run_type"),
+                parent_trace_id=parent_trace_id,
+                root_trace_id=root_trace.id,
+                thread_id=normalized.get("thread_id"),
+                user_id=normalized.get("user_id"),
+            )
         )
-        db.add(child_trace)
+        ext_id_to_uuid[child_ext_id] = child_id
+
+    if new_children:
+        db.add_all(new_children)
         await db.flush()
-        ext_id_to_uuid[child_ext_id] = child_trace.id
 
 
 async def persist_normalized_trace(

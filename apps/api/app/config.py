@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     sync_max_traces: int = 5000
     # Sync — overall timeout (seconds) for one background sync run
     sync_timeout_seconds: int = 1800
+    # Sync — commit every N persisted traces (one fsync per batch, not per trace)
+    sync_commit_batch_size: int = 200
 
     # First-party tracing ingest (push-based SDK → /api/v1/ingest)
     ingest_enabled: bool = True

@@ -59,7 +59,7 @@ function computeBottlenecks(nodes: RouteNode[], limit = 10): BottleneckNode[] {
       results.push({
         node_id: node.id,
         name: node.name,
-        run_type: node.run_type,
+        run_type: node.run_type ?? undefined,
         call_count: node.call_count,
         avg_latency_ms: lat,
         error_rate: node.error_rate,
@@ -158,7 +158,7 @@ export default function RoutesPage() {
   }, [selectedIntegration]);
 
   const bottlenecks = useMemo(
-    () => (routeData ? computeBottlenecks(routeData.nodes) : []),
+    () => (routeData ? computeBottlenecks(routeData.nodes ?? []) : []),
     [routeData]
   );
 
@@ -169,10 +169,10 @@ export default function RoutesPage() {
   useEffect(() => {
     if (!routeData) { setNodes([]); setEdges([]); return; }
     const dark = isDarkRef.current;
-    const maxLat = Math.max(1, ...routeData.nodes.map((n) => n.avg_latency_ms ?? 0));
-    const maxFreq = Math.max(1, ...routeData.edges.map((e) => e.frequency));
+    const maxLat = Math.max(1, ...(routeData.nodes ?? []).map((n) => n.avg_latency_ms ?? 0));
+    const maxFreq = Math.max(1, ...(routeData.edges ?? []).map((e) => e.frequency));
 
-    const rawNodes: Node<RouteNodeData>[] = routeData.nodes.map((n) => ({
+    const rawNodes: Node<RouteNodeData>[] = (routeData.nodes ?? []).map((n) => ({
       id: n.id,
       type: "routeNode",
       position: { x: 0, y: 0 },
@@ -188,7 +188,7 @@ export default function RoutesPage() {
       } as RouteNodeData,
     }));
 
-    const rawEdges: Edge[] = routeData.edges.map((e, i) => {
+    const rawEdges: Edge[] = (routeData.edges ?? []).map((e, i) => {
       const thickness = 1 + (e.frequency / maxFreq) * 6;
       return {
         id: `re-${i}`,
@@ -227,7 +227,7 @@ export default function RoutesPage() {
         </select>
         {routeData && (
           <span className="text-xs text-gray-400 dark:text-slate-500">
-            {routeData.total_traces} traces · {routeData.nodes.length} nodes · {routeData.edges.length} edges
+            {routeData.total_traces} traces · {routeData.nodes?.length ?? 0} nodes · {routeData.edges?.length ?? 0} edges
           </span>
         )}
       </div>
@@ -238,7 +238,7 @@ export default function RoutesPage() {
 
       {loading ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">Loading...</div>
-      ) : routeData && routeData.nodes.length > 0 ? (
+      ) : routeData && (routeData.nodes?.length ?? 0) > 0 ? (
         <div
           className={
             isFullscreen

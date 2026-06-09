@@ -59,7 +59,7 @@ export default function PromptsPage() {
   const loadPrompts = () => {
     setLoading(true);
     getPrompts()
-      .then((r) => setPrompts(r.data))
+      .then((r) => setPrompts(r.data ?? []))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
@@ -80,8 +80,8 @@ export default function PromptsPage() {
         getPromptReviews(p.id),
         getPromptVersions(p.id),
       ]);
-      setReviewHistory(reviewsRes.data);
-      setVersions(versionsRes.data);
+      setReviewHistory(reviewsRes.data ?? []);
+      setVersions(versionsRes.data ?? []);
     } catch {
       setReviewHistory([]);
       setVersions([]);
@@ -215,7 +215,7 @@ export default function PromptsPage() {
                     {p.source}
                   </span>
                 </div>
-                <div className="text-[10px] text-gray-400 dark:text-slate-500">v{p.version} · {p.variables.length} vars</div>
+                <div className="text-[10px] text-gray-400 dark:text-slate-500">v{p.version} · {p.variables?.length ?? 0} vars</div>
               </button>
             ))
           )}
@@ -240,11 +240,11 @@ export default function PromptsPage() {
                 </button>
               </div>
 
-              {selectedPrompt.variables.length > 0 && (
+              {(selectedPrompt.variables?.length ?? 0) > 0 && (
                 <div className="mb-4">
                   <h3 className="text-sm font-medium text-gray-500 dark:text-slate-400 mb-2">Input Variables</h3>
                   <div className="flex flex-wrap gap-1.5">
-                    {selectedPrompt.variables.map((v, i) => (
+                    {(selectedPrompt.variables ?? []).map((v, i) => (
                       <span key={`${v}-${i}`} className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-slate-800 rounded text-gray-600 dark:text-slate-300 font-mono">
                         {`{${v}}`}
                       </span>
@@ -303,9 +303,9 @@ export default function PromptsPage() {
                           <span className="text-[10px] text-gray-300 dark:text-slate-600">{r.model}</span>
                         </div>
                         <div className="text-xs text-gray-600 dark:text-slate-300 mb-2">
-                          {r.anti_patterns.length} anti-pattern{r.anti_patterns.length !== 1 ? "s" : ""} · {r.suggestions.length} suggestion{r.suggestions.length !== 1 ? "s" : ""}
+                          {r.anti_patterns?.length ?? 0} anti-pattern{(r.anti_patterns?.length ?? 0) !== 1 ? "s" : ""} · {r.suggestions?.length ?? 0} suggestion{(r.suggestions?.length ?? 0) !== 1 ? "s" : ""}
                         </div>
-                        {sortBySeverity(r.anti_patterns).map((ap, i) => (
+                        {sortBySeverity(r.anti_patterns ?? []).map((ap, i) => (
                           <div key={i} className="text-[10px] text-gray-500 dark:text-slate-400 ml-2">
                             <span className={SEVERITY_COLORS[ap.severity] ?? ""}>{ap.severity}</span> {ap.pattern}: {ap.description}
                           </div>

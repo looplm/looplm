@@ -2,7 +2,7 @@ import type { EvalGraderResult, EvaluatorItem, GraderResultSummary } from "@/lib
 
 type ResultLike = {
   pass: boolean;
-  graders: Record<string, { pass: boolean; skipped?: boolean }>;
+  graders: Record<string, { pass: boolean; skipped?: boolean | null }>;
 };
 
 export function recomputePass(result: ResultLike, disabledGraders: Set<string>): boolean {

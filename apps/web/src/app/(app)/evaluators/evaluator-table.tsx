@@ -129,7 +129,7 @@ export function EvaluatorTableBody({
                 )}
               </td>
               <td className="px-4 py-3">
-                <SourceBadge source={ev.source} />
+                <SourceBadge source={ev.source ?? null} />
               </td>
               <td className="px-4 py-3">
                 <TypeBadge type={ev.type} />
@@ -171,7 +171,7 @@ export function EvaluatorTableBody({
                 )}
               </td>
               <td className="px-4 py-3 text-xs text-gray-500 dark:text-slate-400 whitespace-nowrap">
-                {timeAgo(ev.last_seen_at)}
+                {timeAgo(ev.last_seen_at ?? null)}
               </td>
               <td className="px-4 py-3 text-center">
                 <button

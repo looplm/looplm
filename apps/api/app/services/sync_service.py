@@ -85,6 +85,7 @@ async def run_sync(integration_id: UUID, db: AsyncSession, *, since_override: da
 
         count = 0
         processed = 0
+        commit_batch = settings.sync_commit_batch_size
         for raw in raw_traces:
             normalized = connector.normalize_trace(raw)
             _, status = await persist_normalized_trace(
@@ -97,8 +98,16 @@ async def run_sync(integration_id: UUID, db: AsyncSession, *, since_override: da
             if status in ("created", "updated"):
                 count += 1
             processed += 1
-            integration.sync_progress_current = processed
-            await db.commit()
+            # Commit in batches rather than once per trace: one fsync per ~N
+            # traces instead of N. The progress counter rides the same cadence —
+            # the UI poll tolerates coarse-grained updates.
+            if processed % commit_batch == 0:
+                integration.sync_progress_current = processed
+                await db.commit()
+
+        # Persist whatever is left in the final partial batch.
+        integration.sync_progress_current = processed
+        await db.commit()
 
         # Sync scores (feedback + grader scores) for Langfuse integrations
         score_count = 0

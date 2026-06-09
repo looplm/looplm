@@ -102,7 +102,7 @@ export default function DashboardPage() {
   }
 
   const { totals, top_failures, feedback, latency, threads } = stats;
-  const fmtMs = (ms: number | null) =>
+  const fmtMs = (ms: number | null | undefined) =>
     ms == null ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
 
   return (

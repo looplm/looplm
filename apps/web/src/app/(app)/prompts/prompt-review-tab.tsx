@@ -39,11 +39,11 @@ export function PromptReviewTab({ review, reviewing, copied, onCopy, onApply }: 
 
   return (
     <div className="space-y-4">
-      {review.anti_patterns.length > 0 && (
+      {(review.anti_patterns?.length ?? 0) > 0 && (
         <div>
           <h3 className="text-sm font-medium text-gray-500 dark:text-slate-400 mb-2">Anti-Patterns Found</h3>
           <div className="space-y-2">
-            {sortBySeverity(review.anti_patterns).map((ap, i) => (
+            {sortBySeverity(review.anti_patterns ?? []).map((ap, i) => (
               <div key={i} className="p-3 bg-gray-100/50 dark:bg-slate-800/50 rounded-lg">
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`text-xs font-medium ${SEVERITY_COLORS[ap.severity] ?? "text-slate-300"}`}>
@@ -58,11 +58,11 @@ export function PromptReviewTab({ review, reviewing, copied, onCopy, onApply }: 
         </div>
       )}
 
-      {review.suggestions.length > 0 && (
+      {(review.suggestions?.length ?? 0) > 0 && (
         <div>
           <h3 className="text-sm font-medium text-gray-500 dark:text-slate-400 mb-2">Suggestions</h3>
           <ul className="space-y-1">
-            {review.suggestions.map((s, i) => (
+            {(review.suggestions ?? []).map((s, i) => (
               <li key={i} className="text-xs text-gray-600 dark:text-slate-300 flex gap-2">
                 <span className="text-indigo-600 dark:text-indigo-400">•</span> {s}
               </li>

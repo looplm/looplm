@@ -45,6 +45,40 @@ jobs:
         run: poetry run pytest
         working-directory: apps/api
 
+  schema-drift:
+    # Regenerate the TS types from the FastAPI OpenAPI schema and fail if the
+    # committed schema.gen.ts is stale — keeps the frontend types in lockstep
+    # with the Pydantic schemas (run `pnpm gen:api` to refresh).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Poetry
+        run: pipx install poetry
+      - name: Install API Deps
+        run: poetry install --with dev
+        working-directory: apps/api
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Install web deps
+        run: pnpm install --frozen-lockfile
+      - name: Regenerate API types
+        run: pnpm gen:api
+        working-directory: apps/web
+      - name: Fail if generated types are stale
+        run: |
+          if ! git diff --exit-code -- src/lib/api-types/schema.gen.ts; then
+            echo "::error::src/lib/api-types/schema.gen.ts is out of date. Run 'pnpm gen:api' in apps/web and commit the result."
+            exit 1
+          fi
+        working-directory: apps/web
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [web, api]

@@ -118,7 +118,8 @@ async def list_threads(
 
     page_q = (
         select(combined.c.item_id, combined.c.item_type)
-        .order_by(combined.c.sort_time.desc())
+        # item_id breaks ties between same-sort_time rows for stable paging.
+        .order_by(combined.c.sort_time.desc(), combined.c.item_id.desc())
         .offset(offset)
         .limit(per_page)
     )

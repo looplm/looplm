@@ -151,14 +151,14 @@ export function treeToFlow(root: TraceTreeNode, isDark = true): {
       data: {
         label: node.name || "unnamed",
         name: node.name || "unnamed",
-        runType: node.run_type,
-        status: node.status,
-        durationMs: node.duration_ms,
+        runType: node.run_type ?? undefined,
+        status: node.status ?? undefined,
+        durationMs: node.duration_ms ?? undefined,
         traceId: node.id,
         startTime: node.start_time,
-        endTime: node.end_time,
-        errorMessage: node.error_message,
-        childCount: node.children.length,
+        endTime: node.end_time ?? undefined,
+        errorMessage: node.error_message ?? undefined,
+        childCount: node.children?.length ?? 0,
         __isDark: isDark,
       },
     });
@@ -174,7 +174,7 @@ export function treeToFlow(root: TraceTreeNode, isDark = true): {
       });
     }
 
-    for (const child of node.children) {
+    for (const child of node.children ?? []) {
       walk(child, nodeId);
     }
   }

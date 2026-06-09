@@ -170,14 +170,17 @@ export function CodeSuggestionsTab({ evalRunId }: { evalRunId: string }) {
           {log.length > 0 && (
             <div className="mb-4 max-h-40 overflow-y-auto rounded-lg bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-700/50">
               <div className="p-2 space-y-0.5">
-                {log.map((entry, i) => (
+                {log.map((entry, i) => {
+                  const e = entry as { t: string; msg: string };
+                  return (
                   <div key={i} className="flex items-start gap-2 text-xs font-mono">
                     <span className="text-gray-400 dark:text-slate-500 shrink-0 tabular-nums">
-                      {new Date(entry.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      {new Date(e.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </span>
-                    <span className="text-gray-600 dark:text-slate-400">{entry.msg}</span>
+                    <span className="text-gray-600 dark:text-slate-400">{e.msg}</span>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -263,12 +266,13 @@ export function CodeSuggestionsTab({ evalRunId }: { evalRunId: string }) {
   }
 
   // Analysis completed
-  const pendingSuggestions = analysis.suggestions.filter((s) => s.status === "pending");
-  const resolvedSuggestions = analysis.suggestions.filter((s) => s.status !== "pending");
+  const suggestionsList = analysis.suggestions ?? [];
+  const pendingSuggestions = suggestionsList.filter((s) => s.status === "pending");
+  const resolvedSuggestions = suggestionsList.filter((s) => s.status !== "pending");
 
   // Group suggestions by file path
   const groupedByFile = new Map<string, CodeSuggestionItem[]>();
-  for (const s of analysis.suggestions) {
+  for (const s of suggestionsList) {
     const key = s.file_path || "__general__";
     if (!groupedByFile.has(key)) groupedByFile.set(key, []);
     groupedByFile.get(key)!.push(s);
@@ -288,8 +292,8 @@ export function CodeSuggestionsTab({ evalRunId }: { evalRunId: string }) {
       <div className="flex items-center justify-between text-sm text-gray-500 dark:text-slate-400">
         <div className="flex items-center gap-4">
           <span>{analysis.suggestion_count} suggestion{analysis.suggestion_count !== 1 ? "s" : ""}</span>
-          {analysis.files_analyzed.length > 0 && (
-            <span>{analysis.files_analyzed.length} file{analysis.files_analyzed.length !== 1 ? "s" : ""} analyzed</span>
+          {(analysis.files_analyzed?.length ?? 0) > 0 && (
+            <span>{analysis.files_analyzed?.length ?? 0} file{(analysis.files_analyzed?.length ?? 0) !== 1 ? "s" : ""} analyzed</span>
           )}
           {analysis.num_turns != null && <span>{analysis.num_turns} agent turns</span>}
           {analysis.total_cost_usd != null && <span>${analysis.total_cost_usd.toFixed(4)}</span>}
@@ -319,7 +323,7 @@ export function CodeSuggestionsTab({ evalRunId }: { evalRunId: string }) {
       </div>
 
       {/* Suggestions */}
-      {analysis.suggestions.length === 0 ? (
+      {suggestionsList.length === 0 ? (
         <p className="text-gray-500 dark:text-slate-400 text-center py-8">
           No suggestions generated. The agent found no actionable improvements for the current failures.
         </p>

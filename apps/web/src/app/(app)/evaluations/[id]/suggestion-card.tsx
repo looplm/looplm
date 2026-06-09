@@ -117,7 +117,7 @@ export function SuggestionCard({
       </div>
 
       {/* Expandable sections */}
-      {(suggestion.diff || suggestion.reasoning || (suggestion.related_test_ids?.length > 0)) && (
+      {(suggestion.diff || suggestion.reasoning || ((suggestion.related_test_ids?.length ?? 0) > 0)) && (
         <button
           onClick={() => setExpanded(!expanded)}
           className="mt-3 text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
@@ -134,19 +134,19 @@ export function SuggestionCard({
                 Suggested Change
               </div>
               <div className="p-3 space-y-2">
-                {suggestion.diff.before && (
+                {!!suggestion.diff.before && (
                   <div>
                     <p className="text-xs text-red-500 dark:text-red-400 font-medium mb-1">Before:</p>
                     <pre className="text-xs font-mono bg-red-50 dark:bg-red-900/10 text-red-800 dark:text-red-300 p-2 rounded overflow-x-auto whitespace-pre-wrap">
-                      {suggestion.diff.before}
+                      {suggestion.diff.before as string}
                     </pre>
                   </div>
                 )}
-                {suggestion.diff.after && (
+                {!!suggestion.diff.after && (
                   <div>
                     <p className="text-xs text-green-500 dark:text-green-400 font-medium mb-1">After:</p>
                     <pre className="text-xs font-mono bg-green-50 dark:bg-green-900/10 text-green-800 dark:text-green-300 p-2 rounded overflow-x-auto whitespace-pre-wrap">
-                      {suggestion.diff.after}
+                      {suggestion.diff.after as string}
                     </pre>
                   </div>
                 )}
@@ -161,11 +161,11 @@ export function SuggestionCard({
             </div>
           )}
 
-          {suggestion.related_test_ids?.length > 0 && (
+          {(suggestion.related_test_ids?.length ?? 0) > 0 && (
             <div>
               <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">Related Tests</p>
               <div className="flex flex-wrap gap-1">
-                {suggestion.related_test_ids.map((tid) => (
+                {(suggestion.related_test_ids ?? []).map((tid) => (
                   <span
                     key={tid}
                     className="text-xs font-mono px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400"

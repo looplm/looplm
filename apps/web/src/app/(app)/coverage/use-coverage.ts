@@ -167,7 +167,8 @@ export function useCoverage() {
   );
 
   // Acknowledgements ("intentional" memory) for the completed run's partition.
-  const completedKey = run?.status === "completed" ? run.results?.partition_key : undefined;
+  const completedKey =
+    run?.status === "completed" ? (run.results?.partition_key as string | undefined) : undefined;
 
   const refreshAcks = useCallback(async () => {
     if (!providerId || !completedKey) {

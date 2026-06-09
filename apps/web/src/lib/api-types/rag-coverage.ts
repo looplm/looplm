@@ -1,45 +1,29 @@
 /**
  * Types for the RAG eval-coverage feature.
  * Mirror the backend contract in apps/api/app/schemas/index_providers.py.
+ *
+ * Generated from the backend OpenAPI schema — do not hand-edit shapes here.
+ * Regenerate with `pnpm gen:api` after changing the Pydantic schemas.
+ * The CLIENT-SIDE section at the bottom is inlined on parents (no named schema).
  */
 
-export interface IndexProvider {
-  id: string;
-  type: string; // "azure_search" (others reserved)
-  name: string;
-  base_url?: string | null; // endpoint URL
-  config: Record<string, unknown>; // e.g. { index_name: "prod-index" }
-  created_at: string;
-  updated_at: string;
-}
+import type { components } from "./schema.gen";
 
-export interface IndexProviderCreateBody {
-  type: string;
-  name: string;
-  api_key: string;
-  base_url?: string;
-  config?: Record<string, unknown>;
-}
+type S = components["schemas"];
 
-export interface IndexProviderUpdateBody {
-  name?: string;
-  api_key?: string;
-  base_url?: string;
-  config?: Record<string, unknown>;
-}
+export type IndexProvider = S["IndexProviderResponse"];
+export type IndexProviderCreateBody = S["IndexProviderCreate"];
+export type IndexProviderUpdateBody = S["IndexProviderUpdate"];
+export type TestConnectionResult = S["TestConnectionResponse"];
+export type PartitionKey = S["PartitionKeyResponse"];
+export type PartitionAcknowledgement = S["AcknowledgementResponse"];
+export type AcknowledgementCreateBody = S["AcknowledgementCreate"];
+export type CoverageRun = S["CoverageRunResponse"];
+export type CoverageRunSummary = S["CoverageRunSummary"];
+export type CoverageCategoryOverview = S["CoverageCategoryOverview"];
+export type AnalyzeResponse = S["app__schemas__index_providers__AnalyzeResponse"];
 
-export interface TestConnectionResult {
-  ok: boolean;
-  document_count?: number | null;
-  error?: string | null;
-}
-
-export interface PartitionKey {
-  key: string;
-  label: string;
-  multivalued: boolean;
-  metadata: Record<string, unknown>;
-}
+// --- Client-side only (inlined on parents, no named backend schema) ---
 
 export interface CoverageRow {
   value: string;
@@ -71,22 +55,6 @@ export interface CoverageResults {
   issues?: PartitionIssue[];
 }
 
-export interface PartitionAcknowledgement {
-  id: string;
-  provider_id: string;
-  partition_key: string;
-  partition_value: string;
-  note?: string | null;
-  created_at: string;
-}
-
-export interface AcknowledgementCreateBody {
-  provider_id: string;
-  partition_key: string;
-  partition_value: string;
-  note?: string;
-}
-
 export interface CoverageSuggestion {
   partition_value: string;
   prompt: string;
@@ -99,48 +67,6 @@ export interface CoverageSuggestion {
 
 export type CoverageRunStatus = "pending" | "running" | "completed" | "failed";
 
-export interface CoverageRun {
-  id: string;
-  provider_id: string;
-  status: CoverageRunStatus;
-  error?: string | null;
-  partition_key: string;
-  dataset_ids?: string[] | null;
-  suggest: boolean;
-  min_covering_cases: number;
-  total: number;
-  processed: number;
-  results?: CoverageResults | null;
-  suggestions: CoverageSuggestion[];
-  started_at?: string | null;
-  completed_at?: string | null;
-  created_at: string;
-}
-
-export interface CoverageRunSummary {
-  id: string;
-  provider_id: string;
-  partition_key: string;
-  status: CoverageRunStatus;
-  value_coverage_pct?: number | null;
-  doc_coverage_pct?: number | null;
-  total_values: number;
-  covered_values: number;
-  gaps: number;
-  issue_count: number;
-  suggestion_count: number;
-  created_at: string;
-  completed_at?: string | null;
-}
-
-export interface CoverageCategoryOverview {
-  partition_key: string;
-  latest: CoverageRunSummary;
-  value_coverage_delta?: number | null;
-  doc_coverage_delta?: number | null;
-  previous_run_at?: string | null;
-}
-
 export interface StartAnalysisBody {
   provider_id: string;
   partition_key: string;
@@ -150,9 +76,4 @@ export interface StartAnalysisBody {
   sample_n?: number;
   max_questions_per_gap?: number;
   max_gaps_to_suggest?: number;
-}
-
-export interface AnalyzeResponse {
-  run_id: string;
-  status: string;
 }

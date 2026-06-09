@@ -32,7 +32,7 @@ function RunTypeBadge({ runType }: { runType?: string }) {
   );
 }
 
-function ErrorBlock({ message }: { message?: string }) {
+function ErrorBlock({ message }: { message?: string | null }) {
   if (!message) return null;
   return (
     <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
@@ -48,14 +48,14 @@ function ChildRunTree({ nodes, depth = 0 }: { nodes: TraceTreeNode[]; depth?: nu
       {nodes.map((node) => (
         <div key={node.id} className="mb-3">
           <div className="flex items-center gap-3 py-1">
-            <RunTypeBadge runType={node.run_type} />
+            <RunTypeBadge runType={node.run_type ?? undefined} />
             <Link href={`/traces/${node.id}`} className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
               {node.name || "unnamed"}
             </Link>
             <StatusBadge status={node.status || undefined} />
             {node.duration_ms != null && <span className="text-xs text-gray-500 dark:text-slate-400">{formatDuration(node.duration_ms)}</span>}
           </div>
-          {node.children.length > 0 && <ChildRunTree nodes={node.children} depth={(depth || 0) + 1} />}
+          {(node.children?.length ?? 0) > 0 && <ChildRunTree nodes={node.children ?? []} depth={(depth || 0) + 1} />}
         </div>
       ))}
     </div>
@@ -105,7 +105,7 @@ function SpanTree({ spans, depth = 0 }: { spans: SpanNode[]; depth?: number }) {
       {spans.map((span) => (
         <div key={span.id}>
           <SpanRow span={span} />
-          {span.children.length > 0 && <SpanTree spans={span.children} depth={depth + 1} />}
+          {(span.children?.length ?? 0) > 0 && <SpanTree spans={span.children ?? []} depth={depth + 1} />}
         </div>
       ))}
     </div>
@@ -126,7 +126,7 @@ export default function TraceDetailPage() {
     getTrace(id).then((t) => {
       setTrace(t);
       if (t.child_run_count > 0) {
-        getTraceChildren(id).then((r) => setChildNodes(r.children)).catch(() => {});
+        getTraceChildren(id).then((r) => setChildNodes(r.children ?? [])).catch(() => {});
       }
     }).catch((e) => setError(e.message));
     getTraceAnalysis(id).then(setAnalysis).catch(() => { });
@@ -173,7 +173,7 @@ export default function TraceDetailPage() {
 
       <div className="flex items-center gap-4 mb-8">
         <h1 className="text-2xl font-bold">{trace.name || trace.external_id}</h1>
-        <RunTypeBadge runType={trace.run_type} />
+        <RunTypeBadge runType={trace.run_type ?? undefined} />
         <StatusBadge status={trace.status || undefined} />
         {trace.duration_ms && <span className="text-gray-500 dark:text-slate-400">{formatDuration(trace.duration_ms)}</span>}
       </div>
@@ -253,10 +253,10 @@ export default function TraceDetailPage() {
       {/* Span Tree */}
       <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6 mb-8">
         <h2 className="text-lg font-semibold mb-4">Span Tree</h2>
-        {trace.spans.length === 0 ? (
+        {(trace.spans?.length ?? 0) === 0 ? (
           <p className="text-gray-500 dark:text-slate-400 text-sm">No spans recorded.</p>
         ) : (
-          <SpanTree spans={trace.spans} />
+          <SpanTree spans={trace.spans ?? []} />
         )}
       </div>
 

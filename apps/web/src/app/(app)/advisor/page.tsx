@@ -183,7 +183,7 @@ export default function AdvisorPage() {
     }
   };
 
-  const grouped = advisorData?.suggestions.reduce<Record<string, Suggestion[]>>((acc, s) => {
+  const grouped = (advisorData?.suggestions ?? []).reduce<Record<string, Suggestion[]>>((acc, s) => {
     (acc[s.category] ??= []).push(s);
     return acc;
   }, {}) ?? {};
@@ -265,14 +265,17 @@ export default function AdvisorPage() {
           {(runData?.progress_log?.length ?? 0) > 0 && (
             <div className="mb-4 max-h-40 overflow-y-auto rounded-lg bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-700/50">
               <div className="p-2 space-y-0.5">
-                {runData!.progress_log.map((entry, i) => (
+                {(runData?.progress_log ?? []).map((entry, i) => {
+                  const e = entry as { t: string; msg: string };
+                  return (
                   <div key={i} className="flex items-start gap-2 text-xs font-mono">
                     <span className="text-gray-400 dark:text-slate-500 shrink-0 tabular-nums">
-                      {new Date(entry.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      {new Date(e.t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </span>
-                    <span className="text-gray-600 dark:text-slate-400">{entry.msg}</span>
+                    <span className="text-gray-600 dark:text-slate-400">{e.msg}</span>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -291,15 +294,15 @@ export default function AdvisorPage() {
         </div>
       ) : loading ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">Loading...</div>
-      ) : !advisorData || advisorData.suggestions.length === 0 ? (
+      ) : !advisorData || (advisorData.suggestions?.length ?? 0) === 0 ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
           No suggestions yet. Click &quot;Run Analysis&quot; to get started.
         </div>
       ) : (
         <div className="space-y-8">
-          {runData?.status === "completed" && runData.files_analyzed.length > 0 && (
+          {runData?.status === "completed" && (runData.files_analyzed?.length ?? 0) > 0 && (
             <p className="text-xs text-gray-400 dark:text-slate-500">
-              Analyzed {runData.files_analyzed.length} file{runData.files_analyzed.length !== 1 ? "s" : ""} from the connected repository.
+              Analyzed {runData.files_analyzed?.length ?? 0} file{(runData.files_analyzed?.length ?? 0) !== 1 ? "s" : ""} from the connected repository.
             </p>
           )}
           {Object.entries(grouped).map(([category, suggestions]) => (

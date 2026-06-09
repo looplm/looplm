@@ -111,7 +111,7 @@ export function useEvaluatorActions({
           description: form.description || undefined,
           relevance: form.relevance,
           affects_pass: form.affects_pass,
-          source: form.source,
+          source: form.source as "custom" | "ragas" | "langfuse" | "discovered",
           config,
         });
       } else {
@@ -119,7 +119,7 @@ export function useEvaluatorActions({
           name: form.name,
           display_name: form.display_name || undefined,
           type: form.type,
-          source: form.source,
+          source: form.source as "custom" | "ragas" | "langfuse" | "discovered",
           description: form.description || undefined,
           relevance: form.relevance,
           affects_pass: form.affects_pass,

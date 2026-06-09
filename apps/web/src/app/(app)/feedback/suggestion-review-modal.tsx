@@ -11,8 +11,8 @@ const CREATE_NEW_DATASET = "__create__";
 
 function formFromSuggestion(sug: TestCaseSuggestion): TestCaseFormData {
   const config: Record<string, unknown> = {};
-  if (sug.team_filter.length > 0) config.team_filter = sug.team_filter;
-  if (sug.tag_filter.length > 0) config.tag_filter = sug.tag_filter;
+  if ((sug.team_filter?.length ?? 0) > 0) config.team_filter = sug.team_filter;
+  if ((sug.tag_filter?.length ?? 0) > 0) config.tag_filter = sug.tag_filter;
   if (sug.expected_sources && sug.expected_sources.length > 0) {
     config.expected_sources = sug.expected_sources;
   }

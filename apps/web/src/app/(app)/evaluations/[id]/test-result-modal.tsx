@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { EvalResultItem, EvaluatorItem, ConversationTurn, RootCauseDetail } from "@/lib/api";
+import type { EvalResultItem, EvaluatorItem, ConversationTurn, RootCauseDetail, EvalGraderResult } from "@/lib/api";
 import { sortGraderEntries, sortGraderDetails, formatScoreValue, formatScoreLabel, rootCauseStyle } from "./eval-utils";
 import { ExpectedOutputDiff, Section, ExpandableBox, CopyButton } from "./eval-components";
 import { GraderResultCard } from "./grader-result-card";
@@ -43,7 +43,7 @@ export function TestResultModal({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  const graderEntries = Object.entries(result.graders || {});
+  const graderEntries = Object.entries(result.graders || {}) as [string, EvalGraderResult][];
   const sortedDetailEntries = sortGraderDetails(graderEntries, evaluatorMap);
   const passedCount = sortedDetailEntries.filter(
     ([, g]) => !g.skipped && g.pass

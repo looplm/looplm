@@ -316,7 +316,7 @@ export function useFeedbackPage() {
       setSugGenerated(true);
       setSuggestions([]);
       if (run.status === "completed") {
-        setSuggestions(run.suggestions);
+        setSuggestions(run.suggestions as TestCaseSuggestion[]);
         setSugLoading(false);
       } else if (run.status === "failed") {
         setSugLoading(false);
@@ -358,7 +358,7 @@ export function useFeedbackPage() {
       }
       setSuggestionRun(run);
       if (run.status === "completed") {
-        setSuggestions(run.suggestions);
+        setSuggestions(run.suggestions as TestCaseSuggestion[]);
         setSugGenerated(run.count > 0);
         setSugLoading(false);
       } else if (run.status === "failed" || run.status === "cancelled") {
@@ -381,7 +381,7 @@ export function useFeedbackPage() {
         setSuggestionRun(updated);
         if (updated.status === "completed") {
           clearInterval(interval);
-          setSuggestions(updated.suggestions);
+          setSuggestions(updated.suggestions as TestCaseSuggestion[]);
           setSugGenerated(updated.count > 0);
           setSugLoading(false);
         } else if (updated.status === "failed") {

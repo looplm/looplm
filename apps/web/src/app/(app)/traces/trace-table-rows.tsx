@@ -100,8 +100,8 @@ export function TraceRow({ t, widths }: { t: TraceListItem; widths: any }) {
 
 export function ThreadGroup({ thread, widths }: { thread: ThreadSummary; widths: any }) {
   const [expanded, setExpanded] = useState(false);
-  const rootTrace = thread.traces[0];
-  const childTraces = thread.traces.slice(1);
+  const rootTrace = thread.traces?.[0];
+  const childTraces = thread.traces?.slice(1) ?? [];
 
   if (!rootTrace) return null;
 
@@ -211,7 +211,7 @@ function RunTreeNodes({ nodes, depth = 0 }: { nodes: TraceTreeNode[]; depth?: nu
 
 function RunTreeNodeRow({ node, depth }: { node: TraceTreeNode; depth: number }) {
   const [expanded, setExpanded] = useState(false);
-  const hasChildren = node.children.length > 0;
+  const hasChildren = (node.children?.length ?? 0) > 0;
   const paddingLeft = 20 + depth * 24;
 
   return (
@@ -235,7 +235,7 @@ function RunTreeNodeRow({ node, depth }: { node: TraceTreeNode; depth: number })
             ) : (
               <span className="w-4 h-4 flex items-center justify-center text-gray-300 dark:text-slate-600 text-xs">&#9679;</span>
             )}
-            <RunTypeBadge runType={node.run_type} />
+            <RunTypeBadge runType={node.run_type ?? undefined} />
             <Link href={`/traces/${node.id}`} className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline truncate max-w-[300px]">
               {node.name || "unnamed"}
             </Link>
@@ -245,14 +245,14 @@ function RunTreeNodeRow({ node, depth }: { node: TraceTreeNode; depth: number })
             )}
             {hasChildren && (
               <span className="text-[10px] text-gray-400 dark:text-slate-500 px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700">
-                {node.children.length}
+                {node.children?.length ?? 0}
               </span>
             )}
           </div>
         </td>
       </tr>
       {expanded && hasChildren && (
-        <RunTreeNodes nodes={node.children} depth={depth + 1} />
+        <RunTreeNodes nodes={node.children ?? []} depth={depth + 1} />
       )}
     </>
   );
@@ -270,7 +270,7 @@ export function RunTreeGroup({ trace, widths }: { trace: TraceListItem; widths: 
       setLoading(true);
       getTraceChildren(trace.id)
         .then((r) => {
-          setChildTree(r.children);
+          setChildTree(r.children ?? []);
           setExpanded(true);
         })
         .catch(() => setChildTree([]))
@@ -301,7 +301,7 @@ export function RunTreeGroup({ trace, widths }: { trace: TraceListItem; widths: 
             ) : (
               <span className="w-4 h-4 mr-2" />
             )}
-            <RunTypeBadge runType={trace.run_type} />
+            <RunTypeBadge runType={trace.run_type ?? undefined} />
             <Link href={`/traces/${trace.id}`} className="ml-1 font-medium text-indigo-600 dark:text-indigo-400 hover:underline truncate max-w-[200px]" onClick={(e) => e.stopPropagation()}>
               {trace.name || trace.external_id}
             </Link>

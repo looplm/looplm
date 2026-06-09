@@ -18,6 +18,7 @@ import {
   type EvalResultSummary,
   type EvaluatorItem,
 } from "@/lib/api";
+import type { EvalJobConfig } from "@/lib/api-types/evals";
 import { JobStatusBadge, JobProgressBar, StatCard, formatDuration } from "@/components/eval-shared";
 import { EvalResultsTable } from "../../[id]/eval-results-table";
 import { TestResultModal } from "../../[id]/test-result-modal";
@@ -209,6 +210,8 @@ export default function EvalJobDetailPage() {
     return <p className="text-red-500">Job not found.</p>;
   }
 
+  const jobConfig = (job.config ?? {}) as EvalJobConfig;
+
   return (
     <div>
       {/* Back link */}
@@ -285,14 +288,14 @@ export default function EvalJobDetailPage() {
         <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
           <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Config</p>
           <p className="text-sm font-medium">
-            {job.config?.filter_mode && job.config.filter_mode !== "as_configured"
-              ? job.config.filter_mode
+            {jobConfig.filter_mode && jobConfig.filter_mode !== "as_configured"
+              ? jobConfig.filter_mode
               : "filtered"}
-            {job.config?.concurrency ? ` · ${job.config.concurrency}x` : ""}
-            {job.config?.max_turns && job.config.max_turns > 1
-              ? ` · ${job.config.max_turns} turns`
+            {jobConfig.concurrency ? ` · ${jobConfig.concurrency}x` : ""}
+            {jobConfig.max_turns && jobConfig.max_turns > 1
+              ? ` · ${jobConfig.max_turns} turns`
               : ""}
-            {job.config?.use_batch && (
+            {jobConfig.use_batch && (
               <span className="ml-1 text-amber-600 dark:text-amber-400">· batch</span>
             )}
           </p>

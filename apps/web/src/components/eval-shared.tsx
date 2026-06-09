@@ -49,7 +49,7 @@ export function JobStatusBadge({ status }: { status: EvalJob["status"] }) {
   );
 }
 
-export function formatDuration(startedAt: string, completedAt?: string): string {
+export function formatDuration(startedAt: string, completedAt?: string | null): string {
   const start = new Date(startedAt).getTime();
   const end = completedAt ? new Date(completedAt).getTime() : Date.now();
   const seconds = Math.floor((end - start) / 1000);

@@ -104,7 +104,7 @@ export default function AggregateGraphPage() {
         {graphData && (
           <span className="text-xs text-gray-400 dark:text-slate-500">
             {graphData.total_traces_analyzed} traces analyzed &middot;{" "}
-            {graphData.nodes.length} unique steps
+            {graphData.nodes?.length ?? 0} unique steps
           </span>
         )}
       </div>
@@ -119,7 +119,7 @@ export default function AggregateGraphPage() {
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
           Loading execution graph...
         </div>
-      ) : !graphData || graphData.nodes.length === 0 ? (
+      ) : !graphData || (graphData.nodes?.length ?? 0) === 0 ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
           {selectedIntegration
             ? "No traces found for this integration and time range."

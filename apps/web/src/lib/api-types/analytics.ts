@@ -1,56 +1,18 @@
 /**
  * Types for the Analytics page — request-type clustering + retrieval insights.
+ *
+ * Generated from the backend OpenAPI schema — do not hand-edit shapes here.
+ * Regenerate with `pnpm gen:api` after changing the Pydantic schemas.
  */
 
-export interface RequestOutcome {
-  success: number;
-  degraded: number;
-  failure: number;
-  fb_positive: number;
-  fb_negative: number;
-}
+import type { components } from "./schema.gen";
 
-export interface RequestClusterTheme {
-  rank: number;
-  theme: string;
-  count: number;
-  summary_question: string;
-  trace_ids: string[];
-  outcome: RequestOutcome;
-}
+type S = components["schemas"];
 
-export interface RequestClustersResponse {
-  id: string;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
-  error?: string;
-  total_requests: number;
-  processed_requests: number;
-  themes: RequestClusterTheme[];
-  started_at?: string;
-  completed_at?: string;
-}
-
-export interface RetrievalSource {
-  url: string;
-  domain: string;
-  label: string;
-  count: number;
-}
-
-export interface RetrievalActivityPoint {
-  date: string;
-  count: number;
-}
-
-export interface RetrievalActivityResponse {
-  requests_total: number;
-  requests_with_retrieval: number;
-  coverage: number; // 0..1
-  avg_sources_per_request: number;
-  daily: RetrievalActivityPoint[];
-}
-
-export interface SpanNameCount {
-  name: string;
-  count: number;
-}
+export type RequestOutcome = S["RequestOutcome"];
+export type RequestClusterTheme = S["RequestClusterTheme"];
+export type RequestClustersResponse = S["RequestClustersResponse"];
+export type RetrievalSource = S["RetrievalSource"];
+export type RetrievalActivityPoint = S["RetrievalActivityPoint"];
+export type RetrievalActivityResponse = S["RetrievalActivityResponse"];
+export type SpanNameCount = S["SpanNameCount"];

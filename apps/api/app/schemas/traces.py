@@ -80,6 +80,10 @@ class PaginationInfo(BaseModel):
     per_page: int
     total: int
     total_pages: int
+    # Keyset pagination (set only when the request used a cursor). In that mode
+    # `total`/`total_pages` are not computed (returned as 0) — use `has_more`.
+    next_cursor: Optional[str] = None
+    has_more: Optional[bool] = None
 
 
 class TraceListResponse(BaseModel):

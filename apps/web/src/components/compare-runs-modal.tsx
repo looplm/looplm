@@ -297,7 +297,7 @@ export function CompareRunsModal({ runs, onClose }: CompareRunsModalProps) {
                                   {getDisplayName(key)}
                                 </span>
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  {meta && <SourceBadge source={meta.source} />}
+                                  {meta && <SourceBadge source={meta.source ?? null} />}
                                   {meta && <RelevanceBadge relevance={meta.relevance} />}
                                   {meta && <PassFailBadge affectsPass={meta.affects_pass} />}
                                   {meta?.display_name && (
