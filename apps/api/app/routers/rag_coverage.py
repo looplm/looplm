@@ -247,6 +247,9 @@ async def analyze(
     await db.flush()
     await db.refresh(run)
     run_id = run.id
+    # Commit before spawning the background task: it opens its own session and
+    # reads this row immediately, so the row must be visible to other connections.
+    await db.commit()
 
     task = asyncio.create_task(
         run_coverage_analysis(

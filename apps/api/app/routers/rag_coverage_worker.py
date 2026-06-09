@@ -121,7 +121,9 @@ async def run_coverage_analysis(
         async with db_factory() as db:
             run = (
                 await db.execute(select(CoverageRun).where(CoverageRun.id == run_id))
-            ).scalar_one()
+            ).scalar_one_or_none()
+            if run is None:
+                raise ValueError(f"Coverage run {run_id} not found")
             run.status = "running"
             run.started_at = datetime.now(timezone.utc)
             await db.commit()
