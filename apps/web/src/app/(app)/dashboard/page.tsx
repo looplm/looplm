@@ -216,28 +216,53 @@ export default function DashboardPage() {
       {/* Feedback Summary */}
       <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6 mb-8">
         <h2 className="text-lg font-semibold mb-4">Feedback Summary</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          {[
-            { label: "Traces with feedback", value: feedback.traces_with_feedback, tooltip: "Distinct traces that received at least one feedback submission." },
-            { label: "No feedback", value: feedback.no_feedback_traces, tooltip: "Traces that received no feedback. Traces with feedback + No feedback = Total Traces." },
-            { label: "Total Feedback", value: feedback.total, tooltip: "Total feedback submissions in this period. A single trace can receive several, so this is usually higher than the number of traces with feedback." },
-            { label: "Positive", value: feedback.positive, color: "text-green-500", tooltip: "Feedback submissions marked positive." },
-            { label: "Negative", value: feedback.negative, color: "text-red-400", tooltip: "Feedback submissions marked negative. Positive + Negative = Total Feedback." },
-          ].map((f) => (
-            <div key={f.label}>
-              <p className="text-xs text-gray-500 dark:text-slate-400">
-                {f.label}
-                {f.tooltip && <Tooltip content={f.tooltip}><InfoIcon /></Tooltip>}
-              </p>
-              <p className={`text-2xl font-bold ${f.color || ""}`}>{f.value}</p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-6">
+          {/* Coverage — share of traces that got any feedback. */}
+          <div>
+            <div className="flex items-baseline justify-between mb-2">
+              <span className="text-xs font-medium text-gray-500 dark:text-slate-400">
+                Coverage
+                <Tooltip content="Share of traces that received at least one feedback submission."><InfoIcon /></Tooltip>
+              </span>
+              <span className="text-xs text-gray-500 dark:text-slate-400">
+                <span className="font-semibold text-gray-900 dark:text-slate-100">{feedback.traces_with_feedback.toLocaleString()}</span>
+                {" of "}{totals.traces.toLocaleString()} traces
+                {" ("}{totals.traces > 0 ? ((feedback.traces_with_feedback / totals.traces) * 100).toFixed(1) : "0.0"}%)
+              </span>
             </div>
-          ))}
-        </div>
+            <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-slate-800">
+              <div
+                className="bg-green-500"
+                style={{ width: `${totals.traces > 0 ? (feedback.traces_with_feedback / totals.traces) * 100 : 0}%` }}
+              />
+            </div>
+            <div className="flex gap-4 mt-2 text-xs text-gray-500 dark:text-slate-400">
+              <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle" />With feedback {feedback.traces_with_feedback.toLocaleString()}</span>
+              <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 dark:bg-slate-700 mr-1.5 align-middle" />No feedback {feedback.no_feedback_traces.toLocaleString()}</span>
+            </div>
+          </div>
 
-        <p className="text-xs text-gray-400 dark:text-slate-500 mt-4">
-          {feedback.traces_with_feedback.toLocaleString()} of {totals.traces.toLocaleString()} traces have feedback.
-          Total Feedback counts submissions, not traces, so it won&apos;t add up with No feedback.
-        </p>
+          {/* Sentiment — positive vs negative across feedback submissions. */}
+          <div>
+            <div className="flex items-baseline justify-between mb-2">
+              <span className="text-xs font-medium text-gray-500 dark:text-slate-400">
+                Sentiment
+                <Tooltip content="Positive vs negative across all feedback submissions. A trace can receive several, so this counts submissions, not traces."><InfoIcon /></Tooltip>
+              </span>
+              <span className="text-xs text-gray-500 dark:text-slate-400">
+                <span className="font-semibold text-gray-900 dark:text-slate-100">{feedback.total.toLocaleString()}</span> submissions
+              </span>
+            </div>
+            <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-slate-800">
+              <div className="bg-green-500" style={{ width: `${feedback.total > 0 ? (feedback.positive / feedback.total) * 100 : 0}%` }} />
+              <div className="bg-red-400" style={{ width: `${feedback.total > 0 ? (feedback.negative / feedback.total) * 100 : 0}%` }} />
+            </div>
+            <div className="flex gap-4 mt-2 text-xs text-gray-500 dark:text-slate-400">
+              <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle" />Positive {feedback.positive.toLocaleString()}</span>
+              <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5 align-middle" />Negative {feedback.negative.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Usage trends chart */}
