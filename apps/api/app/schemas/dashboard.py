@@ -46,10 +46,11 @@ class DashboardTotals(BaseModel):
 
 
 class FeedbackSummary(BaseModel):
-    total: int
+    total: int            # feedback submissions (a trace can have several)
     positive: int
     negative: int
     positive_rate: float
+    traces_with_feedback: int  # distinct traces with >=1 submission; + no_feedback_traces = total traces
     no_feedback_traces: int
 
 

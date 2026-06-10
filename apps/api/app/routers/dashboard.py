@@ -216,60 +216,32 @@ async def get_dashboard_stats(
     )
     trend_rows = (await db.execute(trend_q)).all()
 
-    # Daily feedback counts (user-feedback scores joined to traces in period)
-    fb_base_filter = [
-        FeedbackScore.integration_id.in_(project_integration_ids),
-        FeedbackScore.score_name == "user-feedback",
-        FeedbackScore.scored_at >= start,
-        FeedbackScore.scored_at <= now,
-    ]
-    if integration_id:
-        fb_base_filter.append(FeedbackScore.integration_id == integration_id)
+    # Feedback is scoped to the SAME traces as the totals above: each score is joined
+    # to its trace and reuses base_filter (trace window + env/user/name filters). This
+    # keeps feedback consistent with Total Traces — same date column (Trace.start_time),
+    # same filters — rather than a separate scored_at window that could drift out of sync.
+    # Scores with a null trace_id, or whose trace falls outside the window/filters, are
+    # excluded by the inner join.
+    fb_filter = [FeedbackScore.score_name == "user-feedback", *base_filter]
 
+    # Daily feedback, bucketed by the trace's date so each day's counts line up with the
+    # trace bars/rows for the same day.
     fb_daily_q = (
         select(
-            cast(FeedbackScore.scored_at, Date).label("date"),
+            cast(Trace.start_time, Date).label("date"),
             func.sum(case((FeedbackScore.value == 1, 1), else_=0)).label("positive"),
             func.sum(case((FeedbackScore.value == 0, 1), else_=0)).label("negative"),
-        )
-        .where(*fb_base_filter)
-    )
-    fb_needs_join = bool(environment or include_user_ids or exclude_user_ids or trace_names)
-    if fb_needs_join:
-        fb_daily_q = fb_daily_q.join(Trace, FeedbackScore.trace_id == Trace.id)
-        if environment:
-            fb_daily_q = fb_daily_q.where(Trace.trace_metadata["environment"].astext == environment)
-        if include_user_ids:
-            fb_daily_q = fb_daily_q.where(Trace.user_id.in_(include_user_ids))
-        if exclude_user_ids:
-            fb_daily_q = fb_daily_q.where(~Trace.user_id.in_(exclude_user_ids))
-        if trace_names:
-            fb_daily_q = fb_daily_q.where(Trace.name.in_(trace_names))
-    fb_daily_q = fb_daily_q.group_by(cast(FeedbackScore.scored_at, Date))
-    fb_daily_rows = (await db.execute(fb_daily_q)).all()
-    fb_by_date = {str(r.date): (int(r.positive or 0), int(r.negative or 0)) for r in fb_daily_rows}
-
-    # Daily count of distinct traces that received at least one feedback
-    fb_traces_q = (
-        select(
-            cast(FeedbackScore.scored_at, Date).label("date"),
             func.count(func.distinct(FeedbackScore.trace_id)).label("traces_with_fb"),
         )
-        .where(*fb_base_filter, FeedbackScore.trace_id.isnot(None))
+        .join(Trace, FeedbackScore.trace_id == Trace.id)
+        .where(*fb_filter)
+        .group_by(cast(Trace.start_time, Date))
     )
-    if fb_needs_join:
-        fb_traces_q = fb_traces_q.join(Trace, FeedbackScore.trace_id == Trace.id)
-        if environment:
-            fb_traces_q = fb_traces_q.where(Trace.trace_metadata["environment"].astext == environment)
-        if include_user_ids:
-            fb_traces_q = fb_traces_q.where(Trace.user_id.in_(include_user_ids))
-        if exclude_user_ids:
-            fb_traces_q = fb_traces_q.where(~Trace.user_id.in_(exclude_user_ids))
-        if trace_names:
-            fb_traces_q = fb_traces_q.where(Trace.name.in_(trace_names))
-    fb_traces_q = fb_traces_q.group_by(cast(FeedbackScore.scored_at, Date))
-    fb_traces_rows = (await db.execute(fb_traces_q)).all()
-    fb_traces_by_date = {str(r.date): int(r.traces_with_fb or 0) for r in fb_traces_rows}
+    fb_daily_rows = (await db.execute(fb_daily_q)).all()
+    fb_by_date = {
+        str(r.date): (int(r.positive or 0), int(r.negative or 0), int(r.traces_with_fb or 0))
+        for r in fb_daily_rows
+    }
 
     trends = [
         TrendPoint(
@@ -279,46 +251,30 @@ async def get_dashboard_stats(
             failure_rate=round(r.failures / r.total, 3) if r.total > 0 else 0.0,
             unique_users=r.unique_users or 0,
             unique_threads=r.unique_threads or 0,
-            feedback_positive=fb_by_date.get(str(r.date), (0, 0))[0],
-            feedback_negative=fb_by_date.get(str(r.date), (0, 0))[1],
-            traces_with_feedback=fb_traces_by_date.get(str(r.date), 0),
+            feedback_positive=fb_by_date.get(str(r.date), (0, 0, 0))[0],
+            feedback_negative=fb_by_date.get(str(r.date), (0, 0, 0))[1],
+            traces_with_feedback=fb_by_date.get(str(r.date), (0, 0, 0))[2],
         )
         for r in trend_rows
     ]
 
-    # Feedback summary — reuse the same date/environment/user filters as trends
-    fb_summary_filter = list(fb_base_filter)
-    fb_summary_total_q = select(func.count(FeedbackScore.id)).where(*fb_summary_filter)
-    fb_summary_pos_q = select(func.count(FeedbackScore.id)).where(*fb_summary_filter, FeedbackScore.value == 1)
-    fb_summary_traces_q = select(func.count(func.distinct(FeedbackScore.trace_id))).where(
-        *fb_summary_filter, FeedbackScore.trace_id.isnot(None)
+    # Feedback summary — same scope as the trace totals.
+    #   positive + negative = total_fb   (counts of feedback submissions)
+    #   traces_with_fb + no_feedback_traces = total   (counts of traces)
+    fb_summary_q = (
+        select(
+            func.count(FeedbackScore.id).label("total"),
+            func.count(FeedbackScore.id).filter(FeedbackScore.value == 1).label("positive"),
+            func.count(func.distinct(FeedbackScore.trace_id)).label("traces_with_fb"),
+        )
+        .join(Trace, FeedbackScore.trace_id == Trace.id)
+        .where(*fb_filter)
     )
-    if fb_needs_join:
-        fb_summary_total_q = fb_summary_total_q.join(Trace, FeedbackScore.trace_id == Trace.id)
-        fb_summary_pos_q = fb_summary_pos_q.join(Trace, FeedbackScore.trace_id == Trace.id)
-        fb_summary_traces_q = fb_summary_traces_q.join(Trace, FeedbackScore.trace_id == Trace.id)
-        if environment:
-            fb_summary_total_q = fb_summary_total_q.where(Trace.trace_metadata["environment"].astext == environment)
-            fb_summary_pos_q = fb_summary_pos_q.where(Trace.trace_metadata["environment"].astext == environment)
-            fb_summary_traces_q = fb_summary_traces_q.where(Trace.trace_metadata["environment"].astext == environment)
-        if include_user_ids:
-            fb_summary_total_q = fb_summary_total_q.where(Trace.user_id.in_(include_user_ids))
-            fb_summary_pos_q = fb_summary_pos_q.where(Trace.user_id.in_(include_user_ids))
-            fb_summary_traces_q = fb_summary_traces_q.where(Trace.user_id.in_(include_user_ids))
-        if exclude_user_ids:
-            fb_summary_total_q = fb_summary_total_q.where(~Trace.user_id.in_(exclude_user_ids))
-            fb_summary_pos_q = fb_summary_pos_q.where(~Trace.user_id.in_(exclude_user_ids))
-            fb_summary_traces_q = fb_summary_traces_q.where(~Trace.user_id.in_(exclude_user_ids))
-        if trace_names:
-            fb_summary_total_q = fb_summary_total_q.where(Trace.name.in_(trace_names))
-            fb_summary_pos_q = fb_summary_pos_q.where(Trace.name.in_(trace_names))
-            fb_summary_traces_q = fb_summary_traces_q.where(Trace.name.in_(trace_names))
-
-    total_fb = (await db.execute(fb_summary_total_q)).scalar() or 0
-    positive_fb = (await db.execute(fb_summary_pos_q)).scalar() or 0
+    fb_row = (await db.execute(fb_summary_q)).one()
+    total_fb = fb_row.total or 0
+    positive_fb = fb_row.positive or 0
     negative_fb = total_fb - positive_fb
-
-    traces_with_fb = (await db.execute(fb_summary_traces_q)).scalar() or 0
+    traces_with_fb = fb_row.traces_with_fb or 0
     no_feedback_traces = total - traces_with_fb
 
     positive_rate = round(positive_fb / total_fb, 3) if total_fb > 0 else 0.0
@@ -406,6 +362,7 @@ async def get_dashboard_stats(
             positive=positive_fb,
             negative=negative_fb,
             positive_rate=positive_rate,
+            traces_with_feedback=traces_with_fb,
             no_feedback_traces=no_feedback_traces,
         ),
         latency=latency,

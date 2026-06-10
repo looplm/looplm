@@ -4601,6 +4601,8 @@ export interface components {
             positive_rate: number;
             /** Total */
             total: number;
+            /** Traces With Feedback */
+            traces_with_feedback: number;
         };
         /** FeedbackTrend */
         FeedbackTrend: {
