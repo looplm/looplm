@@ -76,23 +76,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # can retry. (A live stop now flips status='cancelled' via the DB, which the
     # worker honors cooperatively — so we only ever orphan rows on hard restarts.)
     from datetime import datetime as _dt, timezone as _tz
-    from app.models.feedback_eval import TopQuestionsAnalysis
+    from app.models.feedback_eval import FeedbackThemeAnalysis, TopQuestionsAnalysis
     async with async_session() as session:
-        result = await session.execute(
-            _sa_update(TopQuestionsAnalysis)
-            .where(TopQuestionsAnalysis.status.in_(("pending", "running")))
-            .values(
-                status="failed",
-                error="Analysis interrupted by server restart",
-                completed_at=_dt.now(_tz.utc),
+        for _model, _label in (
+            (TopQuestionsAnalysis, "top-questions"),
+            (FeedbackThemeAnalysis, "feedback-theme"),
+        ):
+            result = await session.execute(
+                _sa_update(_model)
+                .where(_model.status.in_(("pending", "running")))
+                .values(
+                    status="failed",
+                    error="Analysis interrupted by server restart",
+                    completed_at=_dt.now(_tz.utc),
+                )
             )
-        )
+            if result.rowcount:
+                logger.warning(
+                    "Reconciled %d %s analysis(es) orphaned by restart",
+                    result.rowcount,
+                    _label,
+                )
         await session.commit()
-        if result.rowcount:
-            logger.warning(
-                "Reconciled %d top-questions analysis(es) orphaned by restart",
-                result.rowcount,
-            )
 
     # Start batch eval poller
     from app.services.batch_poller import start_batch_poller, stop_batch_poller

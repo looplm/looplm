@@ -182,6 +182,31 @@ export const stopTopQuestionsAnalysis = (analysisId: string) =>
     { method: "POST" }
   );
 
+// --- Feedback Theme Clustering ---
+
+export const analyzeFeedbackThemes = (body: {
+  from_date?: string;
+  to_date?: string;
+  environment?: string;
+  limit?: number;
+}) =>
+  request<{ analysis_id: string; status: string }>("/api/feedback/themes", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const getFeedbackThemesAnalysis = (analysisId: string) =>
+  request<import("../api-types/data").FeedbackThemesResponse>(`/api/feedback/themes/${analysisId}`);
+
+export const getLatestFeedbackThemes = () =>
+  request<import("../api-types/data").FeedbackThemesResponse>("/api/feedback/themes/latest");
+
+export const stopFeedbackThemesAnalysis = (analysisId: string) =>
+  request<{ message: string; status: string }>(
+    `/api/feedback/themes/${analysisId}/stop`,
+    { method: "POST" }
+  );
+
 // --- Suggestions ---
 
 export const generateSuggestions = (params?: Record<string, string>) => {

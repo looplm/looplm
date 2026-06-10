@@ -20,18 +20,18 @@ import {
   type TestCaseCreateBody,
 } from "@/lib/api";
 import { evaluateFeedback, getFeedbackEvaluation, stopFeedbackEvaluation, getFeedbackEvaluatorConfig, updateFeedbackEvaluatorConfig } from "@/lib/api/feedback-api";
-import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions, stopTopQuestionsAnalysis, getSuggestionRun, stopSuggestionRun } from "@/lib/api/evals-api";
-import type { TopQuestionsResponse, SuggestionRunResponse } from "@/lib/api";
+import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions, stopTopQuestionsAnalysis, analyzeFeedbackThemes, getFeedbackThemesAnalysis, getLatestFeedbackThemes, stopFeedbackThemesAnalysis, getSuggestionRun, stopSuggestionRun } from "@/lib/api/evals-api";
+import type { TopQuestionsResponse, FeedbackThemesResponse, SuggestionRunResponse } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
 
-type Tab = "feedback" | "suggestions" | "top-questions";
+type Tab = "feedback" | "suggestions" | "top-questions" | "themes";
 
 export function useFeedbackPage() {
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("feedback-tab");
-      if (saved === "feedback" || saved === "suggestions" || saved === "top-questions") return saved as Tab;
+      if (saved === "feedback" || saved === "suggestions" || saved === "top-questions" || saved === "themes") return saved as Tab;
     }
     return "feedback";
   });
@@ -76,6 +76,12 @@ export function useFeedbackPage() {
   const [topQuestionsId, setTopQuestionsId] = useState<string | null>(null);
   const [topQuestionsTriggering, setTopQuestionsTriggering] = useState(false);
   const [topQuestionsLoading, setTopQuestionsLoading] = useState(false);
+
+  // Feedback themes state
+  const [feedbackThemesResult, setFeedbackThemesResult] = useState<FeedbackThemesResponse | null>(null);
+  const [feedbackThemesId, setFeedbackThemesId] = useState<string | null>(null);
+  const [feedbackThemesTriggering, setFeedbackThemesTriggering] = useState(false);
+  const [feedbackThemesLoading, setFeedbackThemesLoading] = useState(false);
 
   const evalRunning = evalResult ? ["pending", "running"].includes(evalResult.status) : false;
   const configuredVerdicts = evalConfig?.verdicts ?? ["suspicious", "helpful", "unhelpful"];
@@ -205,6 +211,62 @@ export function useFeedbackPage() {
     }, 3000);
     return () => clearInterval(interval);
   }, [topQuestionsId, topQuestionsResult?.status]);
+
+  const feedbackThemesRunning = feedbackThemesResult ? ["pending", "running"].includes(feedbackThemesResult.status) : false;
+
+  async function handleAnalyzeFeedbackThemes() {
+    setFeedbackThemesTriggering(true);
+    try {
+      const body: Record<string, unknown> = { limit: 200 };
+      if (globalFilters.startDate) body.from_date = new Date(globalFilters.startDate).toISOString();
+      if (globalFilters.endDate) body.to_date = new Date(globalFilters.endDate).toISOString();
+      if (globalFilters.environment && globalFilters.environment !== "all") {
+        body.environment = globalFilters.environment;
+      }
+      const { analysis_id } = await analyzeFeedbackThemes(body as any);
+      setFeedbackThemesId(analysis_id);
+      const data = await getFeedbackThemesAnalysis(analysis_id);
+      setFeedbackThemesResult(data);
+    } catch (err: any) {
+      toast.error("Analysis failed", { description: err.message });
+    } finally {
+      setFeedbackThemesTriggering(false);
+    }
+  }
+
+  async function handleStopFeedbackThemes() {
+    if (!feedbackThemesId || !feedbackThemesRunning) return;
+    try {
+      await stopFeedbackThemesAnalysis(feedbackThemesId);
+      setFeedbackThemesResult((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
+      toast.success("Analysis stopped");
+    } catch (err: any) {
+      toast.error("Failed to stop analysis", { description: err.message });
+    }
+  }
+
+  // Polling loop for feedback themes analysis progress
+  useEffect(() => {
+    if (!feedbackThemesId || !feedbackThemesResult || !["pending", "running"].includes(feedbackThemesResult.status)) return;
+    const interval = setInterval(async () => {
+      try {
+        const updated = await getFeedbackThemesAnalysis(feedbackThemesId);
+        setFeedbackThemesResult(updated);
+        if (updated.status === "completed") {
+          clearInterval(interval);
+          toast.success(`Identified ${updated.themes.length} themes from ${updated.total_comments} comments`);
+        } else if (updated.status === "failed") {
+          clearInterval(interval);
+          toast.error("Analysis failed", { description: updated.error || "Unknown error" });
+        } else if (updated.status === "cancelled") {
+          clearInterval(interval);
+        }
+      } catch {
+        clearInterval(interval);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [feedbackThemesId, feedbackThemesResult?.status]);
 
   // Eval completion flag — triggers feedback list refresh
   const [evalCompleted, setEvalCompleted] = useState(0);
@@ -337,6 +399,19 @@ export function useFeedbackPage() {
     }
   }, []);
 
+  const loadFeedbackThemes = useCallback(async () => {
+    setFeedbackThemesLoading(true);
+    try {
+      const data = await getLatestFeedbackThemes();
+      setFeedbackThemesResult(data);
+    } catch {
+      // No previous analysis found — that's fine
+      setFeedbackThemesResult(null);
+    } finally {
+      setFeedbackThemesLoading(false);
+    }
+  }, []);
+
   const loadLatestSuggestions = useCallback(async () => {
     setSugLoading(true);
     try {
@@ -414,10 +489,12 @@ export function useFeedbackPage() {
     }
     if (tab === "top-questions") {
       loadTopQuestions();
+    } else if (tab === "themes") {
+      loadFeedbackThemes();
     } else {
       loadFeedback();
     }
-  }, [tab, loadFeedback, loadTopQuestions, loadLatestSuggestions]);
+  }, [tab, loadFeedback, loadTopQuestions, loadFeedbackThemes, loadLatestSuggestions]);
 
   // Saved suggestion runs persist across filter changes — wiping them on every
   // filter tweak would defeat the persistence the user expects, and racing
@@ -512,6 +589,10 @@ export function useFeedbackPage() {
     topQuestionsLoading,
     topQuestionsTriggering,
     topQuestionsRunning,
+    feedbackThemesResult,
+    feedbackThemesLoading,
+    feedbackThemesTriggering,
+    feedbackThemesRunning,
     // Computed
     evalRunning,
     configuredVerdicts,
@@ -524,6 +605,8 @@ export function useFeedbackPage() {
     handleAcceptSuggestion,
     handleAnalyzeTopQuestions,
     handleStopTopQuestions,
+    handleAnalyzeFeedbackThemes,
+    handleStopFeedbackThemes,
     handleGenerateSuggestions: loadSuggestions,
     handleStopSuggestionRun,
   };

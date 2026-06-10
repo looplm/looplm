@@ -185,6 +185,43 @@ class TopQuestionsResponse(BaseModel):
     completed_at: Optional[datetime] = None
 
 
+# --- Feedback Theme Clustering ---
+
+
+class FeedbackThemeRequest(BaseModel):
+    from_date: Optional[datetime] = None
+    to_date: Optional[datetime] = None
+    environment: Optional[str] = None
+    limit: int = Field(200, ge=10, le=500)
+
+
+class FeedbackThemeItem(BaseModel):
+    comment: str
+    feedback_value: Optional[float] = None
+    trace_id: Optional[UUID] = None
+    question: Optional[str] = None  # display context only — not used for clustering
+
+
+class FeedbackTheme(BaseModel):
+    rank: int
+    theme: str
+    count: int
+    summary: str = ""
+    all_comments: list[FeedbackThemeItem] = []
+    feedback_sentiment: dict[str, int] = {}
+
+
+class FeedbackThemesResponse(BaseModel):
+    id: UUID
+    status: str  # "pending" | "running" | "completed" | "failed" | "cancelled"
+    error: Optional[str] = None
+    total_comments: int = 0
+    processed_comments: int = 0
+    themes: list[FeedbackTheme] = []
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
 # --- Suggestion Run ---
 
 
