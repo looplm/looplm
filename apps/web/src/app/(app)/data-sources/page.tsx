@@ -293,11 +293,19 @@ export default function DataSourcesPage() {
                                 {k.multivalued ? " (multi)" : ""}
                               </option>
                             ))}
-                            {/* Allow removing any field except the very first. */}
-                            {!(i === 0 && j === 0) && (
-                              <option value="">— remove —</option>
-                            )}
                           </select>
+                          {/* Remove this field. The very first field always stays
+                              so there's at least one grouping dimension. */}
+                          {!(i === 0 && j === 0) && (
+                            <button
+                              onClick={() => changeField(i, j, "")}
+                              title="Remove this field"
+                              aria-label="Remove this field"
+                              className="text-gray-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded px-1.5 py-1 text-sm leading-none"
+                            >
+                              ×
+                            </button>
+                          )}
                         </div>
                       ))}
                       {canAddMore && (
