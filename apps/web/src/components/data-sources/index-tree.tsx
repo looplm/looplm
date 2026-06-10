@@ -3,9 +3,14 @@
 import { useEffect, useState } from "react";
 
 import { getIndexTree } from "@/lib/api";
-import type { IndexTreeDocument, IndexTreeGroupNode } from "@/lib/api-types/index-explorer";
+import type {
+  IndexTreeDocument,
+  IndexTreeGroupNode,
+  IndexTreeSection,
+} from "@/lib/api-types/index-explorer";
 
 type DocSort = "url" | "title";
+type PathStep = { key: string; value: string };
 
 const ERR_CLS =
   "text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded px-2 py-1";
@@ -108,17 +113,70 @@ function DocumentLeaves({
   );
 }
 
+/** Render one level's distribution(s). Multiple sections (parallel fields) get
+ *  a small "By <label>" header each; a single section renders bare. */
+function TreeSections({
+  providerId,
+  levels,
+  basePath,
+  sections,
+  depth,
+}: {
+  providerId: string;
+  levels: string[][];
+  basePath: PathStep[];
+  sections: IndexTreeSection[];
+  depth: number;
+}) {
+  const labeled = sections.length > 1;
+  return (
+    <>
+      {sections.map((sec) => {
+        const max = Math.max(1, ...sec.groups.map((g) => g.doc_count));
+        return (
+          <div key={sec.key} className={labeled ? "mt-1" : ""}>
+            {labeled && (
+              <div className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-slate-500 px-1 pt-1">
+                By {sec.label}
+              </div>
+            )}
+            <div className={labeled ? "pl-2" : ""}>
+              {sec.groups.length === 0 ? (
+                <p className="text-xs text-gray-400 dark:text-slate-500 py-1 px-1">
+                  No values.
+                </p>
+              ) : (
+                sec.groups.map((g) => (
+                  <GroupNode
+                    key={`${sec.key}:${g.value}@${depth}`}
+                    providerId={providerId}
+                    levels={levels}
+                    path={[...basePath, { key: sec.key, value: g.value }]}
+                    node={g}
+                    maxSiblingCount={max}
+                    depth={depth}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 function GroupNode({
   providerId,
-  groupBy,
+  levels,
   path,
   node,
   maxSiblingCount,
   depth,
 }: {
   providerId: string;
-  groupBy: string[];
-  path: string[]; // values from root to this node, inclusive
+  levels: string[][];
+  path: PathStep[]; // root → this node, inclusive
   node: IndexTreeGroupNode;
   maxSiblingCount: number;
   depth: number;
@@ -126,18 +184,18 @@ function GroupNode({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [children, setChildren] = useState<IndexTreeGroupNode[] | null>(null);
+  const [sections, setSections] = useState<IndexTreeSection[] | null>(null);
   const [docs, setDocs] = useState<IndexTreeDocument[] | null>(null);
 
   async function toggle() {
     const next = !open;
     setOpen(next);
-    if (next && children === null && docs === null && !loading) {
+    if (next && sections === null && docs === null && !loading) {
       setLoading(true);
       setError(null);
       try {
-        const resp = await getIndexTree({ providerId, groupBy, path });
-        if (resp.level === "group") setChildren(resp.groups);
+        const resp = await getIndexTree({ providerId, levels, path });
+        if (resp.level === "group") setSections(resp.sections);
         else setDocs(resp.documents);
       } catch (e) {
         setError((e as Error).message);
@@ -146,10 +204,6 @@ function GroupNode({
       }
     }
   }
-
-  const childMax = children
-    ? Math.max(1, ...children.map((c) => c.doc_count))
-    : 1;
 
   return (
     <div>
@@ -171,17 +225,15 @@ function GroupNode({
             <p className="text-xs text-gray-400 dark:text-slate-500 py-1">Loading…</p>
           )}
           {error && <p className={ERR_CLS}>{error}</p>}
-          {children?.map((c) => (
-            <GroupNode
-              key={`${c.value}@${depth + 1}`}
+          {sections !== null && (
+            <TreeSections
               providerId={providerId}
-              groupBy={groupBy}
-              path={[...path, c.value]}
-              node={c}
-              maxSiblingCount={childMax}
+              levels={levels}
+              basePath={path}
+              sections={sections}
               depth={depth + 1}
             />
-          ))}
+          )}
           {docs !== null && <DocumentLeaves docs={docs} total={node.doc_count} />}
         </div>
       )}
@@ -191,31 +243,31 @@ function GroupNode({
 
 export function IndexTree({
   providerId,
-  groupBy,
+  levels,
 }: {
   providerId: string;
-  groupBy: string[];
+  levels: string[][];
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [roots, setRoots] = useState<IndexTreeGroupNode[]>([]);
+  const [sections, setSections] = useState<IndexTreeSection[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setRoots([]);
-    getIndexTree({ providerId, groupBy, path: [] })
+    setSections([]);
+    getIndexTree({ providerId, levels, path: [] })
       .then((resp) => {
         if (cancelled) return;
-        setRoots(resp.level === "group" ? resp.groups : []);
+        setSections(resp.level === "group" ? resp.sections : []);
       })
       .catch((e) => !cancelled && setError((e as Error).message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [providerId, groupBy]);
+  }, [providerId, levels]);
 
   if (loading) {
     return <p className="text-sm text-gray-400 dark:text-slate-500 py-4">Loading index…</p>;
@@ -223,7 +275,8 @@ export function IndexTree({
   if (error) {
     return <p className={ERR_CLS}>{error}</p>;
   }
-  if (roots.length === 0) {
+  const hasValues = sections.some((s) => s.groups.length > 0);
+  if (!hasValues) {
     return (
       <p className="text-sm text-gray-400 dark:text-slate-500 py-4">
         No values found for this grouping.
@@ -231,21 +284,15 @@ export function IndexTree({
     );
   }
 
-  const max = Math.max(1, ...roots.map((r) => r.doc_count));
-
   return (
     <div className="rounded-xl border border-gray-100 dark:border-slate-800 p-3">
-      {roots.map((r) => (
-        <GroupNode
-          key={`${r.value}@0`}
-          providerId={providerId}
-          groupBy={groupBy}
-          path={[r.value]}
-          node={r}
-          maxSiblingCount={max}
-          depth={0}
-        />
-      ))}
+      <TreeSections
+        providerId={providerId}
+        levels={levels}
+        basePath={[]}
+        sections={sections}
+        depth={0}
+      />
     </div>
   );
 }

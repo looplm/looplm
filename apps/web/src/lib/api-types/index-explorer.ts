@@ -30,6 +30,12 @@ export interface IndexTreeGroupNode {
   has_children: boolean;
 }
 
+export interface IndexTreeSection {
+  key: string;
+  label: string;
+  groups: IndexTreeGroupNode[];
+}
+
 export interface IndexTreeDocument {
   id: string;
   title: string | null;
@@ -39,17 +45,14 @@ export interface IndexTreeDocument {
 
 export interface IndexTreeResponse {
   level: "group" | "documents";
-  key: string | null;
-  groups: IndexTreeGroupNode[];
+  sections: IndexTreeSection[];
   documents: IndexTreeDocument[];
-  parent_doc_count: number | null;
 }
 
 // --- Grouping advisor: LLM-suggested hierarchy + metadata-quality hints ---
 
 export interface GroupingLevel {
-  key: string;
-  label: string;
+  keys: string[];
   reason: string;
 }
 
@@ -62,7 +65,9 @@ export interface MetadataHint {
 }
 
 export interface IndexGroupingSuggestion {
-  suggested_group_by: string[];
+  // Ordered top to bottom; each inner array is the field(s) at that level
+  // (more than one = parallel facets shown side by side).
+  suggested_levels: string[][];
   summary: string;
   levels: GroupingLevel[];
   hints: MetadataHint[];

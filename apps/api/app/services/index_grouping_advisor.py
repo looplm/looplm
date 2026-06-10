@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,8 +44,18 @@ _SYSTEM_PROMPT = (
     "You are a data-architecture assistant for a retrieval-index explorer. "
     "Given a profile of an index's facetable metadata fields, design the most "
     "intuitive way to browse the corpus as a drill-down tree, and flag metadata "
-    "problems. Respond with a single valid JSON object only."
+    "problems. Respond with a single valid JSON object only. "
+    "Never use em dashes (the — character) anywhere in your text; use commas or "
+    "periods instead."
 )
+
+_EM_DASH = re.compile(r"\s*—\s*")
+
+
+def _no_em_dash(text: str) -> str:
+    """Replace em dashes (and surrounding spaces) with a comma. Belt-and-braces
+    on top of the prompt instruction, since models love an em dash."""
+    return _EM_DASH.sub(", ", text).strip().rstrip(",").strip()
 
 
 def _looks_like_path(values: list[PartitionValue]) -> bool:
@@ -63,12 +74,18 @@ def _profile_key(key: PartitionKey, values: list[PartitionValue], doc_count: int
     lengths = [len(v.value) for v in top if v.value]
     avg_len = round(sum(lengths) / len(lengths)) if lengths else 0
     dominant = bool(top and doc_count and top[0].doc_count >= _DOMINANT_RATIO * doc_count)
+    # Fraction of the corpus that carries any value for this field. Well below
+    # 1.0 means the field only describes a subset (a parallel-facet candidate);
+    # multivalued fields can exceed 1.0 since one doc has several values.
+    covered = sum(v.doc_count for v in values)
+    coverage = round(covered / doc_count, 2) if doc_count else 0.0
     return {
         "key": key.key,
         "label": key.label,
         "type": str(key.metadata.get("type", "")),
         "multivalued": key.multivalued,
         "distinct_values": f">={_FACET_CAP}" if distinct >= _FACET_CAP else distinct,
+        "coverage_ratio": coverage,
         "avg_value_length": avg_len,
         "looks_like_path": _looks_like_path(values),
         "single_dominant_value": dominant,
@@ -79,43 +96,56 @@ def _profile_key(key: PartitionKey, values: list[PartitionValue], doc_count: int
 def _build_prompt(doc_count: int, profiles: list[dict]) -> str:
     return (
         f"The index holds {doc_count:,} documents. Below is a JSON profile of each "
-        "facetable field — its cardinality, a sample of its most common values with "
-        "counts, and heuristics (looks_like_path, single_dominant_value).\n\n"
+        "facetable field: its cardinality, coverage_ratio (fraction of the corpus "
+        "that has any value for it), a sample of its most common values with counts, "
+        "and heuristics (looks_like_path, single_dominant_value).\n\n"
         f"{json.dumps(profiles, ensure_ascii=False, indent=2)}\n\n"
-        "Design a drill-down hierarchy a human would find intuitive:\n"
+        "Design a drill-down hierarchy a human would find intuitive. The hierarchy "
+        "is a list of LEVELS, ordered top to bottom. Each level holds one or more "
+        "field keys:\n"
+        "- A level with ONE field nests normally (its value buckets become the "
+        "parents of the next level).\n"
+        "- A level with SEVERAL fields shows them as PARALLEL facets, side by side, "
+        "not nested in each other.\n\n"
+        "Rules:\n"
         "- Put low-to-moderate cardinality categorical fields near the top, "
         "higher-cardinality fields deeper.\n"
         "- NEVER use a near-unique field (distinct_values close to the document "
-        "count) or a field where looks_like_path is true as a grouping dimension — "
+        "count) or a field where looks_like_path is true as a grouping dimension; "
         "those are document identifiers/leaves, not groups.\n"
-        "- Use at most 4 levels. Prefer fewer if that reads more clearly.\n"
-        "- Skip fields with a single_dominant_value (they add no signal).\n\n"
+        "- Skip fields with a single_dominant_value (they add no signal).\n"
+        "- IMPORTANT: when two or more fields are ALTERNATIVE organizational schemes "
+        "for DIFFERENT subsets of the corpus (each has a partial coverage_ratio and "
+        "they describe complementary parts, e.g. one field tags some folders while "
+        "another assigns a team to other folders), DO NOT nest them. Put them "
+        "together in the SAME level as parallel facets.\n"
+        "- Use at most 4 levels total. Prefer fewer if that reads more clearly.\n\n"
         "Also emit hints about metadata quality:\n"
         '- For a field whose values encode a delimited path, add a "warning" hint '
-        'recommending the index be re-indexed with that path split into separate '
+        "recommending the index be re-indexed with that path split into separate "
         'fields (e.g. level_1, level_2), and set "suggested_field".\n'
-        '- If no good top-level categorical dimension exists (e.g. no source/type '
+        "- If no good top-level categorical dimension exists (e.g. no source/type "
         'field), add a hint recommending one be added, with "suggested_field".\n'
-        "- Keep hints short and actionable.\n\n"
+        "- Keep hints short and actionable. Do not use em dashes.\n\n"
         "Respond with JSON of exactly this shape:\n"
         "{\n"
-        '  "suggested_group_by": ["field_key", ...],  // ordered, top to bottom\n'
+        '  "suggested_levels": [["field_key"], ["field_a", "field_b"], ...],\n'
         '  "summary": "one sentence explaining the hierarchy",\n'
-        '  "levels": [{"key": "field_key", "label": "...", "reason": "why this level"}],\n'
+        '  "levels": [{"keys": ["field_key"], "reason": "why this level"}],\n'
         '  "hints": [{"severity": "info|warning", "title": "...", "message": "...", '
         '"field": "existing_key_or_null", "suggested_field": "new_field_or_null"}]\n'
         "}\n"
-        "Use only field keys that appear in the profile above for suggested_group_by "
-        "and levels[].key."
+        "Use only field keys that appear in the profile above."
     )
 
 
 def _parse(raw: str, valid_keys: list[str]) -> IndexGroupingSuggestion:
     """Parse + sanitize the LLM JSON into a validated suggestion.
 
-    Clamps ``suggested_group_by`` (and ``levels``) to fields that actually exist
-    and dedupes them; falls back to the first available key when the result is
-    empty. Defensive against hallucinated field names.
+    Clamps ``suggested_levels`` (and ``levels``) to fields that actually exist,
+    dedupes globally (a field appears in at most one level), drops empty levels,
+    and falls back to a single level of the first available key when empty.
+    Strips em dashes. Defensive against hallucinated field names.
     """
     try:
         data = json.loads(raw)
@@ -123,29 +153,41 @@ def _parse(raw: str, valid_keys: list[str]) -> IndexGroupingSuggestion:
         logger.warning("Grouping advisor returned non-JSON output")
         data = {}
 
+    # Tolerate either the parallel shape or the older flat one.
+    raw_levels = data.get("suggested_levels")
+    if raw_levels is None:
+        raw_levels = [[k] for k in (data.get("suggested_group_by") or [])]
+
     valid = set(valid_keys)
     seen: set[str] = set()
-    group_by: list[str] = []
-    for k in data.get("suggested_group_by", []) or []:
-        if isinstance(k, str) and k in valid and k not in seen:
-            seen.add(k)
-            group_by.append(k)
-    if not group_by and valid_keys:
-        group_by = [valid_keys[0]]
+    suggested_levels: list[list[str]] = []
+    for lvl in raw_levels or []:
+        fields = [lvl] if isinstance(lvl, str) else lvl
+        if not isinstance(fields, list):
+            continue
+        keep: list[str] = []
+        for k in fields:
+            if isinstance(k, str) and k in valid and k not in seen:
+                seen.add(k)
+                keep.append(k)
+        if keep:
+            suggested_levels.append(keep)
+    if not suggested_levels and valid_keys:
+        suggested_levels = [[valid_keys[0]]]
 
+    chosen = {k for lvl in suggested_levels for k in lvl}
     levels: list[GroupingLevel] = []
     for lvl in data.get("levels", []) or []:
         if not isinstance(lvl, dict):
             continue
-        key = lvl.get("key")
-        if isinstance(key, str) and key in group_by:
-            levels.append(
-                GroupingLevel(
-                    key=key,
-                    label=str(lvl.get("label") or key),
-                    reason=str(lvl.get("reason") or ""),
-                )
-            )
+        keys = lvl.get("keys")
+        if keys is None and isinstance(lvl.get("key"), str):
+            keys = [lvl["key"]]
+        if not isinstance(keys, list):
+            continue
+        kept = [k for k in keys if isinstance(k, str) and k in chosen]
+        if kept:
+            levels.append(GroupingLevel(keys=kept, reason=_no_em_dash(str(lvl.get("reason") or ""))))
 
     hints: list[MetadataHint] = []
     for h in data.get("hints", []) or []:
@@ -154,8 +196,8 @@ def _parse(raw: str, valid_keys: list[str]) -> IndexGroupingSuggestion:
         severity = h.get("severity")
         if severity not in ("info", "warning"):
             severity = "info"
-        title = str(h.get("title") or "").strip()
-        message = str(h.get("message") or "").strip()
+        title = _no_em_dash(str(h.get("title") or ""))
+        message = _no_em_dash(str(h.get("message") or ""))
         if not title and not message:
             continue
         hints.append(
@@ -169,8 +211,8 @@ def _parse(raw: str, valid_keys: list[str]) -> IndexGroupingSuggestion:
         )
 
     return IndexGroupingSuggestion(
-        suggested_group_by=group_by,
-        summary=str(data.get("summary") or ""),
+        suggested_levels=suggested_levels,
+        summary=_no_em_dash(str(data.get("summary") or "")),
         levels=levels,
         hints=hints,
     )

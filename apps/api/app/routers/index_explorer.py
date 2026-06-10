@@ -31,6 +31,7 @@ from app.schemas.index_explorer import (
     IndexTreeDocument,
     IndexTreeGroupNode,
     IndexTreeResponse,
+    IndexTreeSection,
 )
 from app.services.analysis_llm import AnalysisLlmConfigError
 from app.services.index_grouping_advisor import suggest_grouping
@@ -114,47 +115,70 @@ async def summary(
 @router.get("/tree", response_model=IndexTreeResponse)
 async def tree(
     provider_id: UUID,
-    group_by: list[str] = Query(..., min_length=1),
-    path: list[str] = Query(default_factory=list),
+    level: list[str] = Query(..., min_length=1),
+    path_key: list[str] = Query(default_factory=list),
+    path_value: list[str] = Query(default_factory=list),
     limit: int = Query(50, ge=1, le=_MAX_SAMPLE),
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
     """One lazily-expanded level of the index tree.
 
-    ``path`` holds the already-selected values for ``group_by[:len(path)]``. When
-    grouping keys remain, return the next field's distribution (filtered by the
-    path); once the path is complete, return sampled documents for the leaf.
+    Each ``level`` is a comma-separated set of field keys; a level with more
+    than one field is rendered as parallel side-by-side sections. ``path_key`` /
+    ``path_value`` are the index-aligned (field, value) pairs already drilled
+    into (one per level descended). While levels remain, return the next level's
+    distribution(s) filtered by the path; once complete, sample the leaf's docs.
     """
-    if len(path) > len(group_by):
+    levels = [[f for f in item.split(",") if f] for item in level]
+    levels = [lvl for lvl in levels if lvl]
+    if not levels:
         raise HTTPException(
             status_code=400,
-            detail={"error": {"code": "BAD_REQUEST", "message": "path longer than group_by"}},
+            detail={"error": {"code": "BAD_REQUEST", "message": "no grouping levels given"}},
+        )
+    if len(path_key) != len(path_value):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "BAD_REQUEST", "message": "path_key/path_value mismatch"}},
+        )
+    if len(path_key) > len(levels):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "BAD_REQUEST", "message": "path longer than levels"}},
         )
 
     provider = await _get_provider_or_404(db, provider_id, project)
-    filters = {group_by[i]: path[i] for i in range(len(path))}
+    depth = len(path_key)
+    filters = {path_key[i]: path_value[i] for i in range(depth)}
     client = build_index_provider(provider)
     try:
-        if len(path) < len(group_by):
-            next_key = group_by[len(path)]
-            has_children = len(path) + 1 < len(group_by)
-            values = await client.get_partition_distribution(next_key, filters or None)
-            return IndexTreeResponse(
-                level="group",
-                key=next_key,
-                groups=[
-                    IndexTreeGroupNode(
-                        value=v.value, doc_count=v.doc_count, has_children=has_children
+        if depth < len(levels):
+            fields = levels[depth]
+            has_children = depth + 1 < len(levels)
+            keys = await client.list_partition_keys()
+            labels = {k.key: k.label for k in keys}
+            sections: list[IndexTreeSection] = []
+            for field in fields:
+                values = await client.get_partition_distribution(field, filters or None)
+                sections.append(
+                    IndexTreeSection(
+                        key=field,
+                        label=labels.get(field, field),
+                        groups=[
+                            IndexTreeGroupNode(
+                                value=v.value, doc_count=v.doc_count, has_children=has_children
+                            )
+                            for v in values
+                        ],
                     )
-                    for v in values
-                ],
-            )
+                )
+            return IndexTreeResponse(level="group", sections=sections)
 
         # Path complete → sample documents for the leaf value.
-        leaf_key = group_by[-1]
-        leaf_value = path[-1]
-        ancestors = {group_by[i]: path[i] for i in range(len(path) - 1)}
+        leaf_key = path_key[-1]
+        leaf_value = path_value[-1]
+        ancestors = {path_key[i]: path_value[i] for i in range(depth - 1)}
         docs = await client.sample_documents(
             leaf_key, leaf_value, limit, ancestors or None
         )

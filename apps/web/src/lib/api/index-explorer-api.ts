@@ -20,14 +20,19 @@ export const getIndexSummary = (providerId: string) =>
 
 export const getIndexTree = (params: {
   providerId: string;
-  groupBy: string[];
-  path?: string[];
+  // Ordered levels; each inner array is the field(s) at that level (parallel).
+  levels: string[][];
+  // (field, value) pairs already drilled into, one per descended level.
+  path?: { key: string; value: string }[];
   limit?: number;
 }) => {
   const q = new URLSearchParams();
   q.set("provider_id", params.providerId);
-  for (const k of params.groupBy) q.append("group_by", k);
-  for (const v of params.path ?? []) q.append("path", v);
+  for (const lvl of params.levels) q.append("level", lvl.join(","));
+  for (const p of params.path ?? []) {
+    q.append("path_key", p.key);
+    q.append("path_value", p.value);
+  }
   if (params.limit != null) q.set("limit", String(params.limit));
   return request<IndexTreeResponse>(`/api/index-explorer/tree?${q.toString()}`);
 };

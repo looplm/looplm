@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class IndexProviderOption(BaseModel):
@@ -49,7 +49,20 @@ class IndexTreeGroupNode(BaseModel):
 
     value: str
     doc_count: int
-    has_children: bool  # True when further group_by keys remain below this node
+    has_children: bool  # True when further levels remain below this node
+
+
+class IndexTreeSection(BaseModel):
+    """One field's value distribution at the current level.
+
+    A level normally has a single section. When the level groups several
+    *parallel* fields (e.g. ``tags`` and ``team``), each is its own section so
+    the UI can render them side by side instead of nested.
+    """
+
+    key: str  # the field whose distribution ``groups`` represents
+    label: str
+    groups: list[IndexTreeGroupNode] = Field(default_factory=list)
 
 
 class IndexTreeDocument(BaseModel):
@@ -64,27 +77,25 @@ class IndexTreeDocument(BaseModel):
 class IndexTreeResponse(BaseModel):
     """One lazily-expanded level of the tree.
 
-    ``level == "group"`` → ``groups`` holds the next grouping field's values.
-    ``level == "documents"`` → ``documents`` holds sampled docs for the leaf
-    (``parent_doc_count`` is the value's total, so the UI can show "N of M").
+    ``level == "group"`` → ``sections`` holds the next level's field
+    distribution(s). ``level == "documents"`` → ``documents`` holds sampled
+    docs for the leaf.
     """
 
     level: Literal["group", "documents"]
-    key: Optional[str] = None  # the field whose distribution ``groups`` represents
-    groups: list[IndexTreeGroupNode] = Field(default_factory=list)
+    sections: list[IndexTreeSection] = Field(default_factory=list)
     documents: list[IndexTreeDocument] = Field(default_factory=list)
-    parent_doc_count: Optional[int] = None
 
 
 # --- Grouping advisor: LLM-suggested hierarchy + metadata-quality hints ---
 
 
 class GroupingLevel(BaseModel):
-    """One level of the suggested hierarchy, with the LLM's reason for it."""
+    """One level of the suggested hierarchy. ``keys`` holds the field(s) at this
+    level; more than one means they are shown in parallel (side by side)."""
 
-    key: str
-    label: str
-    reason: str
+    keys: list[str] = Field(default_factory=list)
+    reason: str = ""
 
 
 class MetadataHint(BaseModel):
@@ -103,12 +114,39 @@ class MetadataHint(BaseModel):
 
 
 class IndexGroupingSuggestion(BaseModel):
-    """The advisor's recommended grouping for an index."""
+    """The advisor's recommended grouping for an index.
 
-    suggested_group_by: list[str] = Field(default_factory=list)
+    ``suggested_levels`` is ordered top to bottom; each inner list is the
+    field(s) at that level (more than one = parallel facets shown side by side).
+    """
+
+    suggested_levels: list[list[str]] = Field(default_factory=list)
     summary: str = ""
     levels: list[GroupingLevel] = Field(default_factory=list)
     hints: list[MetadataHint] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy(cls, data: Any) -> Any:
+        """Read suggestions persisted before parallel levels existed.
+
+        Old shape used a flat ``suggested_group_by`` and ``levels[].key`` —
+        normalize both to the parallel-aware shape so cached rows still load.
+        """
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        if "suggested_levels" not in d and "suggested_group_by" in d:
+            d["suggested_levels"] = [[k] for k in (d.get("suggested_group_by") or [])]
+        lvls = d.get("levels")
+        if isinstance(lvls, list):
+            d["levels"] = [
+                {**lvl, "keys": [lvl["key"]]}
+                if isinstance(lvl, dict) and "keys" not in lvl and "key" in lvl
+                else lvl
+                for lvl in lvls
+            ]
+        return d
 
 
 class IndexGroupingSuggestionResponse(BaseModel):

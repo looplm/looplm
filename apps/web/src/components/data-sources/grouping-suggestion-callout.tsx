@@ -65,8 +65,13 @@ export function GroupingSuggestionCallout({
   // Nothing to show until we have a result, an error, or work in flight.
   if (!loading && !error && !suggestion) return null;
 
-  const levelReason = (key: string) =>
-    suggestion?.levels.find((l) => l.key === key)?.reason ?? "";
+  // Reason for the level whose field set matches `fields` (order-insensitive).
+  const levelReason = (fields: string[]) => {
+    const want = [...fields].sort().join(",");
+    return (
+      suggestion?.levels.find((l) => [...l.keys].sort().join(",") === want)?.reason ?? ""
+    );
+  };
 
   return (
     <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/50 dark:bg-indigo-900/10 p-4 mb-4">
@@ -101,18 +106,27 @@ export function GroupingSuggestionCallout({
             </p>
           )}
 
-          {suggestion.suggested_group_by.length > 0 && (
+          {suggestion.suggested_levels.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              {suggestion.suggested_group_by.map((key, idx) => (
-                <span key={key} className="flex items-center gap-1.5">
+              {suggestion.suggested_levels.map((level, idx) => (
+                <span key={idx} className="flex items-center gap-1.5">
                   {idx > 0 && (
                     <span className="text-gray-400 dark:text-slate-500">→</span>
                   )}
                   <span
-                    className="px-2 py-1 rounded-md bg-white dark:bg-slate-900 border border-indigo-200/70 dark:border-indigo-800/50 text-xs text-gray-700 dark:text-slate-200"
-                    title={levelReason(key)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md bg-white dark:bg-slate-900 border border-indigo-200/70 dark:border-indigo-800/50 text-xs text-gray-700 dark:text-slate-200"
+                    title={levelReason(level)}
                   >
-                    {labelFor(key, keys)}
+                    {level.map((key, j) => (
+                      <span key={key} className="flex items-center gap-1">
+                        {j > 0 && (
+                          <span className="text-[10px] text-gray-400 dark:text-slate-500">
+                            or
+                          </span>
+                        )}
+                        {labelFor(key, keys)}
+                      </span>
+                    ))}
                   </span>
                 </span>
               ))}

@@ -36,8 +36,9 @@ export default function DataSourcesPage() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
-  // Ordered list of fields the tree groups by (top → bottom).
-  const [groupBy, setGroupBy] = useState<string[]>([]);
+  // Ordered grouping levels (top → bottom). Each level holds one or more fields;
+  // more than one field at a level = parallel facets shown side by side.
+  const [levels, setLevels] = useState<string[][]>([]);
 
   // LLM grouping advisor (auto-run on provider load, cached server-side).
   const [suggestion, setSuggestion] = useState<IndexGroupingSuggestion | null>(null);
@@ -70,11 +71,11 @@ export default function DataSourcesPage() {
     (resp: IndexGroupingSuggestionResponse, available: IndexSummary["partition_keys"]) => {
       const sug = resp.suggestion;
       setSuggestion(sug);
-      if (sug && sug.suggested_group_by.length > 0) {
-        const valid = sug.suggested_group_by.filter((k) =>
-          available.some((pk) => pk.key === k),
-        );
-        if (valid.length > 0) setGroupBy(valid);
+      if (sug && sug.suggested_levels.length > 0) {
+        const valid = sug.suggested_levels
+          .map((lvl) => lvl.filter((k) => available.some((pk) => pk.key === k)))
+          .filter((lvl) => lvl.length > 0);
+        if (valid.length > 0) setLevels(valid);
       }
     },
     [],
@@ -86,14 +87,14 @@ export default function DataSourcesPage() {
     setSummaryLoading(true);
     setSummaryError(null);
     setSummary(null);
-    setGroupBy([]);
+    setLevels([]);
     setSuggestion(null);
     setSuggestionError(null);
     getIndexSummary(providerId)
       .then((s) => {
         setSummary(s);
         // Provisional default; the advisor effect may override it below.
-        if (s.partition_keys.length > 0) setGroupBy([s.partition_keys[0].key]);
+        if (s.partition_keys.length > 0) setLevels([[s.partition_keys[0].key]]);
       })
       .catch((e) => setSummaryError((e as Error).message))
       .finally(() => setSummaryLoading(false));
@@ -137,23 +138,51 @@ export default function DataSourcesPage() {
   }, [providerId, summary, applySuggestion]);
 
   const keys = summary?.partition_keys ?? [];
+  const usedCount = levels.reduce((n, lvl) => n + lvl.length, 0);
+  const firstUnused = (extra: Set<string>) =>
+    keys.find((k) => !extra.has(k.key));
 
-  function setLevel(idx: number, value: string) {
-    setGroupBy((prev) => {
-      if (value === "") return prev.slice(0, idx); // remove this level and any below
-      const next = [...prev];
-      next[idx] = value;
-      return next.slice(0, idx + 1); // changing a level drops deeper levels
+  // Editing or removing a field drops any deeper levels (their buckets were
+  // scoped to the old choice). Changing a field within a level keeps that level.
+  function changeField(i: number, j: number, value: string) {
+    setLevels((prev) => {
+      const next = prev.slice(0, i + 1).map((lvl) => [...lvl]);
+      if (value === "") {
+        next[i].splice(j, 1);
+        if (next[i].length === 0) return next.slice(0, i); // empty level → drop it
+      } else {
+        next[i][j] = value;
+      }
+      return next;
+    });
+  }
+
+  function addParallel(i: number) {
+    setLevels((prev) => {
+      const used = new Set(prev.flat());
+      const k = firstUnused(used);
+      if (!k) return prev;
+      const next = prev.slice(0, i + 1).map((lvl) => [...lvl]);
+      next[i].push(k.key);
+      return next;
     });
   }
 
   function addLevel() {
-    const used = new Set(groupBy);
-    const nextKey = keys.find((k) => !used.has(k.key));
-    if (nextKey) setGroupBy((prev) => [...prev, nextKey.key]);
+    setLevels((prev) => {
+      const k = firstUnused(new Set(prev.flat()));
+      return k ? [...prev, [k.key]] : prev;
+    });
   }
 
-  const canAddLevel = groupBy.length < keys.length && groupBy.length > 0;
+  // Options for a given select: unused fields plus the one currently chosen here
+  // (so duplicates can't be created across levels).
+  function optionsFor(current: string) {
+    const usedElsewhere = new Set(levels.flat().filter((k) => k !== current));
+    return keys.filter((k) => k.key === current || !usedElsewhere.has(k.key));
+  }
+
+  const canAddMore = usedCount < keys.length && levels.length > 0;
 
   return (
     <div>
@@ -236,34 +265,57 @@ export default function DataSourcesPage() {
             />
           )}
 
-          {/* Group-by composer */}
+          {/* Group-by composer. Each level can hold several parallel fields. */}
           {!summaryLoading && keys.length > 0 && (
             <div className="rounded-xl border border-gray-100 dark:border-slate-800 p-4 mb-4">
-              <div className="flex flex-wrap items-end gap-3">
-                {groupBy.map((g, idx) => (
-                  <label key={idx} className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+                {levels.map((level, i) => (
+                  <div key={i} className="flex flex-col gap-1">
                     <span className="text-xs text-gray-500 dark:text-slate-400">
-                      {idx === 0 ? "Group by" : "then by"}
+                      {i === 0 ? "Group by" : "then by"}
                     </span>
-                    <select
-                      value={g}
-                      onChange={(e) => setLevel(idx, e.target.value)}
-                      className={inputCls}
-                    >
-                      {keys.map((k) => (
-                        <option key={k.key} value={k.key}>
-                          {k.label}
-                          {k.multivalued ? " (multi)" : ""}
-                        </option>
+                    <div className="flex items-center gap-1.5">
+                      {level.map((field, j) => (
+                        <div key={j} className="flex items-center gap-1.5">
+                          {j > 0 && (
+                            <span className="text-xs text-gray-400 dark:text-slate-500">
+                              or
+                            </span>
+                          )}
+                          <select
+                            value={field}
+                            onChange={(e) => changeField(i, j, e.target.value)}
+                            className={inputCls}
+                          >
+                            {optionsFor(field).map((k) => (
+                              <option key={k.key} value={k.key}>
+                                {k.label}
+                                {k.multivalued ? " (multi)" : ""}
+                              </option>
+                            ))}
+                            {/* Allow removing any field except the very first. */}
+                            {!(i === 0 && j === 0) && (
+                              <option value="">— remove —</option>
+                            )}
+                          </select>
+                        </div>
                       ))}
-                      {idx > 0 && <option value="">— remove —</option>}
-                    </select>
-                  </label>
+                      {canAddMore && (
+                        <button
+                          onClick={() => addParallel(i)}
+                          title="Add a parallel field at this level (shown side by side)"
+                          className="text-sm text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded px-1.5 py-1"
+                        >
+                          + or
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ))}
-                {canAddLevel && (
+                {canAddMore && (
                   <button
                     onClick={addLevel}
-                    className="px-3 py-2 rounded-lg text-sm text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800"
+                    className="self-end px-3 py-2 rounded-lg text-sm text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800"
                   >
                     + Add level
                   </button>
@@ -282,11 +334,11 @@ export default function DataSourcesPage() {
             </p>
           )}
 
-          {!summaryLoading && providerId && groupBy.length > 0 && (
+          {!summaryLoading && providerId && levels.length > 0 && (
             <IndexTree
-              key={`${providerId}:${groupBy.join(">")}`}
+              key={`${providerId}:${levels.map((l) => l.join(",")).join(">")}`}
               providerId={providerId}
-              groupBy={groupBy}
+              levels={levels}
             />
           )}
         </>

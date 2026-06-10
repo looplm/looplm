@@ -13,6 +13,7 @@ from app.index_providers.base import BaseIndexProvider, PartitionKey, PartitionV
 from app.services.analysis_llm import LlmUsageInfo
 from app.services.index_grouping_advisor import (
     _looks_like_path,
+    _no_em_dash,
     _parse,
     suggest_grouping,
 )
@@ -40,31 +41,56 @@ def test_looks_like_path_false_for_flat_labels():
 def test_parse_clamps_hallucinated_keys_and_dedupes():
     raw = json.dumps(
         {
-            "suggested_group_by": ["source_type", "made_up", "source_type", "space"],
+            "suggested_levels": [["source_type", "made_up", "source_type"], ["space"]],
             "summary": "Group by source then space.",
             "levels": [
-                {"key": "source_type", "label": "Source", "reason": "few values"},
-                {"key": "made_up", "label": "Nope", "reason": "x"},
+                {"keys": ["source_type", "made_up"], "reason": "few values"},
+                {"keys": ["ghost"], "reason": "x"},
             ],
             "hints": [],
         }
     )
     result = _parse(raw, valid_keys=["source_type", "space", "page_id"])
-    assert result.suggested_group_by == ["source_type", "space"]
-    # levels are clamped to keys that survived in suggested_group_by
-    assert [lvl.key for lvl in result.levels] == ["source_type"]
+    assert result.suggested_levels == [["source_type"], ["space"]]
+    # levels are clamped to keys that survived in suggested_levels
+    assert [lvl.keys for lvl in result.levels] == [["source_type"]]
+
+
+def test_parse_keeps_parallel_level():
+    raw = json.dumps(
+        {"suggested_levels": [["source_type"], ["tags", "team"]], "hints": []}
+    )
+    result = _parse(raw, valid_keys=["source_type", "tags", "team"])
+    assert result.suggested_levels == [["source_type"], ["tags", "team"]]
 
 
 def test_parse_falls_back_to_first_key_when_empty():
-    raw = json.dumps({"suggested_group_by": ["ghost"], "summary": "", "hints": []})
+    raw = json.dumps({"suggested_levels": [["ghost"]], "summary": "", "hints": []})
     result = _parse(raw, valid_keys=["source_type", "space"])
-    assert result.suggested_group_by == ["source_type"]
+    assert result.suggested_levels == [["source_type"]]
+
+
+def test_parse_strips_em_dashes():
+    raw = json.dumps(
+        {
+            "suggested_levels": [["source_type"]],
+            "summary": "Browse by source — the cleanest split.",
+            "hints": [
+                {"severity": "warning", "title": "Path field — fix it",
+                 "message": "Split it — into parts.", "suggested_field": "level_1"},
+            ],
+        }
+    )
+    result = _parse(raw, valid_keys=["source_type"])
+    assert "—" not in result.summary
+    assert "—" not in result.hints[0].title
+    assert "—" not in result.hints[0].message
 
 
 def test_parse_sanitizes_hint_severity_and_drops_blank():
     raw = json.dumps(
         {
-            "suggested_group_by": ["source_type"],
+            "suggested_levels": [["source_type"]],
             "hints": [
                 {"severity": "critical", "title": "Path field", "message": "split it",
                  "suggested_field": "level_1"},
@@ -80,7 +106,12 @@ def test_parse_sanitizes_hint_severity_and_drops_blank():
 
 def test_parse_handles_non_json():
     result = _parse("not json at all", valid_keys=["source_type"])
-    assert result.suggested_group_by == ["source_type"]
+    assert result.suggested_levels == [["source_type"]]
+
+
+def test_no_em_dash_replaces_with_comma():
+    assert _no_em_dash("a — b") == "a, b"
+    assert _no_em_dash("ends with —") == "ends with"
 
 
 class _FakeProvider(BaseIndexProvider):
@@ -113,9 +144,9 @@ async def test_suggest_grouping_end_to_end(db_session, test_project):
     )
     llm_json = json.dumps(
         {
-            "suggested_group_by": ["source_type", "hallucinated"],
+            "suggested_levels": [["source_type", "hallucinated"]],
             "summary": "Browse by source type.",
-            "levels": [{"key": "source_type", "label": "Source", "reason": "low cardinality"}],
+            "levels": [{"keys": ["source_type"], "reason": "low cardinality"}],
             "hints": [
                 {
                     "severity": "warning",
@@ -149,5 +180,5 @@ async def test_suggest_grouping_end_to_end(db_session, test_project):
 
     assert model == "gpt-test"
     # Hallucinated key dropped; breadcrumb never suggested as a grouping dimension.
-    assert suggestion.suggested_group_by == ["source_type"]
+    assert suggestion.suggested_levels == [["source_type"]]
     assert any(h.suggested_field == "level_1" for h in suggestion.hints)
