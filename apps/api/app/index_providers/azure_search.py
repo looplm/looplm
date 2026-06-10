@@ -4,9 +4,8 @@ Reads the index schema to discover facetable fields (the partition keys),
 uses server-side facets for cheap per-value document counts, and runs filtered
 searches to sample documents for a given partition value.
 
-This is the corpus that ``rde-rag-indexer`` populates (Confluence + external
-BNetzA/BDEW/Gesetze sources). It is accessed read-only with an admin or query
-key.
+The corpus is populated by an external RAG indexing pipeline. It is accessed
+read-only with an admin or query key.
 """
 
 from __future__ import annotations
@@ -27,8 +26,8 @@ from app.index_providers.base import (
 logger = logging.getLogger(__name__)
 
 # Fields we prefer to surface when sampling documents, in priority order. Only
-# those that actually exist in the target index are selected. Tuned for the
-# rde-rag-indexer schema but harmless for any index.
+# those that actually exist in the target index are selected. Tuned for a
+# typical Confluence-style document schema but harmless for any index.
 _PREFERRED_SAMPLE_FIELDS = [
     "page_id",
     "page_title",
