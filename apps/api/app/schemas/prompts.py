@@ -20,6 +20,7 @@ class PromptOut(PromptBase):
     integration_id: str
     external_id: str
     source: str = ""
+    cluster_path: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -129,6 +130,18 @@ class PromptRecheckResult(BaseModel):
     changed: bool = False
 
 
+class PlannedLocation(BaseModel):
+    """A discovered prompt location shown in the pre-import selection step."""
+
+    external_id: str
+    name: str
+    file_path: str
+    line_start: int | None = None
+    role: str | None = None
+    note: str | None = None
+    already_saved: bool = False
+
+
 class PromptExtractionResponse(BaseModel):
     """Status of a background extraction run (polled by the frontend)."""
 
@@ -142,7 +155,42 @@ class PromptExtractionResponse(BaseModel):
     num_turns: int | None = None
     progress_message: str | None = None
     progress_log: list[dict] = Field(default_factory=list)
+    planned_locations: list[PlannedLocation] = Field(default_factory=list)
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+# ── Selection / clustering / exclusion ────────────────────────
+
+class ConfirmExtractionRequest(BaseModel):
+    extraction_id: str
+    selected_external_ids: list[str] = Field(default_factory=list)
+
+
+class ClusterUpdateRequest(BaseModel):
+    cluster_path: list[str] = Field(default_factory=list)
+
+
+class ClusterMoveRequest(BaseModel):
+    from_path: list[str]
+    to_path: list[str]
+
+
+class ClusterMoveResult(BaseModel):
+    moved: int = 0
+
+
+class ExclusionItem(BaseModel):
+    external_id: str
+    name: str = ""
+
+
+class ExclusionListResponse(BaseModel):
+    data: list[ExclusionItem] = Field(default_factory=list)
+    total: int = 0
+
+
+class RemoveExclusionRequest(BaseModel):
+    external_id: str

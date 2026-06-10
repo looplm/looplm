@@ -189,6 +189,152 @@ async def test_reextraction_prunes_removed_prompts(
     assert {p.name for p in prompts} == {"A"}
 
 
+async def _noop_cluster(db, project_id, **kwargs):
+    return 0
+
+
+@pytest.mark.asyncio
+async def test_discover_stores_planned_and_filters_excluded(
+    db_session, test_project: Project, monkeypatch, tmp_path: Path
+):
+    from app.services.prompt_analysis import (
+        add_exclusion,
+        get_or_create_github_integration,
+        upsert_prompts_for_integration,
+    )
+
+    integ = await get_or_create_github_integration(test_project.id, db_session, "acme/app")
+    await upsert_prompts_for_integration(
+        integ.id,
+        [{"external_id": "a.py::A", "name": "A", "template": "x", "version": 1,
+          "variables": [], "metadata": {}}],
+        db_session, delete_stale=False,
+    )
+    await add_exclusion(integ, "z.py::Z", db_session)
+    await db_session.commit()
+
+    locs = [
+        PromptLocation(name="A", file_path="a.py"),
+        PromptLocation(name="B", file_path="b.py"),
+        PromptLocation(name="Z", file_path="z.py"),
+    ]
+
+    async def fake_discover(agent, deps, limits, *, db, extraction):
+        return PromptLocationList(summary="s", locations=locs), _Usage()
+
+    monkeypatch.setattr(pes, "_discover_locations", fake_discover)
+
+    extraction = PromptExtraction(id=uuid4(), project_id=test_project.id, status="pending")
+    db_session.add(extraction)
+    await db_session.commit()
+
+    await pes.discover_repo_prompts(
+        project_id=test_project.id, extraction_id=extraction.id,
+        db_factory=_Factory(db_session), repo_path=str(tmp_path),
+        repo_full_name="acme/app", provider="openai", model="gpt-4o", api_key="sk-test",
+    )
+
+    await db_session.refresh(extraction)
+    assert extraction.status == "awaiting_selection"
+    planned = {p["external_id"]: p for p in extraction.planned_locations}
+    assert set(planned) == {"a.py::A", "b.py::B"}  # Z excluded
+    assert planned["a.py::A"]["already_saved"] is True
+    assert planned["b.py::B"]["already_saved"] is False
+
+
+@pytest.mark.asyncio
+async def test_confirm_extracts_selected_and_prunes(
+    db_session, test_project: Project, monkeypatch, tmp_path: Path
+):
+    from app.services.prompt_analysis import (
+        get_or_create_github_integration,
+        upsert_prompts_for_integration,
+    )
+
+    integ = await get_or_create_github_integration(test_project.id, db_session, "acme/app")
+    await upsert_prompts_for_integration(
+        integ.id,
+        [
+            {"external_id": "a.py::A", "name": "A", "template": "alpha", "version": 1,
+             "variables": [], "metadata": {}},
+            {"external_id": "old.py::Old", "name": "Old", "template": "o", "version": 1,
+             "variables": [], "metadata": {}},
+        ],
+        db_session, delete_stale=False,
+    )
+    planned = [
+        {"external_id": "a.py::A", "name": "A", "file_path": "a.py", "line_start": None,
+         "role": None, "note": None, "already_saved": True},
+        {"external_id": "b.py::B", "name": "B", "file_path": "b.py", "line_start": None,
+         "role": None, "note": None, "already_saved": False},
+        {"external_id": "c.py::C", "name": "C", "file_path": "c.py", "line_start": None,
+         "role": None, "note": None, "already_saved": False},
+    ]
+    extraction = PromptExtraction(
+        id=uuid4(), project_id=test_project.id, status="awaiting_selection",
+        planned_locations=planned,
+    )
+    db_session.add(extraction)
+    await db_session.commit()
+
+    calls: list[str] = []
+    extracts = {"B": ExtractedPrompt(name="B", template="beta", variables=[], file_path="b.py")}
+
+    async def fake_extract(agent, deps, loc, limits):
+        calls.append(loc.name)
+        return extracts.get(loc.name), _Usage()
+
+    monkeypatch.setattr(pes, "_extract_one", fake_extract)
+    monkeypatch.setattr("app.services.prompt_clustering.cluster_project_prompts", _noop_cluster)
+
+    await pes.confirm_extraction(
+        project_id=test_project.id, extraction_id=extraction.id,
+        db_factory=_Factory(db_session), repo_path=str(tmp_path), repo_full_name="acme/app",
+        selected_external_ids=["b.py::B"],  # A already saved, C not selected
+        provider="openai", model="gpt-4o", api_key="sk-test",
+    )
+
+    await db_session.refresh(extraction)
+    assert extraction.status == "completed"
+    assert calls == ["B"]  # only the selected, not-already-saved location is extracted
+    _, prompts = await _github_prompts(db_session, test_project)
+    # A kept (still in planned), B added, Old pruned (gone from repo), C never imported.
+    assert {p.name for p in prompts} == {"A", "B"}
+
+
+@pytest.mark.asyncio
+async def test_delete_and_exclusion_helpers(db_session, test_project: Project):
+    from app.services.prompt_analysis import (
+        add_exclusion,
+        delete_prompt,
+        get_excluded_ids,
+        get_or_create_github_integration,
+        remove_exclusion,
+        upsert_prompts_for_integration,
+    )
+
+    integ = await get_or_create_github_integration(test_project.id, db_session, "acme/app")
+    await upsert_prompts_for_integration(
+        integ.id,
+        [{"external_id": "a.py::A", "name": "A", "template": "x", "version": 1,
+          "variables": [], "metadata": {}}],
+        db_session, delete_stale=False,
+    )
+    await db_session.commit()
+
+    _, prompts = await _github_prompts(db_session, test_project)
+    assert await delete_prompt(prompts[0].id, test_project.id, db_session) is True
+    _, prompts = await _github_prompts(db_session, test_project)
+    assert prompts == []
+
+    await add_exclusion(integ, "a.py::A", db_session)
+    await db_session.commit()
+    assert get_excluded_ids(integ) == {"a.py::A"}
+    await remove_exclusion(integ, "a.py::A", db_session)
+    await db_session.commit()
+    assert get_excluded_ids(integ) == set()
+
+
 @pytest.mark.asyncio
 async def test_recheck_updates_when_changed(
     db_session, test_project: Project, monkeypatch, tmp_path: Path

@@ -38,6 +38,9 @@ class Prompt(Base):
     version = Column(Integer, nullable=False, server_default=text("1"))
     variables = Column(JSONB, nullable=False, server_default=text("'[]'"))
     prompt_metadata = Column("metadata", JSONB, nullable=False, server_default=text("'{}'"))
+    # Ordered hierarchy this prompt belongs to, e.g. ["Graders", "Conciseness"].
+    # Empty = ungrouped. Suggested by the clustering pass, editable by the user.
+    cluster_path = Column(JSONB, nullable=False, server_default=text("'[]'"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
@@ -94,6 +97,8 @@ class PromptExtraction(Base):
     num_turns = Column(Integer, nullable=True)
     progress_message = Column(String(512), nullable=True)
     progress_log = Column(JSONB, nullable=False, server_default=text("'[]'"))
+    # Locations found during discovery, awaiting user selection before extraction.
+    planned_locations = Column(JSONB, nullable=False, server_default=text("'[]'"))
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
