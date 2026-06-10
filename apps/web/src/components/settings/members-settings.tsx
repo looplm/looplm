@@ -14,8 +14,8 @@ const ALL_SECTIONS = ["observe", "evaluate", "improve"] as const;
 
 const SECTION_PAGES: Record<string, string[]> = {
   observe: ["dashboard", "traces", "analytics", "feedback", "costs", "data-sources"],
-  evaluate: ["evaluations", "evaluators", "datasets"],
-  improve: ["advisor", "routes", "prompts"],
+  evaluate: ["evaluations", "evaluators", "datasets", "coverage"],
+  improve: ["issues", "advisor", "routes", "prompts"],
 };
 
 const ALL_PAGES = Object.values(SECTION_PAGES).flat();
