@@ -37,8 +37,8 @@ export default function IntegrationsPanel() {
       }
       prev[integration.id] = integration.sync_status;
     }
-    // Filter out json_file integrations
-    setIntegrations(r.data.filter((i) => i.type !== "json_file"));
+    // Filter out integrations managed elsewhere (JSON import, GitHub via OAuth)
+    setIntegrations(r.data.filter((i) => i.type !== "json_file" && i.type !== "github"));
   }).catch((e) => setError(e.message));
 
   const loadImports = () => {

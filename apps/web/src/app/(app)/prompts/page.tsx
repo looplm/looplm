@@ -9,9 +9,14 @@ import {
   reviewPrompt,
   getPromptReviews,
   getPromptVersions,
+  getProjectGithubInstallation,
+  extractGithubPrompts,
+  getGithubExtractionStatus,
+  cancelGithubExtraction,
   type Integration,
   type PromptItem,
   type PromptReviewResult,
+  type PromptExtractionStatus,
 } from "@/lib/api";
 import { PromptReviewTab, sortBySeverity } from "./prompt-review-tab";
 import { usePermissions } from "@/components/permissions-context";
@@ -22,6 +27,7 @@ const SOURCE_BADGES: Record<string, string> = {
   langfuse: "bg-purple-500/20 text-purple-300 border-purple-500/30",
   langsmith: "bg-blue-500/20 text-blue-300 border-blue-500/30",
   json_import: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+  github: "bg-slate-500/20 text-slate-300 border-slate-500/30",
 };
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -54,7 +60,12 @@ export default function PromptsPage() {
   const [compareB, setCompareB] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [githubRepo, setGithubRepo] = useState<string | null>(null);
+  const [extraction, setExtraction] = useState<PromptExtractionStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const extracting = extraction?.status === "pending" || extraction?.status === "running";
 
   const loadPrompts = () => {
     setLoading(true);
@@ -64,10 +75,81 @@ export default function PromptsPage() {
       .finally(() => setLoading(false));
   };
 
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const startPolling = () => {
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await getGithubExtractionStatus();
+        setExtraction(status);
+        if (["completed", "failed", "cancelled"].includes(status.status)) {
+          stopPolling();
+          if (status.status === "completed") loadPrompts();
+          if (status.status === "failed" && status.error) setError(status.error);
+        }
+      } catch {
+        stopPolling();
+      }
+    }, 2000);
+  };
+
   useEffect(() => {
     getIntegrations().then((r) => setIntegrations(r.data)).catch((e) => setError(e.message));
     loadPrompts();
+    getProjectGithubInstallation()
+      .then((inst) => setGithubRepo(inst?.repo_full_name ?? null))
+      .catch(() => setGithubRepo(null));
+    // Resume polling if an extraction is already in flight (e.g. after a reload).
+    getGithubExtractionStatus()
+      .then((status) => {
+        setExtraction(status);
+        if (status.status === "pending" || status.status === "running") startPolling();
+      })
+      .catch(() => {});
+    return stopPolling;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleExtractGithub = async () => {
+    setError(null);
+    try {
+      await extractGithubPrompts();
+      setExtraction({
+        id: "",
+        status: "pending",
+        error: null,
+        summary: null,
+        files_analyzed: [],
+        extracted_count: 0,
+        total_cost_usd: null,
+        num_turns: null,
+        progress_message: "Starting…",
+        progress_log: [],
+        started_at: null,
+        completed_at: null,
+      });
+      startPolling();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const handleCancelExtraction = async () => {
+    try {
+      await cancelGithubExtraction();
+    } catch {
+      /* ignore */
+    } finally {
+      stopPolling();
+      setExtraction((prev) => (prev ? { ...prev, status: "cancelled", progress_message: null } : prev));
+    }
+  };
 
   const selectPrompt = async (p: PromptItem) => {
     setSelectedPrompt(p);
@@ -158,7 +240,7 @@ export default function PromptsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Prompts</h1>
         <div className="flex gap-2">
-          {integrations.filter((i) => i.type !== "json_file").map((i) => (
+          {integrations.filter((i) => i.type !== "json_file" && i.type !== "github").map((i) => (
             <button
               key={i.id}
               onClick={() => handleSync(i.id)}
@@ -169,6 +251,25 @@ export default function PromptsPage() {
               {syncing ? "Syncing..." : `Sync ${i.name}`}
             </button>
           ))}
+          {githubRepo && (
+            extracting ? (
+              <button
+                onClick={handleCancelExtraction}
+                className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-sm rounded-lg"
+              >
+                Cancel extraction
+              </button>
+            ) : (
+              <button
+                onClick={handleExtractGithub}
+                disabled={!canEdit}
+                title={!canEdit ? PROMPTS_READ_ONLY_TITLE : `Extract prompts from ${githubRepo}`}
+                className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Extract from GitHub
+              </button>
+            )
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -189,6 +290,21 @@ export default function PromptsPage() {
 
       {error && (
         <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">{error}</div>
+      )}
+
+      {extracting && (
+        <div className="mb-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-indigo-600 dark:text-indigo-300 text-sm flex items-center gap-2">
+          <span className="inline-block w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+          <span>
+            Extracting prompts from {githubRepo}
+            {extraction?.progress_message ? ` — ${extraction.progress_message}` : "…"}
+          </span>
+        </div>
+      )}
+      {extraction?.status === "completed" && (
+        <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-600 dark:text-emerald-300 text-sm">
+          Extracted {extraction.extracted_count} prompt{extraction.extracted_count !== 1 ? "s" : ""} from {githubRepo}.
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

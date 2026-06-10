@@ -16,6 +16,7 @@ class IntegrationType(str, enum.Enum):
     langsmith = "langsmith"
     json_file = "json_file"
     looplm = "looplm"  # first-party push-based tracing (SDK → ingest endpoint)
+    github = "github"  # prompts extracted from a connected GitHub codebase
 
 
 class IndexProviderType(str, enum.Enum):

@@ -1,16 +1,22 @@
 """Prompt import & analysis endpoints."""
 
+import asyncio
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
-from app.db import get_db
+from app.db import async_session, get_db
+from app.models.github import GithubInstallation
 from app.models.models import JsonImport
 from app.models.project import Project
+from app.models.prompts import PromptExtraction
 from app.models.user import User
 from app.schemas.prompts import (
+    PromptExtractionResponse,
     PromptImportRequest,
     PromptListResponse,
     PromptOut,
@@ -18,6 +24,7 @@ from app.schemas.prompts import (
     PromptReviewResult,
     PromptSyncResponse,
 )
+from app.services import github_app
 from app.services.prompt_analysis import (
     get_prompt,
     import_prompts_from_json,
@@ -27,8 +34,32 @@ from app.services.prompt_analysis import (
     review_prompt,
     sync_prompts,
 )
+from app.services.prompt_extraction_service import extract_prompts_from_repo
+from app.services.repo_resolver import RepoPathError, resolve_project_repo
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/prompts", tags=["prompts"], dependencies=[require_section("improve", "prompts")])
+
+_SUPPORTED_PROVIDERS = {"openai", "anthropic", "azure_openai"}
+_extraction_tasks: dict[UUID, asyncio.Task] = {}
+
+
+def _extraction_to_out(e: PromptExtraction) -> PromptExtractionResponse:
+    return PromptExtractionResponse(
+        id=str(e.id),
+        status=e.status,
+        error=e.error,
+        summary=e.summary,
+        files_analyzed=e.files_analyzed or [],
+        extracted_count=e.extracted_count or 0,
+        total_cost_usd=e.total_cost_usd,
+        num_turns=e.num_turns,
+        progress_message=e.progress_message,
+        progress_log=e.progress_log or [],
+        started_at=e.started_at,
+        completed_at=e.completed_at,
+    )
 
 
 def _prompt_to_out(p) -> PromptOut:
@@ -176,3 +207,137 @@ async def trigger_review(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Review failed: {e}")
+
+
+# ── Extract prompts from a connected GitHub codebase ──────────────
+
+@router.post(
+    "/extract/github",
+    status_code=202,
+    dependencies=[require_write("improve", "prompts")],
+)
+async def trigger_github_extraction(
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Kick off a background agent that extracts prompts from the connected repo."""
+    # Don't start a second run while one is in flight.
+    existing = await db.execute(
+        select(PromptExtraction)
+        .where(
+            PromptExtraction.project_id == project.id,
+            PromptExtraction.status.in_(["pending", "running"]),
+        )
+        .limit(1)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="An extraction is already running for this project.",
+        )
+
+    try:
+        repo_path = await resolve_project_repo(project, db)
+    except RepoPathError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (github_app.GithubAppDisabledError, github_app.GithubAppError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if not repo_path:
+        raise HTTPException(
+            status_code=400,
+            detail="No code repository is connected for this project. Connect one in Settings → GitHub.",
+        )
+
+    installation = (
+        await db.execute(
+            select(GithubInstallation).where(GithubInstallation.project_id == project.id)
+        )
+    ).scalar_one_or_none()
+    repo_full_name = installation.repo_full_name if installation else None
+
+    ps = dict(project.settings or {})
+    stored_provider = ps.get("code_agent_provider", "anthropic")
+    provider = stored_provider if stored_provider in _SUPPORTED_PROVIDERS else "anthropic"
+    if provider != stored_provider:
+        logger.warning(
+            "Project %s has unsupported code_agent_provider %r; falling back to 'anthropic'",
+            project.id, stored_provider,
+        )
+
+    extraction = PromptExtraction(project_id=project.id, status="pending")
+    db.add(extraction)
+    await db.commit()
+    await db.refresh(extraction)
+
+    task = asyncio.create_task(
+        extract_prompts_from_repo(
+            project_id=project.id,
+            extraction_id=extraction.id,
+            db_factory=async_session,
+            repo_path=repo_path,
+            repo_full_name=repo_full_name,
+            provider=provider,
+            model=ps.get("code_agent_model"),
+            api_key=ps.get("code_agent_api_key"),
+            azure_endpoint=ps.get("code_agent_azure_endpoint"),
+            azure_api_version=ps.get("code_agent_azure_api_version"),
+        )
+    )
+    _extraction_tasks[extraction.id] = task
+
+    return {"extraction_id": str(extraction.id), "status": "pending"}
+
+
+@router.get("/extract/github/latest", response_model=PromptExtractionResponse)
+async def get_latest_github_extraction(
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Return the most recent extraction run for the project (for polling)."""
+    result = await db.execute(
+        select(PromptExtraction)
+        .where(PromptExtraction.project_id == project.id)
+        .order_by(PromptExtraction.created_at.desc())
+        .limit(1)
+    )
+    extraction = result.scalar_one_or_none()
+    if not extraction:
+        raise HTTPException(status_code=404, detail="No extraction has been run yet.")
+    return _extraction_to_out(extraction)
+
+
+@router.post(
+    "/extract/github/cancel",
+    dependencies=[require_write("improve", "prompts")],
+)
+async def cancel_github_extraction(
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Cancel the running extraction for this project."""
+    result = await db.execute(
+        select(PromptExtraction)
+        .where(
+            PromptExtraction.project_id == project.id,
+            PromptExtraction.status.in_(["pending", "running"]),
+        )
+        .order_by(PromptExtraction.created_at.desc())
+        .limit(1)
+    )
+    extraction = result.scalar_one_or_none()
+    if not extraction:
+        raise HTTPException(status_code=404, detail="No running extraction to cancel.")
+
+    task = _extraction_tasks.pop(extraction.id, None)
+    if task and not task.done():
+        task.cancel()
+
+    from datetime import datetime, timezone
+
+    extraction.status = "cancelled"
+    extraction.completed_at = datetime.now(timezone.utc)
+    extraction.progress_message = None
+    await db.commit()
+
+    return {"status": "cancelled", "extraction_id": str(extraction.id)}

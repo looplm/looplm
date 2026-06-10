@@ -13,6 +13,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy import Float
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -61,3 +62,40 @@ class PromptReview(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     prompt = relationship("Prompt", back_populates="reviews")
+
+
+class PromptExtraction(Base):
+    """Background run that extracts prompts from a connected GitHub codebase.
+
+    Mirrors OpenCodeAnalysis: an agentic, long-running task whose live progress
+    is polled by the frontend. The extracted prompts themselves land in the
+    `prompts` table under the project's `github` integration; this row only
+    tracks the run.
+    """
+
+    __tablename__ = "prompt_extractions"
+    __table_args__ = (
+        Index("idx_prompt_extractions_project_id", "project_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    integration_id = Column(
+        UUID(as_uuid=True), ForeignKey("integrations.id", ondelete="SET NULL"), nullable=True
+    )
+    status = Column(String(32), nullable=False, server_default=text("'pending'"))
+    error = Column(Text, nullable=True)
+    files_analyzed = Column(JSONB, nullable=False, server_default=text("'[]'"))
+    summary = Column(Text, nullable=True)
+    extracted_count = Column(Integer, nullable=False, server_default=text("0"))
+    total_cost_usd = Column(Float, nullable=True)
+    num_turns = Column(Integer, nullable=True)
+    progress_message = Column(String(512), nullable=True)
+    progress_log = Column(JSONB, nullable=False, server_default=text("'[]'"))
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    project = relationship("Project")
