@@ -160,18 +160,21 @@ export default function DashboardPage() {
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6">
           <h2 className="text-lg font-semibold mb-4">
             Latency
-            <Tooltip content="Trace duration percentiles. Tail latency (p95/p99) reveals problems the average hides.">
+            <Tooltip content="How long traces take, shown as percentiles. Sort every trace from fastest to slowest: a percentile is the speed you're at or below for that share of traces. P50 is the typical case. P95 and P99 are the slow tail, the problems an average would hide.">
               <InfoIcon />
             </Tooltip>
           </h2>
           <div className="grid grid-cols-3 gap-4">
             {[
-              { label: "p50", value: fmtMs(latency.p50_ms) },
-              { label: "p95", value: fmtMs(latency.p95_ms) },
-              { label: "p99", value: fmtMs(latency.p99_ms) },
+              { label: "p50", value: fmtMs(latency.p50_ms), tooltip: "Median: half of traces are faster than this, half slower. The typical experience." },
+              { label: "p95", value: fmtMs(latency.p95_ms), tooltip: "95% of traces are faster than this; only the slowest 5% are worse." },
+              { label: "p99", value: fmtMs(latency.p99_ms), tooltip: "99% of traces are faster than this; only the worst 1% are slower. The tail, your unluckiest users." },
             ].map((s) => (
               <div key={s.label}>
-                <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide">{s.label}</p>
+                <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide">
+                  {s.label}
+                  <Tooltip content={s.tooltip}><InfoIcon /></Tooltip>
+                </p>
                 <p className="text-2xl font-bold">{s.value}</p>
               </div>
             ))}
@@ -192,7 +195,7 @@ export default function DashboardPage() {
             {[
               { label: "Multi-turn", value: `${(threads.multi_turn_rate * 100).toFixed(0)}%`, tooltip: "Share of threads with more than one trace" },
               { label: "Avg length", value: threads.avg_thread_length.toFixed(1), tooltip: "Average traces per thread" },
-              { label: "p95 length", value: String(threads.p95_thread_length), tooltip: "95th-percentile thread length" },
+              { label: "p95 length", value: String(threads.p95_thread_length), tooltip: "95% of threads are this many traces long or shorter; only the longest 5% have more." },
               { label: "Retry rate", value: `${(threads.retry_rate * 100).toFixed(0)}%`, color: "text-amber-500", tooltip: "Of threads that hit a failure, the share where the user continued (a retry)" },
             ].map((s) => (
               <div key={s.label}>
