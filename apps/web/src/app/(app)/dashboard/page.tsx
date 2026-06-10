@@ -219,7 +219,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {[
             { label: "Traces with feedback", value: feedback.traces_with_feedback, tooltip: "Distinct traces that received at least one feedback submission." },
-            { label: "No feedback", value: feedback.no_feedback_traces, color: "text-gray-400 dark:text-slate-500", tooltip: "Traces that received no feedback. Traces with feedback + No feedback = Total Traces." },
+            { label: "No feedback", value: feedback.no_feedback_traces, tooltip: "Traces that received no feedback. Traces with feedback + No feedback = Total Traces." },
             { label: "Total Feedback", value: feedback.total, tooltip: "Total feedback submissions in this period. A single trace can receive several, so this is usually higher than the number of traces with feedback." },
             { label: "Positive", value: feedback.positive, color: "text-green-500", tooltip: "Feedback submissions marked positive." },
             { label: "Negative", value: feedback.negative, color: "text-red-400", tooltip: "Feedback submissions marked negative. Positive + Negative = Total Feedback." },
