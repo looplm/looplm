@@ -1517,6 +1517,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/feedback/themes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Analyze Feedback Themes
+         * @description Start background analysis to cluster qualitative feedback comments into themes.
+         */
+        post: operations["analyze_feedback_themes_api_feedback_themes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/themes/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latest Feedback Themes
+         * @description Get the most recent feedback theme analysis for the project.
+         */
+        get: operations["get_latest_feedback_themes_api_feedback_themes_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/themes/{analysis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Feedback Themes Analysis
+         * @description Get feedback theme analysis status and results.
+         */
+        get: operations["get_feedback_themes_analysis_api_feedback_themes__analysis_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/themes/{analysis_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Feedback Themes Analysis
+         * @description Cancel an in-progress feedback theme analysis.
+         */
+        post: operations["stop_feedback_themes_analysis_api_feedback_themes__analysis_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/feedback/top-questions": {
         parameters: {
             query?: never;
@@ -1828,6 +1908,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/index-explorer/grouping-suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Grouping Suggestion
+         * @description The cached LLM-suggested grouping for this provider (no LLM call).
+         *
+         *     Returns ``suggestion: null`` when none has been computed yet — the frontend
+         *     then triggers ``POST`` to compute one.
+         */
+        get: operations["get_grouping_suggestion_api_index_explorer_grouping_suggestion_get"];
+        put?: never;
+        /**
+         * Compute Grouping Suggestion
+         * @description Profile the index with an LLM, persist the suggestion, and return it.
+         */
+        post: operations["compute_grouping_suggestion_api_index_explorer_grouping_suggestion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/index-explorer/providers": {
         parameters: {
             query?: never;
@@ -1879,9 +1986,11 @@ export interface paths {
          * Tree
          * @description One lazily-expanded level of the index tree.
          *
-         *     ``path`` holds the already-selected values for ``group_by[:len(path)]``. When
-         *     grouping keys remain, return the next field's distribution (filtered by the
-         *     path); once the path is complete, return sampled documents for the leaf.
+         *     Each ``level`` is a comma-separated set of field keys; a level with more
+         *     than one field is rendered as parallel side-by-side sections. ``path_key`` /
+         *     ``path_value`` are the index-aligned (field, value) pairs already drilled
+         *     into (one per level descended). While levels remain, return the next level's
+         *     distribution(s) filtered by the path; once complete, sample the leaf's docs.
          */
         get: operations["tree_api_index_explorer_tree_get"];
         put?: never;
@@ -4604,6 +4713,88 @@ export interface components {
             /** Traces With Feedback */
             traces_with_feedback: number;
         };
+        /** FeedbackTheme */
+        FeedbackTheme: {
+            /**
+             * All Comments
+             * @default []
+             */
+            all_comments: components["schemas"]["FeedbackThemeItem"][];
+            /** Count */
+            count: number;
+            /**
+             * Feedback Sentiment
+             * @default {}
+             */
+            feedback_sentiment: {
+                [key: string]: number;
+            };
+            /** Rank */
+            rank: number;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Theme */
+            theme: string;
+        };
+        /** FeedbackThemeItem */
+        FeedbackThemeItem: {
+            /** Comment */
+            comment: string;
+            /** Feedback Value */
+            feedback_value?: number | null;
+            /** Question */
+            question?: string | null;
+            /** Trace Id */
+            trace_id?: string | null;
+        };
+        /** FeedbackThemeRequest */
+        FeedbackThemeRequest: {
+            /** Environment */
+            environment?: string | null;
+            /** From Date */
+            from_date?: string | null;
+            /**
+             * Limit
+             * @default 200
+             */
+            limit: number;
+            /** To Date */
+            to_date?: string | null;
+        };
+        /** FeedbackThemesResponse */
+        FeedbackThemesResponse: {
+            /** Completed At */
+            completed_at?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Processed Comments
+             * @default 0
+             */
+            processed_comments: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Themes
+             * @default []
+             */
+            themes: components["schemas"]["FeedbackTheme"][];
+            /**
+             * Total Comments
+             * @default 0
+             */
+            total_comments: number;
+        };
         /** FeedbackTrend */
         FeedbackTrend: {
             /** Date */
@@ -4722,6 +4913,20 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * GroupingLevel
+         * @description One level of the suggested hierarchy. ``keys`` holds the field(s) at this
+         *     level; more than one means they are shown in parallel (side by side).
+         */
+        GroupingLevel: {
+            /** Keys */
+            keys?: string[];
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -4747,6 +4952,45 @@ export interface components {
             testCases: {
                 [key: string]: unknown;
             }[];
+        };
+        /**
+         * IndexGroupingSuggestion
+         * @description The advisor's recommended grouping for an index.
+         *
+         *     ``suggested_levels`` is ordered top to bottom; each inner list is the
+         *     field(s) at that level (more than one = parallel facets shown side by side).
+         */
+        IndexGroupingSuggestion: {
+            /** Hints */
+            hints?: components["schemas"]["MetadataHint"][];
+            /** Levels */
+            levels?: components["schemas"]["GroupingLevel"][];
+            /** Suggested Levels */
+            suggested_levels?: string[][];
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+        };
+        /** IndexGroupingSuggestionRequest */
+        IndexGroupingSuggestionRequest: {
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+        };
+        /**
+         * IndexGroupingSuggestionResponse
+         * @description Cached or freshly-computed grouping suggestion for a provider.
+         */
+        IndexGroupingSuggestionResponse: {
+            /** Model */
+            model?: string | null;
+            /** Suggested At */
+            suggested_at?: string | null;
+            suggestion?: components["schemas"]["IndexGroupingSuggestion"] | null;
         };
         /** IndexPartitionKey */
         IndexPartitionKey: {
@@ -4885,24 +5129,36 @@ export interface components {
          * IndexTreeResponse
          * @description One lazily-expanded level of the tree.
          *
-         *     ``level == "group"`` → ``groups`` holds the next grouping field's values.
-         *     ``level == "documents"`` → ``documents`` holds sampled docs for the leaf
-         *     (``parent_doc_count`` is the value's total, so the UI can show "N of M").
+         *     ``level == "group"`` → ``sections`` holds the next level's field
+         *     distribution(s). ``level == "documents"`` → ``documents`` holds sampled
+         *     docs for the leaf.
          */
         IndexTreeResponse: {
             /** Documents */
             documents?: components["schemas"]["IndexTreeDocument"][];
-            /** Groups */
-            groups?: components["schemas"]["IndexTreeGroupNode"][];
-            /** Key */
-            key?: string | null;
             /**
              * Level
              * @enum {string}
              */
             level: "group" | "documents";
-            /** Parent Doc Count */
-            parent_doc_count?: number | null;
+            /** Sections */
+            sections?: components["schemas"]["IndexTreeSection"][];
+        };
+        /**
+         * IndexTreeSection
+         * @description One field's value distribution at the current level.
+         *
+         *     A level normally has a single section. When the level groups several
+         *     *parallel* fields (e.g. ``tags`` and ``team``), each is its own section so
+         *     the UI can render them side by side instead of nested.
+         */
+        IndexTreeSection: {
+            /** Groups */
+            groups?: components["schemas"]["IndexTreeGroupNode"][];
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
         };
         /** IngestKeyCreate */
         IngestKeyCreate: {
@@ -5368,6 +5624,29 @@ export interface components {
             role?: string | null;
             /** Write Pages */
             write_pages?: string[] | null;
+        };
+        /**
+         * MetadataHint
+         * @description A metadata-quality observation surfaced to the user.
+         *
+         *     ``field`` points at an existing partition key the hint is about;
+         *     ``suggested_field`` names a *new* field the user should add to the index
+         *     to enable better grouping (e.g. splitting a path-encoded field).
+         */
+        MetadataHint: {
+            /** Field */
+            field?: string | null;
+            /** Message */
+            message: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning";
+            /** Suggested Field */
+            suggested_field?: string | null;
+            /** Title */
+            title: string;
         };
         /** ModelCostBreakdown */
         ModelCostBreakdown: {
@@ -10144,6 +10423,138 @@ export interface operations {
             };
         };
     };
+    analyze_feedback_themes_api_feedback_themes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackThemeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latest_feedback_themes_api_feedback_themes_latest_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackThemesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_feedback_themes_analysis_api_feedback_themes__analysis_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                analysis_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackThemesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_feedback_themes_analysis_api_feedback_themes__analysis_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                analysis_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     analyze_top_questions_api_feedback_top_questions_post: {
         parameters: {
             query?: never;
@@ -10791,6 +11202,74 @@ export interface operations {
             };
         };
     };
+    get_grouping_suggestion_api_index_explorer_grouping_suggestion_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexGroupingSuggestionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compute_grouping_suggestion_api_index_explorer_grouping_suggestion_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IndexGroupingSuggestionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexGroupingSuggestionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_providers_api_index_explorer_providers_get: {
         parameters: {
             query?: never;
@@ -10859,8 +11338,9 @@ export interface operations {
         parameters: {
             query: {
                 provider_id: string;
-                group_by: string[];
-                path?: string[];
+                level: string[];
+                path_key?: string[];
+                path_value?: string[];
                 limit?: number;
             };
             header?: {

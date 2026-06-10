@@ -38,6 +38,11 @@ export type TopQuestionTheme = S["TopQuestionTheme"];
 export type TopQuestionsResponse = S["TopQuestionsResponse"];
 export type SuggestionRunResponse = S["SuggestionRunResponse"];
 
+// --- Feedback Theme Clustering ---
+export type FeedbackThemeItem = S["FeedbackThemeItem"];
+export type FeedbackTheme = S["FeedbackTheme"];
+export type FeedbackThemesResponse = S["FeedbackThemesResponse"];
+
 // --- Test Datasets ---
 export type TestDatasetItem = S["TestDatasetItem"];
 export type TestDatasetListResponse = S["TestDatasetListResponse"];

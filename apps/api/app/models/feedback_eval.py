@@ -123,6 +123,33 @@ class TopQuestionsAnalysis(Base):
     project = relationship("Project")
 
 
+class FeedbackThemeAnalysis(Base):
+    """Stores results of LLM-based clustering of qualitative feedback comments."""
+
+    __tablename__ = "feedback_theme_analyses"
+    __table_args__ = (
+        Index("idx_feedback_theme_analyses_project_id", "project_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    status = Column(String(32), nullable=False, server_default=text("'pending'"))
+    error = Column(Text, nullable=True)
+    total_comments = Column(Integer, nullable=False, server_default=text("0"))
+    processed_comments = Column(Integer, nullable=False, server_default=text("0"))
+    results = Column(JSONB, nullable=True)
+    filter_from_date = Column(DateTime(timezone=True), nullable=True)
+    filter_to_date = Column(DateTime(timezone=True), nullable=True)
+    filter_environment = Column(String(255), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    project = relationship("Project")
+
+
 class FeedbackSuggestionRun(Base):
     """Stores generated test case suggestions from feedback so they survive page reloads."""
 

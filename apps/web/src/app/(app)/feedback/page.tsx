@@ -7,6 +7,7 @@ import { StatCard } from "@/components/eval-shared";
 import { TrendBarChart } from "./feedback-chart";
 import { SuggestionsTab } from "./suggestions-tab";
 import { TopQuestionsTab } from "./top-questions-tab";
+import { FeedbackThemesTab } from "./feedback-themes-tab";
 import { useFeedbackPage } from "./use-feedback-page";
 import { downloadTopQuestionsPdf } from "./top-questions-pdf";
 import { toast } from "sonner";
@@ -46,6 +47,10 @@ export default function FeedbackPage() {
     topQuestionsLoading,
     topQuestionsTriggering,
     topQuestionsRunning,
+    feedbackThemesResult,
+    feedbackThemesLoading,
+    feedbackThemesTriggering,
+    feedbackThemesRunning,
     evalRunning,
     configuredVerdicts,
     tabClass,
@@ -56,6 +61,8 @@ export default function FeedbackPage() {
     handleAcceptSuggestion,
     handleAnalyzeTopQuestions,
     handleStopTopQuestions,
+    handleAnalyzeFeedbackThemes,
+    handleStopFeedbackThemes,
     handleGenerateSuggestions,
     handleStopSuggestionRun,
   } = useFeedbackPage();
@@ -115,6 +122,26 @@ export default function FeedbackPage() {
               )}
             </>
           )}
+          {tab === "themes" && feedbackThemesRunning && (
+            <button
+              onClick={handleStopFeedbackThemes}
+              disabled={!canEdit}
+              title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
+              className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Stop ({feedbackThemesResult?.processed_comments ?? 0}/{feedbackThemesResult?.total_comments ?? 0})
+            </button>
+          )}
+          {tab === "themes" && !feedbackThemesRunning && (
+            <button
+              onClick={handleAnalyzeFeedbackThemes}
+              disabled={feedbackThemesTriggering || !canEdit}
+              title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {feedbackThemesTriggering ? "Starting..." : "Analyze Themes"}
+            </button>
+          )}
           {tab === "feedback" && (
             <>
               <button
@@ -171,6 +198,9 @@ export default function FeedbackPage() {
         <button onClick={() => setTab("top-questions")} className={tabClass("top-questions")}>
           Top Questions
         </button>
+        <button onClick={() => setTab("themes")} className={tabClass("themes")}>
+          Themes
+        </button>
       </div>
 
       {/* === Top Questions Tab === */}
@@ -181,6 +211,14 @@ export default function FeedbackPage() {
           running={topQuestionsRunning}
           triggering={topQuestionsTriggering}
           onAnalyze={handleAnalyzeTopQuestions}
+        />
+      ) : tab === "themes" ? (
+        <FeedbackThemesTab
+          result={feedbackThemesResult}
+          loading={feedbackThemesLoading}
+          running={feedbackThemesRunning}
+          triggering={feedbackThemesTriggering}
+          onAnalyze={handleAnalyzeFeedbackThemes}
         />
       ) : tab === "suggestions" ? (
         <SuggestionsTab
