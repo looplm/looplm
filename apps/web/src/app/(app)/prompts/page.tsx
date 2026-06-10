@@ -73,6 +73,7 @@ export default function PromptsPage() {
   const [now, setNow] = useState(() => Date.now());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastCountRef = useRef(0);
 
   const extracting = extraction?.status === "pending" || extraction?.status === "running";
 
@@ -92,6 +93,12 @@ export default function PromptsPage() {
       .finally(() => setLoading(false));
   };
 
+  // Reload the list without flipping the loading state — used to surface
+  // prompts as they're extracted one by one.
+  const refreshPromptsQuietly = () => {
+    getPrompts().then((r) => setPrompts(r.data ?? [])).catch(() => {});
+  };
+
   const stopPolling = () => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -105,8 +112,14 @@ export default function PromptsPage() {
       try {
         const status = await getGithubExtractionStatus();
         setExtraction(status);
+        // Surface prompts as they land, one by one.
+        if (status.extracted_count > lastCountRef.current) {
+          lastCountRef.current = status.extracted_count;
+          refreshPromptsQuietly();
+        }
         if (["completed", "failed", "cancelled"].includes(status.status)) {
           stopPolling();
+          lastCountRef.current = 0;
           if (status.status === "completed") loadPrompts();
           if (status.status === "failed" && status.error) setError(status.error);
         }
@@ -135,6 +148,7 @@ export default function PromptsPage() {
 
   const handleExtractGithub = async () => {
     setError(null);
+    lastCountRef.current = 0;
     try {
       await extractGithubPrompts();
       setExtraction({

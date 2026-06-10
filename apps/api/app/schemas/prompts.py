@@ -99,12 +99,27 @@ class ExtractedPrompt(BaseModel):
     )
 
 
-class PromptExtractionOutput(BaseModel):
-    """Structured output the extraction agent must return."""
+class PromptLocation(BaseModel):
+    """A pointer to a prompt found during the discovery pass (no template text)."""
 
-    summary: str = Field(description="One-paragraph summary of what was found")
-    files_analyzed: list[str] = Field(default_factory=list)
-    prompts: list[ExtractedPrompt] = Field(default_factory=list)
+    name: str = Field(description="Short, human-readable name for the prompt")
+    file_path: str = Field(description="Repo-relative path the prompt lives in")
+    line_start: int | None = Field(
+        default=None, description="1-based line where the prompt begins, if known"
+    )
+    role: str | None = Field(
+        default=None, description="system | user | assistant | tool, if discernible"
+    )
+    note: str | None = Field(
+        default=None, description="One short phrase on what this prompt is for"
+    )
+
+
+class PromptLocationList(BaseModel):
+    """Output of the discovery pass: where prompts live, not their contents."""
+
+    summary: str = Field(default="", description="One-paragraph summary of what was found")
+    locations: list[PromptLocation] = Field(default_factory=list)
 
 
 class PromptExtractionResponse(BaseModel):

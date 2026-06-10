@@ -1,9 +1,16 @@
 """Prompt extraction service — pull prompts out of a connected GitHub codebase.
 
-Reuses the Code Agent's repo-reading agent (Pydantic AI + sandboxed glob/grep/read
-tools) to locate prompt definitions, then upserts them into the prompts table under
-the project's auto-created `github` integration. Runs as a background task with
-live progress, mirroring `code_agent_service.analyze_eval_run`.
+Two-phase pipeline, both phases reusing the Code Agent's sandboxed repo tools
+(Pydantic AI + glob/grep/read):
+
+1. Discover — one agent run returns a lightweight *list of prompt locations*
+   (name + file + line), not the template text. Small output → fast.
+2. Extract — for each location, a focused agent run reads just that spot and
+   returns the single prompt verbatim. Each prompt is persisted as it is found,
+   so they appear in the UI one by one and a slow prompt can't stall the rest.
+
+Runs as a background task with live progress, mirroring
+`code_agent_service.analyze_eval_run`.
 """
 
 from __future__ import annotations
@@ -18,10 +25,14 @@ from pydantic_ai import Agent
 from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
 from pydantic_ai.messages import TextPart, ToolCallPart
 from pydantic_ai.usage import UsageLimits
+from sqlalchemy import select
 
-from app.schemas.prompts import PromptExtractionOutput
+from app.schemas.prompts import ExtractedPrompt, PromptLocation, PromptLocationList
 from app.services.code_agent_helpers import _update_progress
-from app.services.code_agent_prompts import PROMPT_EXTRACTION_SYSTEM_PROMPT
+from app.services.code_agent_prompts import (
+    PROMPT_DISCOVERY_SYSTEM_PROMPT,
+    PROMPT_EXTRACT_ONE_SYSTEM_PROMPT,
+)
 from app.services.code_agent_service import _build_model
 from app.services.code_agent_tools import RepoContext, glob_files, grep_files, read_file
 from app.services.llm_pricing import calculate_cost
@@ -32,22 +43,32 @@ from app.services.prompt_analysis import (
 
 logger = logging.getLogger(__name__)
 
-_EXTRACTION_REQUEST_LIMIT = 25
-# Wall-clock safety net: the request_limit caps turns but not time. A slow or
-# hung model turn would otherwise leave the run "stuck" forever — fail cleanly.
+_DISCOVERY_REQUEST_LIMIT = 25
+_EXTRACT_ONE_REQUEST_LIMIT = 6
+_MAX_PROMPTS = 100  # safety cap on how many locations we extract in one run
+# Wall-clock safety net: request limits cap turns but not time. A slow or hung
+# model turn would otherwise leave the run "stuck" forever — fail cleanly.
 _EXTRACTION_TIMEOUT_SECONDS = 900
-_USER_PROMPT = (
-    "Find all LLM prompts defined in this repository and return them in the "
-    "structured format. Start by grepping for common prompt signals, then read "
-    "the most promising files to capture the full template text."
+
+_DISCOVERY_PROMPT = (
+    "Locate every LLM prompt defined in this repository and return the list of "
+    "locations (name, file, line) — do not include the template text yet."
 )
+
+
+def _tokens(usage) -> tuple[int, int]:
+    if not usage:
+        return 0, 0
+    return (
+        int(getattr(usage, "input_tokens", 0) or 0),
+        int(getattr(usage, "output_tokens", 0) or 0),
+    )
 
 
 def _describe_activity(node: CallToolsNode) -> tuple[str, str]:
     """Turn a model response into a friendly (progress_message, log_entry).
 
-    The extraction agent only returns the prompt list at the very end, so the
-    live signal users can see is *what it is currently doing* — which files it
+    The live signal users can see is *what the agent is doing* — which files it
     reads and searches. Phrase those as plain English.
     """
     for part in node.model_response.parts:
@@ -78,6 +99,51 @@ def _describe_activity(node: CallToolsNode) -> tuple[str, str]:
     return "Analyzing the codebase…", "Analyzing"
 
 
+async def _discover_locations(
+    agent: Agent,
+    deps: RepoContext,
+    usage_limits: UsageLimits,
+    *,
+    db,
+    extraction,
+) -> tuple[PromptLocationList | None, object]:
+    """Phase 1: locate prompts, streaming tool activity into the progress feed."""
+    turn = 0
+    async with agent.iter(_DISCOVERY_PROMPT, deps=deps, usage_limits=usage_limits) as ctx:
+        async for node in ctx:
+            if isinstance(node, ModelRequestNode):
+                turn += 1
+                await _update_progress(
+                    db, extraction,
+                    progress_message="Scanning the codebase…" if turn == 1
+                    else "Looking for prompts…",
+                )
+            elif isinstance(node, CallToolsNode):
+                progress_msg, log_msg = _describe_activity(node)
+                await _update_progress(
+                    db, extraction, progress_message=progress_msg, log_entry=log_msg
+                )
+        output = ctx.result.output if ctx.result else None
+        usage = ctx.result.usage if ctx.result else None
+    return output, usage
+
+
+async def _extract_one(
+    agent: Agent,
+    deps: RepoContext,
+    loc: PromptLocation,
+    usage_limits: UsageLimits,
+) -> tuple[ExtractedPrompt | None, object]:
+    """Phase 2: read one location and return the single prompt verbatim."""
+    user = (
+        f"Extract the prompt named {loc.name!r} defined in {loc.file_path}"
+        + (f" around line {loc.line_start}." if loc.line_start else ".")
+        + " Return its full template verbatim and its variables."
+    )
+    result = await agent.run(user, deps=deps, usage_limits=usage_limits)
+    return result.output, result.usage
+
+
 async def extract_prompts_from_repo(
     project_id: UUID,
     extraction_id: UUID,
@@ -90,7 +156,7 @@ async def extract_prompts_from_repo(
     azure_endpoint: str | None = None,
     azure_api_version: str | None = None,
 ) -> None:
-    """Run the extraction agent over a cloned repo. Designed as a background task."""
+    """Run the discover→extract pipeline over a cloned repo. A background task."""
     async with db_factory() as db:
         from app.models.prompts import PromptExtraction
 
@@ -101,8 +167,11 @@ async def extract_prompts_from_repo(
 
         extraction.status = "running"
         extraction.started_at = datetime.now(timezone.utc)
-        extraction.progress_message = "Preparing extraction..."
+        extraction.progress_message = "Preparing extraction…"
         await db.commit()
+
+        total_in = 0
+        total_out = 0
 
         try:
             llm_model = _build_model(
@@ -112,97 +181,148 @@ async def extract_prompts_from_repo(
                 azure_endpoint=azure_endpoint,
                 azure_api_version=azure_api_version,
             )
+            resolved_model_name = getattr(llm_model, "model_name", model or "")
+            deps = RepoContext(repo_root=Path(repo_path))
 
-            agent = Agent(
+            discover_agent = Agent(
                 llm_model,
-                output_type=PromptExtractionOutput,
-                system_prompt=PROMPT_EXTRACTION_SYSTEM_PROMPT,
+                output_type=PromptLocationList,
+                system_prompt=PROMPT_DISCOVERY_SYSTEM_PROMPT,
                 deps_type=RepoContext,
                 tools=(read_file, glob_files, grep_files),
             )
-            deps = RepoContext(repo_root=Path(repo_path))
-            usage_limits = UsageLimits(request_limit=_EXTRACTION_REQUEST_LIMIT)
-            resolved_model_name = getattr(llm_model, "model_name", model or "")
-
-            await _update_progress(
-                db, extraction,
-                progress_message="Scanning repository...",
-                log_entry=f"Scanning {repo_full_name or repo_path}",
+            extract_agent = Agent(
+                llm_model,
+                output_type=ExtractedPrompt,
+                system_prompt=PROMPT_EXTRACT_ONE_SYSTEM_PROMPT,
+                deps_type=RepoContext,
+                tools=(read_file, grep_files),
             )
+            discover_limits = UsageLimits(request_limit=_DISCOVERY_REQUEST_LIMIT)
+            extract_limits = UsageLimits(request_limit=_EXTRACT_ONE_REQUEST_LIMIT)
 
-            turn_count = 0
+            async def _drive() -> tuple[str, list[str], int]:
+                nonlocal total_in, total_out
 
-            async def _drive() -> tuple[PromptExtractionOutput | None, object]:
-                nonlocal turn_count
-                _output: PromptExtractionOutput | None = None
-                _usage = None
-                async with agent.iter(
-                    _USER_PROMPT, deps=deps, usage_limits=usage_limits
-                ) as run_ctx:
-                    async for node in run_ctx:
-                        if isinstance(node, ModelRequestNode):
-                            turn_count += 1
-                            await _update_progress(
-                                db, extraction,
-                                num_turns=turn_count,
-                                progress_message="Reading the codebase…" if turn_count == 1
-                                else "Analyzing the codebase…",
-                            )
-                        elif isinstance(node, CallToolsNode):
-                            progress_msg, log_msg = _describe_activity(node)
-                            await _update_progress(
-                                db, extraction,
-                                progress_message=progress_msg,
-                                log_entry=log_msg,
-                            )
-                    _output = run_ctx.result.output if run_ctx.result else None
-                    _usage = run_ctx.result.usage if run_ctx.result else None
-                return _output, _usage
+                # ── Phase 1: discover ──────────────────────────────
+                await _update_progress(
+                    db, extraction,
+                    progress_message="Scanning the repository…",
+                    log_entry=f"Scanning {repo_full_name or repo_path}",
+                )
+                loc_list, usage = await _discover_locations(
+                    discover_agent, deps, discover_limits, db=db, extraction=extraction
+                )
+                di, do = _tokens(usage)
+                total_in += di
+                total_out += do
+
+                locations = list(loc_list.locations) if loc_list else []
+                if len(locations) > _MAX_PROMPTS:
+                    await _update_progress(
+                        db, extraction,
+                        log_entry=f"Found {len(locations)}; capping at {_MAX_PROMPTS}",
+                    )
+                    locations = locations[:_MAX_PROMPTS]
+
+                total = len(locations)
+                await _update_progress(
+                    db, extraction,
+                    progress_message=f"Found {total} prompt{'s' if total != 1 else ''}"
+                    " — extracting one by one…",
+                    log_entry=f"Found {total} prompt location{'s' if total != 1 else ''}",
+                )
+
+                # ── Phase 2: extract one by one, persisting as we go ─
+                integration = await get_or_create_github_integration(
+                    project_id, db, repo_full_name
+                )
+                seen: set[str] = set()
+                for i, loc in enumerate(locations):
+                    await _update_progress(
+                        db, extraction,
+                        progress_message=f"Extracting {i + 1}/{total}: {loc.name}",
+                        log_entry=f"{loc.name} — {loc.file_path}",
+                    )
+                    ep, usage = await _extract_one(extract_agent, deps, loc, extract_limits)
+                    ei, eo = _tokens(usage)
+                    total_in += ei
+                    total_out += eo
+
+                    template = ((ep.template if ep else "") or "").strip()
+                    if not template:
+                        await _update_progress(
+                            db, extraction,
+                            log_entry=f"· no prompt text found in {loc.file_path}",
+                        )
+                        continue
+
+                    external_id = f"{loc.file_path}::{loc.name}"[:512]
+                    if external_id in seen:
+                        continue
+                    seen.add(external_id)
+                    await upsert_prompts_for_integration(
+                        integration.id,
+                        [{
+                            "external_id": external_id,
+                            "name": loc.name[:512],
+                            "template": ep.template,
+                            "version": 1,
+                            "variables": ep.variables,
+                            "metadata": {
+                                "source": "github",
+                                "file_path": loc.file_path,
+                                "line_start": ep.line_start or loc.line_start,
+                                "role": ep.role or loc.role,
+                                "note": loc.note,
+                                "repo": repo_full_name,
+                            },
+                        }],
+                        db,
+                        delete_stale=False,
+                    )
+                    extraction.extracted_count = len(seen)
+                    await db.commit()  # commit per prompt so it shows up live
+
+                removed = await _prune_prompts(integration.id, seen, db)
+                if removed:
+                    await _update_progress(
+                        db, extraction, log_entry=f"Removed {removed} stale prompt(s)"
+                    )
+
+                files = sorted({loc.file_path for loc in locations})
+                summary = loc_list.summary if loc_list else ""
+                return summary, files, len(seen)
 
             try:
-                output, usage = await asyncio.wait_for(
+                summary, files_analyzed, extracted = await asyncio.wait_for(
                     _drive(), timeout=_EXTRACTION_TIMEOUT_SECONDS
                 )
             except asyncio.TimeoutError as exc:
                 minutes = _EXTRACTION_TIMEOUT_SECONDS // 60
                 raise RuntimeError(
-                    f"Extraction timed out after {minutes} minutes. The codebase may "
-                    f"be very large — try again or point the Code Agent at a narrower repo."
+                    f"Extraction timed out after {minutes} minutes. Prompts found so "
+                    f"far were saved — re-run to continue, or narrow the repo."
                 ) from exc
-
-            if output is None:
-                raise RuntimeError("Extraction agent returned no output")
-
-            found = len(output.prompts)
-            await _update_progress(
-                db, extraction,
-                progress_message=f"Found {found} prompt{'s' if found != 1 else ''} — saving…",
-                log_entry=f"Found {found} prompt{'s' if found != 1 else ''}; saving",
-            )
-
-            count = await _persist_prompts(db, project_id, repo_full_name, output)
 
             await _record_usage(
                 db,
                 project_id=project_id,
                 provider=provider,
                 model_name=resolved_model_name,
-                usage=usage,
+                input_tokens=total_in,
+                output_tokens=total_out,
                 extraction_id=extraction_id,
-                num_turns=turn_count,
             )
 
             extraction.status = "completed"
             extraction.completed_at = datetime.now(timezone.utc)
             extraction.progress_message = None
-            extraction.summary = output.summary
-            extraction.files_analyzed = output.files_analyzed
-            extraction.extracted_count = count
-            extraction.num_turns = turn_count
-            input_tokens = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
-            output_tokens = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
+            extraction.summary = summary
+            extraction.files_analyzed = files_analyzed
+            extraction.extracted_count = extracted
             extraction.total_cost_usd = (
-                calculate_cost(resolved_model_name, input_tokens, output_tokens)
+                calculate_cost(resolved_model_name, total_in, total_out)
                 if resolved_model_name else None
             )
             await db.commit()
@@ -224,42 +344,19 @@ async def extract_prompts_from_repo(
             await db.commit()
 
 
-async def _persist_prompts(
-    db,
-    project_id: UUID,
-    repo_full_name: str | None,
-    output: PromptExtractionOutput,
-) -> int:
-    """Upsert the agent's extracted prompts under the github integration."""
-    integration = await get_or_create_github_integration(project_id, db, repo_full_name)
+async def _prune_prompts(integration_id: UUID, keep: set[str], db) -> int:
+    """Delete prompts under the integration whose external_id is not in `keep`."""
+    from app.models.models import Prompt
 
-    items: list[dict] = []
-    seen: set[str] = set()
-    for p in output.prompts:
-        if not p.template.strip():
-            continue
-        external_id = f"{p.file_path}::{p.name}"[:512]
-        if external_id in seen:
-            continue
-        seen.add(external_id)
-        items.append({
-            "external_id": external_id,
-            "name": p.name[:512],
-            "template": p.template,
-            "version": 1,
-            "variables": p.variables,
-            "metadata": {
-                "source": "github",
-                "file_path": p.file_path,
-                "line_start": p.line_start,
-                "role": p.role,
-                "repo": repo_full_name,
-            },
-        })
-
-    count = await upsert_prompts_for_integration(integration.id, items, db)
-    await db.commit()
-    return count
+    rows = await db.execute(select(Prompt).where(Prompt.integration_id == integration_id))
+    removed = 0
+    for p in rows.scalars().all():
+        if p.external_id not in keep:
+            await db.delete(p)
+            removed += 1
+    if removed:
+        await db.commit()
+    return removed
 
 
 async def _record_usage(
@@ -268,14 +365,12 @@ async def _record_usage(
     project_id: UUID,
     provider: str,
     model_name: str,
-    usage,
+    input_tokens: int,
+    output_tokens: int,
     extraction_id: UUID,
-    num_turns: int,
 ) -> None:
     from app.models.llm_usage import LlmUsageRecord
 
-    input_tokens = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
-    output_tokens = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
     db.add(LlmUsageRecord(
         project_id=project_id,
         service_name="prompt_extraction",
@@ -286,6 +381,6 @@ async def _record_usage(
         output_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
         cost_usd=calculate_cost(model_name, input_tokens, output_tokens) if model_name else None,
-        request_metadata={"extraction_id": str(extraction_id), "num_turns": num_turns},
+        request_metadata={"extraction_id": str(extraction_id)},
     ))
     await db.commit()

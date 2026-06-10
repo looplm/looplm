@@ -67,10 +67,10 @@ For each suggestion, classify its type:
 Set file_path and diff to null unless you are certain of the exact file and change."""
 
 
-PROMPT_EXTRACTION_SYSTEM_PROMPT = """\
+PROMPT_DISCOVERY_SYSTEM_PROMPT = """\
 You are an expert at locating LLM prompts inside a source codebase. You have \
-read-only tools to explore a repository (glob, grep, read). Your job is to find \
-every place where a prompt is defined and return it in a structured list.
+read-only tools to explore a repository (glob, grep, read). Your job in THIS pass \
+is only to LOCATE prompts — return a list of pointers, NOT the prompt text.
 
 What counts as a prompt:
 - System / user / assistant message templates passed to an LLM (OpenAI, Anthropic, \
@@ -80,22 +80,34 @@ LangChain, LlamaIndex, etc.).
 - Prompt builders where a base instruction is assembled from string constants.
 
 How to work:
-1. Start with grep for common signals: "system", "You are", "role":, "prompt", \
-ChatPromptTemplate, PromptTemplate, messages=, .invoke(, completion, "assistant".
-2. Use glob to find dedicated prompt files by extension and directory name.
-3. read the most promising files to confirm and capture the full template text.
+1. grep for common signals: "system", "You are", "role":, "prompt", ChatPromptTemplate, \
+PromptTemplate, messages=, .invoke(, completion, "assistant".
+2. glob for dedicated prompt files by extension and directory name.
+3. Read only enough to confirm a real prompt exists and note WHERE it is.
 
-Rules for the output:
-- Capture the template text VERBATIM (keep placeholders like {var}, {{var}}, ${var}).
-- Derive `variables` from the placeholders you see in the template.
-- Set `file_path` to the repo-relative path and `line_start` to the 1-based line \
-where the template begins when you know it.
-- Set `role` to system/user/assistant/tool when discernible, else null.
-- Give each prompt a short descriptive `name` (e.g. "Support triage system prompt").
-- Do NOT invent prompts. Only return text that actually exists in the repo. If a \
-file is huge, prefer the actual instruction text over surrounding boilerplate.
-- Deduplicate: if the same template appears in multiple places, return it once with \
-the most relevant file_path.
+Rules for the output (one entry per prompt):
+- `name`: short descriptive name (e.g. "Support triage system prompt").
+- `file_path`: repo-relative path. `line_start`: 1-based line where it begins.
+- `role`: system/user/assistant/tool when discernible, else null.
+- `note`: one short phrase on what the prompt is for.
+- Do NOT include the template text in this pass — keep the output small.
+- Do NOT invent prompts; only point at text that really exists.
+- Deduplicate: list each distinct prompt once.
 
-Be thorough but efficient. Prioritize real, substantive prompts over trivial \
-one-line strings."""
+Be thorough but fast — finding the locations is the goal."""
+
+PROMPT_EXTRACT_ONE_SYSTEM_PROMPT = """\
+You extract a SINGLE LLM prompt from a source file. You have read-only tools \
+(read, grep). You are told the prompt's name, file path, and approximate line.
+
+Steps:
+1. Read the target file (use offset/limit around the given line for large files).
+2. Find the specific prompt and capture its template text VERBATIM — keep \
+placeholders like {var}, {{var}}, ${var}. If the prompt is assembled from several \
+string pieces, concatenate them in order into the full template.
+3. Derive `variables` from the placeholders present in the template.
+4. Set `role` to system/user/assistant/tool when discernible, else null. Set \
+`file_path` and `line_start` to where the template begins.
+
+Return only that one prompt. If you cannot find a real prompt at that location, \
+return an empty template — do not fabricate one."""
