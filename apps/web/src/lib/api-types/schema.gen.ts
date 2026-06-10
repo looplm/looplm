@@ -2482,6 +2482,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/prompts/{prompt_id}/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recheck Github Prompt
+         * @description Re-extract a single github-sourced prompt from the repo to detect changes.
+         */
+        post: operations["recheck_github_prompt_api_prompts__prompt_id__recheck_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/prompts/{prompt_id}/review": {
         parameters: {
             query?: never;
@@ -6012,6 +6032,18 @@ export interface components {
              * @default 1
              */
             version: number;
+        };
+        /**
+         * PromptRecheckResult
+         * @description Result of re-extracting a single prompt from the connected repo.
+         */
+        PromptRecheckResult: {
+            /**
+             * Changed
+             * @default false
+             */
+            changed: boolean;
+            prompt: components["schemas"]["PromptOut"];
         };
         /** PromptReviewListResponse */
         PromptReviewListResponse: {
@@ -12617,6 +12649,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PromptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recheck_github_prompt_api_prompts__prompt_id__recheck_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                prompt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptRecheckResult"];
                 };
             };
             /** @description Validation Error */
