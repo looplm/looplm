@@ -53,6 +53,18 @@ interface GlobalFiltersContextValue extends GlobalFilters {
 
 export const DEFAULT_RETRIEVAL_SPAN_NAME = "retrieval-context";
 
+export const DEFAULT_RANGE_DAYS = 7;
+
+export function daysAgo(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 16);
+}
+
+export function nowLocal(): string {
+  return new Date().toISOString().slice(0, 16);
+}
+
 const GlobalFiltersContext = createContext<GlobalFiltersContextValue | null>(null);
 
 export function useGlobalFilters(): GlobalFiltersContextValue {
@@ -66,8 +78,8 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const [startDate, setStartDate] = useState(() => searchParams.get("sd") || "");
-  const [endDate, setEndDate] = useState(() => searchParams.get("ed") || "");
+  const [startDate, setStartDate] = useState(() => searchParams.get("sd") || daysAgo(DEFAULT_RANGE_DAYS));
+  const [endDate, setEndDate] = useState(() => searchParams.get("ed") || nowLocal());
   const [environment, setEnvironment] = useState(() => searchParams.get("env") || "all");
   const [userFilterMode, setUserFilterMode] = useState<UserFilterMode>(
     () => (searchParams.get("ufm") as UserFilterMode) || "exclude"
@@ -155,8 +167,8 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resetFilters = useCallback(() => {
-    setStartDate("");
-    setEndDate("");
+    setStartDate(daysAgo(DEFAULT_RANGE_DAYS));
+    setEndDate(nowLocal());
     setEnvironment("all");
     setUserFilterMode("exclude");
     setFilteredUsers([]);
@@ -168,13 +180,16 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
   const searchParamsRef = useRef(searchParams);
   searchParamsRef.current = searchParams;
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // The untouched default (last DEFAULT_RANGE_DAYS days) is left out of the URL so
+  // fresh-load links stay clean and the window keeps rolling on reload.
+  const isDefaultRange = startDate.slice(0, 10) === daysAgo(DEFAULT_RANGE_DAYS).slice(0, 10);
   useEffect(() => {
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       const params = new URLSearchParams(searchParamsRef.current.toString());
-      if (startDate) params.set("sd", startDate);
+      if (startDate && !isDefaultRange) params.set("sd", startDate);
       else params.delete("sd");
-      if (endDate) params.set("ed", endDate);
+      if (endDate && !isDefaultRange) params.set("ed", endDate);
       else params.delete("ed");
       if (environment && environment !== "all") params.set("env", environment);
       else params.delete("env");
@@ -193,9 +208,9 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
       router.replace(target, { scroll: false });
     }, 300);
     return () => clearTimeout(timerRef.current);
-  }, [startDate, endDate, environment, userFilterMode, filteredUsers, pathname, router]);
+  }, [startDate, endDate, isDefaultRange, environment, userFilterMode, filteredUsers, pathname, router]);
 
-  const hasActiveFilters = !!startDate || !!endDate || (environment !== "all" && environment !== "") || filteredUsers.length > 0;
+  const hasActiveFilters = !isDefaultRange || (environment !== "all" && environment !== "") || filteredUsers.length > 0;
 
   return (
     <GlobalFiltersContext.Provider
