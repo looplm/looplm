@@ -9,6 +9,7 @@ by level, and finally into sampled documents. It reuses the same
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
@@ -73,3 +74,50 @@ class IndexTreeResponse(BaseModel):
     groups: list[IndexTreeGroupNode] = Field(default_factory=list)
     documents: list[IndexTreeDocument] = Field(default_factory=list)
     parent_doc_count: Optional[int] = None
+
+
+# --- Grouping advisor: LLM-suggested hierarchy + metadata-quality hints ---
+
+
+class GroupingLevel(BaseModel):
+    """One level of the suggested hierarchy, with the LLM's reason for it."""
+
+    key: str
+    label: str
+    reason: str
+
+
+class MetadataHint(BaseModel):
+    """A metadata-quality observation surfaced to the user.
+
+    ``field`` points at an existing partition key the hint is about;
+    ``suggested_field`` names a *new* field the user should add to the index
+    to enable better grouping (e.g. splitting a path-encoded field).
+    """
+
+    severity: Literal["info", "warning"]
+    title: str
+    message: str
+    field: Optional[str] = None
+    suggested_field: Optional[str] = None
+
+
+class IndexGroupingSuggestion(BaseModel):
+    """The advisor's recommended grouping for an index."""
+
+    suggested_group_by: list[str] = Field(default_factory=list)
+    summary: str = ""
+    levels: list[GroupingLevel] = Field(default_factory=list)
+    hints: list[MetadataHint] = Field(default_factory=list)
+
+
+class IndexGroupingSuggestionResponse(BaseModel):
+    """Cached or freshly-computed grouping suggestion for a provider."""
+
+    suggestion: Optional[IndexGroupingSuggestion] = None
+    suggested_at: Optional[datetime] = None
+    model: Optional[str] = None
+
+
+class IndexGroupingSuggestionRequest(BaseModel):
+    provider_id: UUID

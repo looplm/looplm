@@ -3,6 +3,7 @@
  */
 
 import type {
+  IndexGroupingSuggestionResponse,
   IndexProviderOption,
   IndexSummary,
   IndexTreeResponse,
@@ -30,3 +31,16 @@ export const getIndexTree = (params: {
   if (params.limit != null) q.set("limit", String(params.limit));
   return request<IndexTreeResponse>(`/api/index-explorer/tree?${q.toString()}`);
 };
+
+// Read the cached LLM grouping suggestion (no LLM call; suggestion may be null).
+export const getGroupingSuggestion = (providerId: string) =>
+  request<IndexGroupingSuggestionResponse>(
+    `/api/index-explorer/grouping-suggestion?provider_id=${encodeURIComponent(providerId)}`,
+  );
+
+// Compute (and cache) a fresh grouping suggestion via the LLM advisor.
+export const computeGroupingSuggestion = (providerId: string) =>
+  request<IndexGroupingSuggestionResponse>("/api/index-explorer/grouping-suggestion", {
+    method: "POST",
+    body: JSON.stringify({ provider_id: providerId }),
+  });

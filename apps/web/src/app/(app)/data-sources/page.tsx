@@ -2,13 +2,21 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { getIndexExplorerProviders, getIndexSummary } from "@/lib/api";
+import {
+  computeGroupingSuggestion,
+  getGroupingSuggestion,
+  getIndexExplorerProviders,
+  getIndexSummary,
+} from "@/lib/api";
 import type {
+  IndexGroupingSuggestion,
+  IndexGroupingSuggestionResponse,
   IndexProviderOption,
   IndexSummary,
 } from "@/lib/api-types/index-explorer";
 import { StatCard } from "@/components/eval-shared";
 import { IndexTree } from "@/components/data-sources/index-tree";
+import { GroupingSuggestionCallout } from "@/components/data-sources/grouping-suggestion-callout";
 import { ProviderManager } from "@/components/coverage/provider-manager";
 import { usePermissions } from "@/components/permissions-context";
 
@@ -31,6 +39,11 @@ export default function DataSourcesPage() {
   // Ordered list of fields the tree groups by (top → bottom).
   const [groupBy, setGroupBy] = useState<string[]>([]);
 
+  // LLM grouping advisor (auto-run on provider load, cached server-side).
+  const [suggestion, setSuggestion] = useState<IndexGroupingSuggestion | null>(null);
+  const [suggestionLoading, setSuggestionLoading] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+
   const loadProviders = useCallback(async () => {
     try {
       const { data } = await getIndexExplorerProviders();
@@ -51,21 +64,77 @@ export default function DataSourcesPage() {
     loadProviders();
   }, [loadProviders]);
 
-  // Load summary + default grouping when the provider changes.
+  // Apply a suggestion response: store it for the callout and adopt its
+  // hierarchy (clamped to fields that actually exist on this index).
+  const applySuggestion = useCallback(
+    (resp: IndexGroupingSuggestionResponse, available: IndexSummary["partition_keys"]) => {
+      const sug = resp.suggestion;
+      setSuggestion(sug);
+      if (sug && sug.suggested_group_by.length > 0) {
+        const valid = sug.suggested_group_by.filter((k) =>
+          available.some((pk) => pk.key === k),
+        );
+        if (valid.length > 0) setGroupBy(valid);
+      }
+    },
+    [],
+  );
+
+  // Load summary + a provisional default grouping when the provider changes.
   useEffect(() => {
     if (!providerId) return;
     setSummaryLoading(true);
     setSummaryError(null);
     setSummary(null);
     setGroupBy([]);
+    setSuggestion(null);
+    setSuggestionError(null);
     getIndexSummary(providerId)
       .then((s) => {
         setSummary(s);
+        // Provisional default; the advisor effect may override it below.
         if (s.partition_keys.length > 0) setGroupBy([s.partition_keys[0].key]);
       })
       .catch((e) => setSummaryError((e as Error).message))
       .finally(() => setSummaryLoading(false));
   }, [providerId]);
+
+  // Once the summary is in, fetch the cached grouping suggestion — computing one
+  // on the fly (auto-run) when the provider has never been analyzed.
+  useEffect(() => {
+    if (!providerId || !summary || summary.partition_keys.length === 0) return;
+    let cancelled = false;
+    const keys = summary.partition_keys;
+    setSuggestionError(null);
+    setSuggestionLoading(true);
+    getGroupingSuggestion(providerId)
+      .then((resp) =>
+        resp.suggestion ? resp : computeGroupingSuggestion(providerId),
+      )
+      .then((resp) => {
+        if (!cancelled) applySuggestion(resp, keys);
+      })
+      .catch((e) => {
+        if (!cancelled) setSuggestionError((e as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setSuggestionLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [providerId, summary, applySuggestion]);
+
+  const handleReanalyze = useCallback(() => {
+    if (!providerId || !summary) return;
+    const keys = summary.partition_keys;
+    setSuggestionError(null);
+    setSuggestionLoading(true);
+    computeGroupingSuggestion(providerId)
+      .then((resp) => applySuggestion(resp, keys))
+      .catch((e) => setSuggestionError((e as Error).message))
+      .finally(() => setSuggestionLoading(false));
+  }, [providerId, summary, applySuggestion]);
 
   const keys = summary?.partition_keys ?? [];
 
@@ -154,6 +223,18 @@ export default function DataSourcesPage() {
             />
             <StatCard label="Provider" value={providers.find((p) => p.id === providerId)?.name ?? "—"} />
           </div>
+
+          {/* LLM-suggested hierarchy + metadata hints */}
+          {!summaryLoading && keys.length > 0 && (
+            <GroupingSuggestionCallout
+              suggestion={suggestion}
+              keys={keys}
+              loading={suggestionLoading}
+              error={suggestionError}
+              onReanalyze={handleReanalyze}
+              canReanalyze={canEdit}
+            />
+          )}
 
           {/* Group-by composer */}
           {!summaryLoading && keys.length > 0 && (

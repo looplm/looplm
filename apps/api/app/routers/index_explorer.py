@@ -8,18 +8,23 @@ CRUD lives on the RAG-coverage surface (``rag_coverage.py``). Both reuse the sam
 """
 
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, require_section
+from app.auth import get_current_project, get_current_user, require_section
 from app.db import get_db
 from app.index_providers.registry import build_index_provider
 from app.models.index_providers import IndexProvider
 from app.models.project import Project
+from app.models.user import User
 from app.schemas.index_explorer import (
+    IndexGroupingSuggestion,
+    IndexGroupingSuggestionRequest,
+    IndexGroupingSuggestionResponse,
     IndexPartitionKey,
     IndexProviderOptionListResponse,
     IndexSummaryResponse,
@@ -27,6 +32,8 @@ from app.schemas.index_explorer import (
     IndexTreeGroupNode,
     IndexTreeResponse,
 )
+from app.services.analysis_llm import AnalysisLlmConfigError
+from app.services.index_grouping_advisor import suggest_grouping
 
 logger = logging.getLogger(__name__)
 
@@ -167,3 +174,56 @@ async def tree(
         raise _provider_error(e)
     finally:
         await client.aclose()
+
+
+@router.get("/grouping-suggestion", response_model=IndexGroupingSuggestionResponse)
+async def get_grouping_suggestion(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """The cached LLM-suggested grouping for this provider (no LLM call).
+
+    Returns ``suggestion: null`` when none has been computed yet — the frontend
+    then triggers ``POST`` to compute one.
+    """
+    provider = await _get_provider_or_404(db, provider_id, project)
+    suggestion = (
+        IndexGroupingSuggestion.model_validate(provider.grouping_suggestion)
+        if provider.grouping_suggestion
+        else None
+    )
+    return IndexGroupingSuggestionResponse(
+        suggestion=suggestion, suggested_at=provider.grouping_suggested_at
+    )
+
+
+@router.post("/grouping-suggestion", response_model=IndexGroupingSuggestionResponse)
+async def compute_grouping_suggestion(
+    body: IndexGroupingSuggestionRequest,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """Profile the index with an LLM, persist the suggestion, and return it."""
+    provider = await _get_provider_or_404(db, body.provider_id, project)
+    client = build_index_provider(provider)
+    try:
+        suggestion, model = await suggest_grouping(
+            client, project_id=project.id, db=db, user_settings=user.settings
+        )
+    except AnalysisLlmConfigError as e:
+        raise HTTPException(
+            status_code=400, detail={"error": {"code": "LLM_NOT_CONFIGURED", "message": str(e)}}
+        )
+    except Exception as e:
+        raise _provider_error(e)
+    finally:
+        await client.aclose()
+
+    suggested_at = datetime.now(timezone.utc)
+    provider.grouping_suggestion = suggestion.model_dump(mode="json")
+    provider.grouping_suggested_at = suggested_at
+    return IndexGroupingSuggestionResponse(
+        suggestion=suggestion, suggested_at=suggested_at, model=model
+    )

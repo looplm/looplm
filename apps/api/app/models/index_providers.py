@@ -46,6 +46,10 @@ class IndexProvider(Base):
     config = Column(JSONB, nullable=False, server_default=text("'{}'"))
     api_key = Column(LargeBinary, nullable=False)  # encrypted at app layer
     base_url = Column(String(2048))  # endpoint URL
+    # Cached LLM-suggested grouping hierarchy + metadata hints (IndexGroupingSuggestion);
+    # null until the grouping advisor has run for this provider.
+    grouping_suggestion = Column(JSONB, nullable=True)
+    grouping_suggested_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
