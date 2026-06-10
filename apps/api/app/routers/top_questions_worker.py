@@ -124,6 +124,24 @@ def _parse_json_array(text: str) -> list[dict]:
         return []
 
 
+async def _abort_if_cancelled(db, analysis_id: UUID) -> None:
+    """Cooperatively honor a stop request, even from another worker/replica.
+
+    The ``/stop`` endpoint commits ``status='cancelled'`` from a *different* DB
+    session — and in prod often a different process, where the in-memory
+    ``task.cancel()`` can never reach this task. So we can't rely on the
+    asyncio cancellation alone: re-read the row on a fresh snapshot at each
+    checkpoint and bail out if a stop was requested. Callers must invoke this
+    only right after a ``commit()`` so the read sees the other session's write.
+    """
+    from app.models.feedback_eval import TopQuestionsAnalysis
+
+    db.expire_all()
+    current = await db.get(TopQuestionsAnalysis, analysis_id)
+    if current is None or current.status == "cancelled":
+        raise asyncio.CancelledError()
+
+
 async def run_top_questions_analysis(
     analysis_id: UUID,
     questions: list[dict],
@@ -163,6 +181,7 @@ async def run_top_questions_analysis(
 
             if len(questions) <= 100:
                 # Single-pass: send all questions at once
+                await _abort_if_cancelled(db, analysis_id)
                 user_content = "\n".join(numbered_questions)
                 text, usage = await llm_service.tracked_chat_completion(
                     messages=[
@@ -230,6 +249,7 @@ async def run_top_questions_analysis(
                 processed = 0
 
                 for chunk_idx, chunk in enumerate(chunks):
+                    await _abort_if_cancelled(db, analysis_id)
                     user_content = "\n".join(chunk)
                     text, usage = await llm_service.tracked_chat_completion(
                         messages=[
@@ -301,6 +321,7 @@ async def run_top_questions_analysis(
                     indent=2,
                     default=str,
                 )
+                await _abort_if_cancelled(db, analysis_id)
                 text, usage = await llm_service.tracked_chat_completion(
                     messages=[
                         {"role": "system", "content": TOP_QUESTIONS_MERGE_PROMPT},
@@ -343,12 +364,21 @@ async def run_top_questions_analysis(
             for i, t in enumerate(themes[:10], 1):
                 t["rank"] = i
 
+            # Don't clobber a stop that landed while we were finishing up.
+            db.expire_all()
             analysis = await db.get(TopQuestionsAnalysis, analysis_id)
+            if analysis is None or analysis.status == "cancelled":
+                return
             analysis.results = themes[:10]
             analysis.status = "completed"
             analysis.completed_at = datetime.now(timezone.utc)
             await db.commit()
 
+        except asyncio.CancelledError:
+            # Stop requested (cooperative check or in-process task.cancel()). The
+            # /stop endpoint already wrote status='cancelled'; just exit cleanly.
+            logger.info("Top questions analysis %s stopped", analysis_id)
+            raise
         except Exception as e:
             logger.exception("Top questions analysis failed")
             analysis = await db.get(TopQuestionsAnalysis, analysis_id)
@@ -356,3 +386,6 @@ async def run_top_questions_analysis(
             analysis.error = str(e)[:2000]
             analysis.completed_at = datetime.now(timezone.utc)
             await db.commit()
+        finally:
+            # Drop the in-memory handle so the registry can't leak across runs.
+            _top_questions_tasks.pop(analysis_id, None)
