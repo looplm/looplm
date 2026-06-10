@@ -1,12 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { toast } from "sonner";
 import {
   getTraces,
   getThreads,
-  importTraces,
   type TraceListItem,
   type ThreadListResponse,
 } from "@/lib/api";
@@ -17,13 +15,10 @@ import TraceFilters, {
 import { useGlobalFilters } from "@/components/global-filters-context";
 import ResizableHeader from "@/components/resizable-header";
 import { TraceRow, ThreadGroup, RunTreeGroup } from "./trace-table-rows";
-import { usePermissions } from "@/components/permissions-context";
 
 type ViewMode = "flat" | "runs" | "threads";
 
 export default function TracesPage() {
-  const { canWrite } = usePermissions();
-  const canEdit = canWrite("traces");
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("traces-view-mode");
@@ -51,24 +46,7 @@ export default function TracesPage() {
     setCursorIdx(0);
   }, []);
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const globalFilters = useGlobalFilters();
-
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const json = JSON.parse(text);
-      const traces = Array.isArray(json) ? json : json.traces || [];
-      await importTraces({ traces, filename: file.name });
-      toast.success("Traces imported successfully");
-      load();
-    } catch (err: any) {
-      toast.error("Import failed", { description: err.message });
-    }
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
 
   // Default widths
   const [colWidths, setColWidths] = useState({
@@ -164,21 +142,6 @@ export default function TracesPage() {
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold">Traces</h1>
         <div className="flex items-center gap-4">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            className="hidden"
-            onChange={handleImport}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!canEdit}
-            title={!canEdit ? "Read-only access. Ask an admin to grant write permission." : undefined}
-            className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-800 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            Import JSON
-          </button>
           <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700">
             <button
               onClick={() => { setViewMode("flat"); resetPagination(); }}

@@ -31,7 +31,7 @@ export function useFeedbackPage() {
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("feedback-tab");
-      if (saved === "feedback" || saved === "graders" || saved === "suggestions" || saved === "top-questions") return saved as Tab;
+      if (saved === "feedback" || saved === "suggestions" || saved === "top-questions") return saved as Tab;
     }
     return "feedback";
   });

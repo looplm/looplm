@@ -167,9 +167,6 @@ export default function FeedbackPage() {
         <button onClick={() => setTab("feedback")} className={tabClass("feedback")}>
           User Feedback
         </button>
-        <button onClick={() => setTab("graders")} className={tabClass("graders")}>
-          Grader Scores
-        </button>
         <button onClick={() => setTab("suggestions")} className={tabClass("suggestions")}>
           Suggestions
         </button>
