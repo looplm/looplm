@@ -104,7 +104,7 @@ export default function DashboardPage() {
 
   const { totals, feedback, latency, threads } = stats;
   const fmtMs = (ms: number | null | undefined) =>
-    ms == null ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
+    ms == null ? "N/A" : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
   // Regression values arrive in the metric's native unit: latency in ms, rates in 0–1.
   const fmtRegression = (metric: string, v: number) =>
     metric === "latency_p95" ? fmtMs(Math.round(v)) : `${(v * 100).toFixed(1)}%`;
@@ -123,13 +123,13 @@ export default function DashboardPage() {
     <div>
       <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
 
-      {/* Regression banner — metrics that worsened vs the previous window */}
+      {/* Regression banner: metrics that worsened vs the previous window */}
       {stats.regressions.length > 0 && (
         <div className="mb-8 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 p-4">
           <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">
             ⚠️ Regression vs previous period
             <span className="font-normal text-amber-700 dark:text-amber-400/90"> ({prevRangeLabel})</span>
-            <Tooltip content={`Compared against the equally-long window immediately before the selected period — here ${prevRangeLabel}. A metric is flagged when it got materially worse.`}>
+            <Tooltip content={`Compared against the equally-long window immediately before the selected period, here ${prevRangeLabel}. A metric is flagged when it got materially worse.`}>
               <InfoIcon />
             </Tooltip>
           </p>
@@ -216,7 +216,7 @@ export default function DashboardPage() {
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6">
           <h2 className="text-lg font-semibold mb-4">
             Conversations
-            <Tooltip content="Signals derived from grouping traces into threads — multi-turn share, length, and whether users retried after a failure.">
+            <Tooltip content="Signals derived from grouping traces into threads: multi-turn share, length, and whether users retried after a failure.">
               <InfoIcon />
             </Tooltip>
           </h2>
@@ -251,7 +251,7 @@ export default function DashboardPage() {
       <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6 mb-8">
         <h2 className="text-lg font-semibold mb-4">Feedback Summary</h2>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-6">
-          {/* Coverage — share of traces that got any feedback. */}
+          {/* Coverage: share of traces that got any feedback. */}
           <div>
             <div className="flex items-baseline justify-between mb-2">
               <span className="text-xs font-medium text-gray-500 dark:text-slate-400">
@@ -276,7 +276,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Sentiment — positive vs negative across feedback submissions. */}
+          {/* Sentiment: positive vs negative across feedback submissions. */}
           <div>
             <div className="flex items-baseline justify-between mb-2">
               <span className="text-xs font-medium text-gray-500 dark:text-slate-400">

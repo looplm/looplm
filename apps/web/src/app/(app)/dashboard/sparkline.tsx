@@ -1,6 +1,6 @@
 interface SparklineProps {
   data: number[];
-  /** Tailwind text-color class — drives both the line and its faint fill via currentColor. */
+  /** Tailwind text-color class; drives both the line and its faint fill via currentColor. */
   className?: string;
 }
 
