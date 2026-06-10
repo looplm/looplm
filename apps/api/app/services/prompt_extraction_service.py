@@ -16,12 +16,13 @@ from uuid import UUID
 
 from pydantic_ai import Agent
 from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
+from pydantic_ai.messages import TextPart, ToolCallPart
 from pydantic_ai.usage import UsageLimits
 
 from app.schemas.prompts import PromptExtractionOutput
 from app.services.code_agent_helpers import _update_progress
 from app.services.code_agent_prompts import PROMPT_EXTRACTION_SYSTEM_PROMPT
-from app.services.code_agent_service import _build_model, _summarize_model_response
+from app.services.code_agent_service import _build_model
 from app.services.code_agent_tools import RepoContext, glob_files, grep_files, read_file
 from app.services.llm_pricing import calculate_cost
 from app.services.prompt_analysis import (
@@ -37,6 +38,41 @@ _USER_PROMPT = (
     "structured format. Start by grepping for common prompt signals, then read "
     "the most promising files to capture the full template text."
 )
+
+
+def _describe_activity(node: CallToolsNode) -> tuple[str, str]:
+    """Turn a model response into a friendly (progress_message, log_entry).
+
+    The extraction agent only returns the prompt list at the very end, so the
+    live signal users can see is *what it is currently doing* — which files it
+    reads and searches. Phrase those as plain English.
+    """
+    for part in node.model_response.parts:
+        if isinstance(part, ToolCallPart):
+            args = part.args_as_dict() if hasattr(part, "args_as_dict") else {}
+            if not isinstance(args, dict):
+                args = {}
+            if part.tool_name == "read_file":
+                path = args.get("path") or "a file"
+                return f"Reading {path}", f"Read {path}"
+            if part.tool_name == "grep_files":
+                pattern = (args.get("pattern") or "").strip()
+                return (
+                    "Searching the code for prompts…",
+                    f"Searched for: {pattern}"[:120] if pattern else "Searched the code",
+                )
+            if part.tool_name == "glob_files":
+                pattern = (args.get("pattern") or "").strip()
+                return (
+                    "Looking for prompt files…",
+                    f"Looked for files: {pattern}"[:120] if pattern else "Looked for files",
+                )
+            return f"Running {part.tool_name}…", part.tool_name
+        if isinstance(part, TextPart) and part.content:
+            snippet = part.content[:140].replace("\n", " ").strip()
+            if snippet:
+                return "Analyzing the codebase…", snippet
+    return "Analyzing the codebase…", "Analyzing"
 
 
 async def extract_prompts_from_repo(
@@ -102,11 +138,11 @@ async def extract_prompts_from_repo(
                         await _update_progress(
                             db, extraction,
                             num_turns=turn_count,
-                            progress_message=f"Turn {turn_count}: Thinking...",
-                            log_entry=f"Turn {turn_count}",
+                            progress_message="Reading the codebase…" if turn_count == 1
+                            else "Analyzing the codebase…",
                         )
                     elif isinstance(node, CallToolsNode):
-                        log_msg, progress_msg = _summarize_model_response(node, turn_count)
+                        progress_msg, log_msg = _describe_activity(node)
                         await _update_progress(
                             db, extraction,
                             progress_message=progress_msg,
@@ -117,6 +153,13 @@ async def extract_prompts_from_repo(
 
             if output is None:
                 raise RuntimeError("Extraction agent returned no output")
+
+            found = len(output.prompts)
+            await _update_progress(
+                db, extraction,
+                progress_message=f"Found {found} prompt{'s' if found != 1 else ''} — saving…",
+                log_entry=f"Found {found} prompt{'s' if found != 1 else ''}; saving",
+            )
 
             count = await _persist_prompts(db, project_id, repo_full_name, output)
 

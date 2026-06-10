@@ -293,12 +293,26 @@ export default function PromptsPage() {
       )}
 
       {extracting && (
-        <div className="mb-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-indigo-600 dark:text-indigo-300 text-sm flex items-center gap-2">
-          <span className="inline-block w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-          <span>
-            Extracting prompts from {githubRepo}
-            {extraction?.progress_message ? ` — ${extraction.progress_message}` : "…"}
-          </span>
+        <div className="mb-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-sm">
+          <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-300 font-medium">
+            <span className="inline-block w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+            <span>
+              Extracting prompts from {githubRepo}
+              {extraction?.progress_message ? ` — ${extraction.progress_message}` : "…"}
+            </span>
+          </div>
+          {(extraction?.progress_log?.length ?? 0) > 0 && (
+            <ul className="mt-2 ml-5 space-y-0.5 font-mono text-[11px] text-gray-500 dark:text-slate-400">
+              {extraction!.progress_log.slice(-6).map((entry, i, arr) => (
+                <li
+                  key={`${entry.t}-${i}`}
+                  className={i === arr.length - 1 ? "text-indigo-600 dark:text-indigo-300" : ""}
+                >
+                  <span className="text-gray-400 dark:text-slate-600">›</span> {entry.msg}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {extraction?.status === "completed" && (
