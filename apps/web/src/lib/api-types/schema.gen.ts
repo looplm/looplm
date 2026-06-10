@@ -2362,6 +2362,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/prompts/extract/github": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Github Extraction
+         * @description Kick off a background agent that extracts prompts from the connected repo.
+         */
+        post: operations["trigger_github_extraction_api_prompts_extract_github_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prompts/extract/github/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Github Extraction
+         * @description Cancel the running extraction for this project.
+         */
+        post: operations["cancel_github_extraction_api_prompts_extract_github_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prompts/extract/github/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latest Github Extraction
+         * @description Return the most recent extraction run for the project (for polling).
+         */
+        get: operations["get_latest_github_extraction_api_prompts_extract_github_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/prompts/import": {
         parameters: {
             query?: never;
@@ -5840,6 +5900,41 @@ export interface components {
             settings?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * PromptExtractionResponse
+         * @description Status of a background extraction run (polled by the frontend).
+         */
+        PromptExtractionResponse: {
+            /** Completed At */
+            completed_at?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Extracted Count
+             * @default 0
+             */
+            extracted_count: number;
+            /** Files Analyzed */
+            files_analyzed?: string[];
+            /** Id */
+            id: string;
+            /** Num Turns */
+            num_turns?: number | null;
+            /** Progress Log */
+            progress_log?: {
+                [key: string]: unknown;
+            }[];
+            /** Progress Message */
+            progress_message?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /** Summary */
+            summary?: string | null;
+            /** Total Cost Usd */
+            total_cost_usd?: number | null;
         };
         /** PromptImportItem */
         PromptImportItem: {
@@ -12328,6 +12423,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PromptListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_github_extraction_api_prompts_extract_github_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_github_extraction_api_prompts_extract_github_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latest_github_extraction_api_prompts_extract_github_latest_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptExtractionResponse"];
                 };
             };
             /** @description Validation Error */
