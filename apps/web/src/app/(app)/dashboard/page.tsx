@@ -105,6 +105,9 @@ export default function DashboardPage() {
   const { totals, feedback, latency, threads } = stats;
   const fmtMs = (ms: number | null | undefined) =>
     ms == null ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
+  // Regression values arrive in the metric's native unit: latency in ms, rates in 0–1.
+  const fmtRegression = (metric: string, v: number) =>
+    metric === "latency_p95" ? fmtMs(Math.round(v)) : `${(v * 100).toFixed(1)}%`;
 
   // Chronological daily series for the KPI sparklines.
   const chrono = [...stats.trends].sort((a, b) => a.date.localeCompare(b.date));
@@ -124,7 +127,7 @@ export default function DashboardPage() {
               <span key={r.metric} className="text-sm text-amber-800 dark:text-amber-200">
                 {r.label}: <span className="font-semibold">+{(r.change_pct * 100).toFixed(0)}%</span>
                 <span className="text-amber-600 dark:text-amber-400/80">
-                  {" "}({r.previous} → {r.current})
+                  {" "}({fmtRegression(r.metric, r.previous)} → {fmtRegression(r.metric, r.current)})
                 </span>
               </span>
             ))}
