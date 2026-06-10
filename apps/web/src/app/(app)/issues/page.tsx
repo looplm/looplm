@@ -56,6 +56,7 @@ export default function IssuesPage() {
         `${r.issues_created} new`,
         `${r.issues_updated} updated`,
       ];
+      if (r.issues_merged > 0) parts.push(`${r.issues_merged} merged`);
       if (r.issues_diagnosed > 0) parts.push(`${r.issues_diagnosed} diagnosed`);
       setDetectMsg(`${parts.join(" · ")}${r.used_llm ? "" : " (rule-based)"}`);
       load();

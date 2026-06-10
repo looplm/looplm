@@ -3820,6 +3820,8 @@ export interface components {
             issues_created: number;
             /** Issues Diagnosed */
             issues_diagnosed: number;
+            /** Issues Merged */
+            issues_merged: number;
             /** Issues Updated */
             issues_updated: number;
             /** Signals */

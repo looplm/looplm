@@ -78,6 +78,95 @@ async def import_prompts_from_json(
     return synced
 
 
+async def get_or_create_github_integration(
+    project_id: UUID,
+    db: AsyncSession,
+    repo_full_name: str | None = None,
+) -> Integration:
+    """Find (or create) the per-project `github` integration that owns prompts
+    extracted from the connected codebase. Mirrors the json_file container
+    created by `import_prompts_from_json`."""
+    from app.encryption import encrypt_api_key
+
+    result = await db.execute(
+        select(Integration).where(
+            Integration.project_id == project_id,
+            Integration.type == IntegrationType.github,
+        )
+    )
+    integration = result.scalar_one_or_none()
+    if integration:
+        if repo_full_name and integration.config.get("repo_full_name") != repo_full_name:
+            integration.config = {**(integration.config or {}), "repo_full_name": repo_full_name}
+        return integration
+
+    integration = Integration(
+        project_id=project_id,
+        type=IntegrationType.github,
+        name="GitHub",
+        config={"repo_full_name": repo_full_name} if repo_full_name else {},
+        api_key=encrypt_api_key("github_placeholder"),
+        sync_status=SyncStatus.idle,
+    )
+    db.add(integration)
+    await db.flush()
+    return integration
+
+
+async def upsert_prompts_for_integration(
+    integration_id: UUID,
+    items: list[dict],
+    db: AsyncSession,
+    *,
+    delete_stale: bool = True,
+) -> int:
+    """Upsert prompts under an integration, keyed by (external_id, version).
+
+    `items` are plain dicts with keys: external_id, name, template, version,
+    variables, metadata. When `delete_stale` is set, prompts under the
+    integration that are absent from `items` are removed (refresh semantics).
+    """
+    remote_keys = {(it["external_id"], it.get("version", 1)) for it in items}
+
+    if delete_stale:
+        existing_all = await db.execute(
+            select(Prompt).where(Prompt.integration_id == integration_id)
+        )
+        for existing_prompt in existing_all.scalars().all():
+            if (existing_prompt.external_id, existing_prompt.version) not in remote_keys:
+                await db.delete(existing_prompt)
+
+    synced = 0
+    for it in items:
+        result = await db.execute(
+            select(Prompt).where(
+                Prompt.integration_id == integration_id,
+                Prompt.external_id == it["external_id"],
+                Prompt.version == it.get("version", 1),
+            )
+        )
+        existing_prompt = result.scalar_one_or_none()
+        if existing_prompt:
+            existing_prompt.name = it["name"]
+            existing_prompt.template = it.get("template", "")
+            existing_prompt.variables = it.get("variables", [])
+            existing_prompt.prompt_metadata = it.get("metadata", {})
+            existing_prompt.updated_at = datetime.now(timezone.utc)
+        else:
+            db.add(Prompt(
+                integration_id=integration_id,
+                external_id=it["external_id"],
+                name=it["name"],
+                template=it.get("template", ""),
+                version=it.get("version", 1),
+                variables=it.get("variables", []),
+                prompt_metadata=it.get("metadata", {}),
+            ))
+        synced += 1
+
+    return synced
+
+
 async def sync_prompts(
     integration_id: UUID,
     project_id: UUID,

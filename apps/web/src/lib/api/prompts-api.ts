@@ -37,3 +37,33 @@ export const getPromptReviews = (id: string) =>
 
 export const getPromptVersions = (id: string) =>
   request<PromptListResponse>(`/api/prompts/${id}/versions`);
+
+// --- Extract prompts from a connected GitHub codebase ---
+
+export interface PromptExtractionStatus {
+  id: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  error: string | null;
+  summary: string | null;
+  files_analyzed: string[];
+  extracted_count: number;
+  total_cost_usd: number | null;
+  num_turns: number | null;
+  progress_message: string | null;
+  progress_log: { t: string; msg: string }[];
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export const extractGithubPrompts = () =>
+  request<{ extraction_id: string; status: string }>("/api/prompts/extract/github", {
+    method: "POST",
+  });
+
+export const getGithubExtractionStatus = () =>
+  request<PromptExtractionStatus>("/api/prompts/extract/github/latest");
+
+export const cancelGithubExtraction = () =>
+  request<{ status: string; extraction_id: string }>("/api/prompts/extract/github/cancel", {
+    method: "POST",
+  });
