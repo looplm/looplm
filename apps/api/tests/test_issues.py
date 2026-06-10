@@ -232,6 +232,99 @@ async def test_detect_issues_creates_then_recurs(db_session, test_project, faili
     assert refreshed[0].trace_count == 2
 
 
+@pytest.mark.asyncio
+async def test_detect_issues_no_llm_does_not_duplicate_across_runs(
+    db_session, test_project, failing_data
+):
+    """The deterministic (no-LLM) fallback must merge by fingerprint, not pile up.
+
+    Regression for duplicate "Recurring X failures" issues: running detection
+    repeatedly used to create a fresh issue every pass because the fallback
+    grouper never matched existing issues.
+    """
+    first = await detect_issues(db_session, test_project.id, llm=None)
+    assert first["issues_created"] >= 1
+
+    before = (
+        await db_session.execute(select(Issue).where(Issue.project_id == test_project.id))
+    ).scalars().all()
+    count_before = len(before)
+
+    # Second pass over the same signals: every group should collapse onto the
+    # issue created in the first pass — nothing new, no duplicates.
+    second = await detect_issues(db_session, test_project.id, llm=None)
+    assert second["issues_created"] == 0
+    assert second["issues_updated"] >= 1
+
+    after = (
+        await db_session.execute(select(Issue).where(Issue.project_id == test_project.id))
+    ).scalars().all()
+    assert len(after) == count_before
+    # Fingerprints are unique across the surviving issues.
+    fps = [i.fingerprint for i in after if i.fingerprint]
+    assert len(fps) == len(set(fps))
+
+
+@pytest.mark.asyncio
+async def test_detect_issues_merges_preexisting_duplicates(
+    db_session, test_project, test_integration, failing_data
+):
+    """Legacy duplicates sharing a fingerprint are collapsed on the next pass.
+
+    Seeds three open issues with the same fingerprint (as older builds would
+    have produced), each with its own evidence/events, then asserts detection
+    folds them into a single survivor that keeps all the evidence.
+    """
+    from app.models.models import IssueEvent, IssueEvidence, SignalType
+
+    trace_ids = [t.id for t in failing_data["traces"]]
+    fp = "eval:faithfulnessToSource"
+    seeded: list[Issue] = []
+    for n in range(3):
+        issue = Issue(
+            project_id=test_project.id,
+            integration_id=test_integration.id,
+            title="Recurring faithfulnessToSource failures",
+            category="faithfulnessToSource",
+            status=IssueStatus.open,
+            signal_types=["eval_failure"],
+            fingerprint=fp,
+            first_seen_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+            last_seen_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        )
+        db_session.add(issue)
+        await db_session.flush()
+        # Each duplicate references a distinct trace so the survivor accrues both.
+        db_session.add(
+            IssueEvidence(
+                issue_id=issue.id,
+                trace_id=trace_ids[n % len(trace_ids)],
+                signal_type=SignalType.eval_failure,
+                detail=f"dup {n}",
+            )
+        )
+        db_session.add(IssueEvent(issue_id=issue.id, event_type="detected", detail={}))
+        seeded.append(issue)
+    await db_session.commit()
+
+    result = await detect_issues(db_session, test_project.id, llm=None)
+    assert result["issues_merged"] == 2  # 3 dupes -> 1 survivor
+
+    survivors = (
+        await db_session.execute(
+            select(Issue).where(
+                Issue.project_id == test_project.id,
+                Issue.fingerprint == fp,
+            )
+        )
+    ).scalars().all()
+    assert len(survivors) == 1
+    survivor = survivors[0]
+    # The oldest issue survived and absorbed the others' distinct-trace evidence.
+    assert survivor.id == seeded[0].id
+    assert survivor.trace_count == len(set(trace_ids))
+
+
 # ── API ────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

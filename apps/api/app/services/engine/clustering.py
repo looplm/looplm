@@ -61,6 +61,7 @@ class ExistingIssueRef:
     id: UUID
     title: str
     category: str | None = None
+    fingerprint: str | None = None
 
 
 def _build_user_message(signals: list[Signal], existing: list[ExistingIssueRef]) -> str:

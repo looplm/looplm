@@ -43,6 +43,7 @@ class DetectResponse(BaseModel):
     signals: int
     issues_created: int
     issues_updated: int
+    issues_merged: int
     issues_diagnosed: int
     used_llm: bool
 

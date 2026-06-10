@@ -16,10 +16,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.base import IssueSeverity
 from app.models.models import (
     Integration,
     Issue,
@@ -49,6 +50,16 @@ _MATCHABLE_STATUSES = (
     IssueStatus.resolved,
 )
 
+# Active statuses — a duplicate in one of these keeps a merged survivor alive.
+_ACTIVE_STATUSES = (
+    IssueStatus.open,
+    IssueStatus.diagnosing,
+    IssueStatus.resolving,
+    IssueStatus.recurring,
+)
+
+_SEVERITY_RANK = {IssueSeverity.high: 0, IssueSeverity.medium: 1, IssueSeverity.low: 2}
+
 
 async def detect_issues(
     db: AsyncSession,
@@ -62,17 +73,36 @@ async def detect_issues(
     if not integration_ids:
         return _summary(0, 0, 0)
 
+    total_traces = await _total_root_traces(db, integration_ids, since)
+
+    # Self-healing cleanup: collapse any pre-existing issues that share a
+    # fingerprint into a single survivor before detecting. Repairs duplicates
+    # created before fingerprint dedup was wired up, and keeps the list clean
+    # even if the LLM clusterer ever splits the same problem into two issues.
+    merged = await _merge_duplicate_issues_by_fingerprint(db, project_id, total_traces)
+
     signals = await collect_signals(
         db, project_id, since=since, integration_ids=integration_ids
     )
     if not signals:
-        return _summary(0, 0, 0)
+        if merged:
+            await db.commit()
+        return _summary(0, 0, 0, merged)
 
     existing = await _load_matchable_issues(db, project_id)
     groups, _usage = await cluster_signals(signals, existing, llm)
 
-    total_traces = await _total_root_traces(db, integration_ids, since)
     lone_integration = integration_ids[0] if len(integration_ids) == 1 else None
+
+    # Deterministic dedup index: fingerprint -> issue id. Seeded with existing
+    # issues and grown as new issues are created during this pass, so any group
+    # the clusterer left unmatched (the no-LLM fallback, the LLM-overflow tail,
+    # or simply a repeat detection run) still collapses onto the right issue
+    # instead of spawning a duplicate "Recurring X failures".
+    fingerprint_to_id: dict[str, UUID] = {}
+    for e in existing:
+        if e.fingerprint:
+            fingerprint_to_id.setdefault(e.fingerprint, e.id)
 
     created = updated = 0
     existing_by_id = {e.id: e for e in existing}
@@ -83,6 +113,7 @@ async def detect_issues(
             group=group,
             signals=signals,
             known_existing_ids=set(existing_by_id),
+            fingerprint_to_id=fingerprint_to_id,
             total_traces=total_traces,
             lone_integration_id=lone_integration,
         )
@@ -91,14 +122,19 @@ async def detect_issues(
 
     await db.commit()
     logger.info(
-        "Issue detection for project %s: %d signals, %d created, %d updated",
-        project_id, len(signals), created, updated,
+        "Issue detection for project %s: %d signals, %d created, %d updated, %d merged",
+        project_id, len(signals), created, updated, merged,
     )
-    return _summary(len(signals), created, updated)
+    return _summary(len(signals), created, updated, merged)
 
 
-def _summary(signals: int, created: int, updated: int) -> dict:
-    return {"signals": signals, "issues_created": created, "issues_updated": updated}
+def _summary(signals: int, created: int, updated: int, merged: int = 0) -> dict:
+    return {
+        "signals": signals,
+        "issues_created": created,
+        "issues_updated": updated,
+        "issues_merged": merged,
+    }
 
 
 # ── Diagnosis ──────────────────────────────────────────────────────
@@ -242,12 +278,113 @@ async def _load_matchable_issues(
     db: AsyncSession, project_id: UUID
 ) -> list[ExistingIssueRef]:
     rows = await db.execute(
-        select(Issue.id, Issue.title, Issue.category).where(
+        select(Issue.id, Issue.title, Issue.category, Issue.fingerprint).where(
             Issue.project_id == project_id,
             Issue.status.in_(_MATCHABLE_STATUSES),
         )
     )
-    return [ExistingIssueRef(id=r.id, title=r.title, category=r.category) for r in rows]
+    return [
+        ExistingIssueRef(id=r.id, title=r.title, category=r.category, fingerprint=r.fingerprint)
+        for r in rows
+    ]
+
+
+async def _merge_duplicate_issues_by_fingerprint(
+    db: AsyncSession, project_id: UUID, total_traces: int
+) -> int:
+    """Collapse matchable issues that share a fingerprint into one survivor.
+
+    The survivor is the oldest issue (stable identity); the rest are absorbed —
+    their evidence and events are reassigned, metadata is unioned, and the
+    duplicate rows are deleted. Dismissed issues are left untouched (the user
+    already judged them). Returns the number of duplicates removed. Does not
+    commit — the caller owns the transaction.
+    """
+    rows = (
+        await db.execute(
+            select(Issue)
+            .where(
+                Issue.project_id == project_id,
+                Issue.fingerprint.isnot(None),
+                Issue.status.in_(_MATCHABLE_STATUSES),
+            )
+            .order_by(Issue.created_at.asc())
+        )
+    ).scalars().all()
+
+    by_fingerprint: dict[str, list[Issue]] = {}
+    for issue in rows:
+        by_fingerprint.setdefault(issue.fingerprint, []).append(issue)
+
+    removed = 0
+    for fingerprint, group in by_fingerprint.items():
+        if len(group) < 2:
+            continue
+        survivor, *dups = group  # oldest first
+        survivor_keys = await _existing_evidence_keys(db, survivor.id)
+        for dup in dups:
+            await _absorb_issue(db, survivor, dup, survivor_keys)
+        db.add(_event(survivor.id, "merged", {"fingerprint": fingerprint, "count": len(dups)}))
+        await db.flush()
+        await _recompute_counts(db, survivor, total_traces)
+        removed += len(dups)
+
+    return removed
+
+
+async def _absorb_issue(
+    db: AsyncSession, survivor: Issue, dup: Issue, survivor_keys: set[tuple]
+) -> None:
+    """Fold ``dup`` into ``survivor`` and delete it. Pure-core child reassignment
+    so the ORM cascade never deletes the rows we just moved."""
+    dup_evidence = (
+        await db.execute(
+            select(IssueEvidence.id, IssueEvidence.trace_id, IssueEvidence.signal_type).where(
+                IssueEvidence.issue_id == dup.id
+            )
+        )
+    ).all()
+    to_delete: list[UUID] = []
+    to_move: list[UUID] = []
+    for ev_id, trace_id, signal_type in dup_evidence:
+        st = signal_type.value if isinstance(signal_type, SignalType) else signal_type
+        key = (trace_id, st)
+        if trace_id is not None and key in survivor_keys:
+            to_delete.append(ev_id)  # would collide on uq_issue_evidence
+        else:
+            to_move.append(ev_id)
+            survivor_keys.add(key)
+    if to_delete:
+        await db.execute(delete(IssueEvidence).where(IssueEvidence.id.in_(to_delete)))
+    if to_move:
+        await db.execute(
+            update(IssueEvidence).where(IssueEvidence.id.in_(to_move)).values(issue_id=survivor.id)
+        )
+    await db.execute(
+        update(IssueEvent).where(IssueEvent.issue_id == dup.id).values(issue_id=survivor.id)
+    )
+
+    # Union metadata onto the survivor.
+    survivor.signal_types = sorted(set(survivor.signal_types or []) | set(dup.signal_types or []))
+    s_first, d_first = _aware(survivor.first_seen_at), _aware(dup.first_seen_at)
+    if d_first is not None and (s_first is None or d_first < s_first):
+        survivor.first_seen_at = dup.first_seen_at
+    s_last, d_last = _aware(survivor.last_seen_at), _aware(dup.last_seen_at)
+    if d_last is not None and (s_last is None or d_last > s_last):
+        survivor.last_seen_at = dup.last_seen_at
+    if not survivor.root_cause and dup.root_cause:
+        survivor.root_cause = dup.root_cause
+        survivor.suggested_fix = dup.suggested_fix
+    if _SEVERITY_RANK.get(dup.severity, 1) < _SEVERITY_RANK.get(survivor.severity, 1):
+        survivor.severity = dup.severity
+    # A still-active duplicate revives a survivor that had been resolved.
+    if survivor.status == IssueStatus.resolved and dup.status in _ACTIVE_STATUSES:
+        survivor.status = IssueStatus.recurring
+        survivor.resolved_at = None
+
+    await db.flush()  # persist child reassignment before the core delete
+    await db.execute(delete(Issue).where(Issue.id == dup.id))
+    db.expunge(dup)  # drop the now-deleted row from the identity map
 
 
 async def _total_root_traces(
@@ -269,10 +406,19 @@ async def _apply_group(
     group: IssueGroup,
     signals: list[Signal],
     known_existing_ids: set[UUID],
+    fingerprint_to_id: dict[str, UUID],
     total_traces: int,
     lone_integration_id: UUID | None,
 ) -> bool:
-    """Create or update one issue from a group. Returns True if a new issue was created."""
+    """Create or update one issue from a group. Returns True if a new issue was created.
+
+    Resolves the target issue in priority order:
+      1. an existing issue the clusterer explicitly matched, then
+      2. any issue (existing, or already created in this pass) with the same
+         fingerprint — the deterministic dedup that prevents duplicates.
+    Falls back to creating a new issue, registering its fingerprint so later
+    groups in this pass dedup against it. ``fingerprint_to_id`` is mutated.
+    """
     members = [signals[i] for i in group.signal_indices]
     if not members:
         return False
@@ -283,8 +429,15 @@ async def _apply_group(
     signal_type_values = sorted({s.signal_type.value for s in members})
     fingerprint = _dominant_fingerprint(members)
 
-    is_new = group.existing_issue_id is None or group.existing_issue_id not in known_existing_ids
-    if is_new:
+    target_id: UUID | None = None
+    if group.existing_issue_id is not None and group.existing_issue_id in known_existing_ids:
+        target_id = group.existing_issue_id
+    elif fingerprint and fingerprint in fingerprint_to_id:
+        target_id = fingerprint_to_id[fingerprint]
+
+    issue = await db.get(Issue, target_id) if target_id is not None else None
+
+    if issue is None:  # nothing to merge into (or a matched issue raced/deleted)
         issue = Issue(
             project_id=project_id,
             integration_id=lone_integration_id,
@@ -301,21 +454,13 @@ async def _apply_group(
         await db.flush()
         db.add(_event(issue.id, "detected", {"signal_count": len(members)}))
         existing_keys: set[tuple] = set()
+        if fingerprint:
+            fingerprint_to_id[fingerprint] = issue.id
+        is_new = True
     else:
-        issue = await db.get(Issue, group.existing_issue_id)
-        if issue is None:  # raced/deleted — treat as new
-            return await _apply_group(
-                db,
-                project_id=project_id,
-                group=IssueGroup(
-                    title=group.title, severity=group.severity,
-                    signal_indices=group.signal_indices, category=group.category,
-                ),
-                signals=signals,
-                known_existing_ids=known_existing_ids,
-                total_traces=total_traces,
-                lone_integration_id=lone_integration_id,
-            )
+        is_new = False
+        if fingerprint:
+            fingerprint_to_id.setdefault(fingerprint, issue.id)
         recurred = issue.status in (IssueStatus.resolved,)
         if recurred:
             issue.status = IssueStatus.recurring
