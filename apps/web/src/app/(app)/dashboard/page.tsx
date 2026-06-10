@@ -5,6 +5,7 @@ import { getDashboardStats, type DashboardStats } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import Tooltip from "@/components/tooltip";
 import { UsageTrendChart } from "./usage-trend-chart";
+import { Sparkline } from "./sparkline";
 
 function InfoIcon() {
   return (
@@ -105,6 +106,9 @@ export default function DashboardPage() {
   const fmtMs = (ms: number | null | undefined) =>
     ms == null ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
 
+  // Chronological daily series for the KPI sparklines.
+  const chrono = [...stats.trends].sort((a, b) => a.date.localeCompare(b.date));
+
   return (
     <div>
       <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
@@ -131,9 +135,9 @@ export default function DashboardPage() {
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {[
-          { label: "Total Traces", value: totals.traces.toLocaleString(), tooltip: "Total number of traces in the selected period" },
-          { label: "Unique Users", value: totals.unique_users.toLocaleString(), tooltip: "Number of distinct users who generated traces" },
-          { label: "Unique Threads", value: totals.unique_threads.toLocaleString(), tooltip: "Number of distinct conversation threads" },
+          { label: "Total Traces", value: totals.traces.toLocaleString(), tooltip: "Total number of traces in the selected period", series: chrono.map((d) => d.total), spark: "text-indigo-500" },
+          { label: "Unique Users", value: totals.unique_users.toLocaleString(), tooltip: "Number of distinct users who generated traces", series: chrono.map((d) => d.unique_users), spark: "text-violet-400" },
+          { label: "Unique Threads", value: totals.unique_threads.toLocaleString(), tooltip: "Number of distinct conversation threads", series: chrono.map((d) => d.unique_threads), spark: "text-sky-400" },
           {
             label: "Feedback Rate",
             value: totals.traces > 0
@@ -141,6 +145,8 @@ export default function DashboardPage() {
               : "0.0%",
             color: "text-green-500",
             tooltip: "Share of traces that received at least one feedback submission (traces with feedback ÷ total traces).",
+            series: chrono.map((d) => (d.total > 0 ? (d.traces_with_feedback / d.total) * 100 : 0)),
+            spark: "text-green-500",
           },
         ].map((s) => (
           <div key={s.label} className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
@@ -151,6 +157,9 @@ export default function DashboardPage() {
               )}
             </p>
             <p className={`text-3xl font-bold ${s.color || ""}`}>{s.value}</p>
+            <div className="mt-3 h-7">
+              <Sparkline data={s.series} className={s.spark} />
+            </div>
           </div>
         ))}
       </div>
@@ -164,20 +173,26 @@ export default function DashboardPage() {
               <InfoIcon />
             </Tooltip>
           </h2>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { label: "p50", value: fmtMs(latency.p50_ms), tooltip: "Median: half of traces are faster than this, half slower. The typical experience." },
-              { label: "p95", value: fmtMs(latency.p95_ms), tooltip: "95% of traces are faster than this; only the slowest 5% are worse." },
-              { label: "p99", value: fmtMs(latency.p99_ms), tooltip: "99% of traces are faster than this; only the worst 1% are slower. The tail, your unluckiest users." },
-            ].map((s) => (
-              <div key={s.label}>
-                <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide">
-                  {s.label}
-                  <Tooltip content={s.tooltip}><InfoIcon /></Tooltip>
-                </p>
-                <p className="text-2xl font-bold">{s.value}</p>
-              </div>
-            ))}
+          <div className="space-y-3">
+            {(() => {
+              const latMax = Math.max(latency.p50_ms ?? 0, latency.p95_ms ?? 0, latency.p99_ms ?? 0, 1);
+              return [
+                { label: "p50", ms: latency.p50_ms, bar: "bg-indigo-300 dark:bg-indigo-400/70", tooltip: "Median: half of traces are faster than this, half slower. The typical experience." },
+                { label: "p95", ms: latency.p95_ms, bar: "bg-indigo-400 dark:bg-indigo-400", tooltip: "95% of traces are faster than this; only the slowest 5% are worse." },
+                { label: "p99", ms: latency.p99_ms, bar: "bg-indigo-600 dark:bg-indigo-500", tooltip: "99% of traces are faster than this; only the worst 1% are slower. The tail, your unluckiest users." },
+              ].map((s) => (
+                <div key={s.label} className="flex items-center gap-3">
+                  <span className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide w-9 shrink-0">
+                    {s.label}
+                    <Tooltip content={s.tooltip}><InfoIcon /></Tooltip>
+                  </span>
+                  <div className="flex-1 h-2.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
+                    <div className={`h-full rounded-full ${s.bar}`} style={{ width: `${((s.ms ?? 0) / latMax) * 100}%` }} />
+                  </div>
+                  <span className="text-sm font-bold tabular-nums w-16 text-right shrink-0">{fmtMs(s.ms)}</span>
+                </div>
+              ));
+            })()}
           </div>
           <p className="text-xs text-gray-400 dark:text-slate-500 mt-3">
             Across {latency.count.toLocaleString()} traces with a recorded duration.
@@ -193,10 +208,10 @@ export default function DashboardPage() {
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
-              { label: "Multi-turn", value: `${(threads.multi_turn_rate * 100).toFixed(0)}%`, tooltip: "Share of threads with more than one trace" },
+              { label: "Multi-turn", value: `${(threads.multi_turn_rate * 100).toFixed(0)}%`, bar: threads.multi_turn_rate, barColor: "bg-indigo-500", tooltip: "Share of threads with more than one trace" },
               { label: "Avg length", value: threads.avg_thread_length.toFixed(1), tooltip: "Average traces per thread" },
               { label: "p95 length", value: String(threads.p95_thread_length), tooltip: "95% of threads are this many traces long or shorter; only the longest 5% have more." },
-              { label: "Retry rate", value: `${(threads.retry_rate * 100).toFixed(0)}%`, color: "text-amber-500", tooltip: "Of threads that hit a failure, the share where the user continued (a retry)" },
+              { label: "Retry rate", value: `${(threads.retry_rate * 100).toFixed(0)}%`, color: "text-amber-500", bar: threads.retry_rate, barColor: "bg-amber-500", tooltip: "Of threads that hit a failure, the share where the user continued (a retry)" },
             ].map((s) => (
               <div key={s.label}>
                 <p className="text-xs text-gray-500 dark:text-slate-400">
@@ -204,6 +219,11 @@ export default function DashboardPage() {
                   {s.tooltip && <Tooltip content={s.tooltip}><InfoIcon /></Tooltip>}
                 </p>
                 <p className={`text-2xl font-bold ${s.color || ""}`}>{s.value}</p>
+                {s.bar !== undefined && (
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
+                    <div className={`h-full rounded-full ${s.barColor}`} style={{ width: `${Math.min(s.bar, 1) * 100}%` }} />
+                  </div>
+                )}
               </div>
             ))}
           </div>
