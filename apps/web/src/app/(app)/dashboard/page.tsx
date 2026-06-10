@@ -101,7 +101,7 @@ export default function DashboardPage() {
     );
   }
 
-  const { totals, top_failures, feedback, latency, threads } = stats;
+  const { totals, feedback, latency, threads } = stats;
   const fmtMs = (ms: number | null | undefined) =>
     ms == null ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
 
@@ -213,6 +213,56 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Feedback Summary */}
+      <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6 mb-8">
+        <h2 className="text-lg font-semibold mb-4">Feedback Summary</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Submissions: counts of individual feedback events. */}
+          <div>
+            <p className="text-xs font-medium text-gray-400 dark:text-slate-500 uppercase tracking-wide mb-2">Submissions</p>
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                { label: "Total Feedback", value: feedback.total, tooltip: "Total feedback submissions in this period. A single trace can receive several, so this is usually higher than the number of traces with feedback." },
+                { label: "Positive", value: feedback.positive, color: "text-green-500", tooltip: "Feedback submissions marked positive." },
+                { label: "Negative", value: feedback.negative, color: "text-red-400", tooltip: "Feedback submissions marked negative. Positive + Negative = Total Feedback." },
+              ].map((f) => (
+                <div key={f.label}>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">
+                    {f.label}
+                    {f.tooltip && <Tooltip content={f.tooltip}><InfoIcon /></Tooltip>}
+                  </p>
+                  <p className={`text-2xl font-bold ${f.color || ""}`}>{f.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Coverage: how many traces did or didn't get feedback. These two sum to Total Traces. */}
+          <div>
+            <p className="text-xs font-medium text-gray-400 dark:text-slate-500 uppercase tracking-wide mb-2">Trace coverage</p>
+            <div className="grid grid-cols-2 gap-4">
+              {[
+                { label: "Traces with feedback", value: feedback.traces_with_feedback, color: "text-green-500", tooltip: "Distinct traces that received at least one feedback submission." },
+                { label: "No feedback", value: feedback.no_feedback_traces, color: "text-gray-400 dark:text-slate-500", tooltip: "Traces that received no feedback. Traces with feedback + No feedback = Total Traces." },
+              ].map((f) => (
+                <div key={f.label}>
+                  <p className="text-xs text-gray-500 dark:text-slate-400">
+                    {f.label}
+                    {f.tooltip && <Tooltip content={f.tooltip}><InfoIcon /></Tooltip>}
+                  </p>
+                  <p className={`text-2xl font-bold ${f.color || ""}`}>{f.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <p className="text-xs text-gray-400 dark:text-slate-500 mt-4">
+          {feedback.traces_with_feedback.toLocaleString()} of {totals.traces.toLocaleString()} traces have feedback.
+          Total Feedback counts submissions, not traces, so it won&apos;t add up with No feedback.
+        </p>
+      </div>
+
       {/* Usage trends chart */}
       <UsageTrendChart data={[...stats.trends].sort((a, b) => a.date.localeCompare(b.date))} />
 
@@ -276,68 +326,6 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Bottom row: Feedback Summary + Top Failures */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6">
-          <h2 className="text-lg font-semibold mb-4">Feedback Summary</h2>
-
-          {/* Submissions: counts of individual feedback events. */}
-          <p className="text-xs font-medium text-gray-400 dark:text-slate-500 uppercase tracking-wide mb-2">Submissions</p>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { label: "Total Feedback", value: feedback.total, tooltip: "Total feedback submissions in this period. A single trace can receive several, so this is usually higher than the number of traces with feedback." },
-              { label: "Positive", value: feedback.positive, color: "text-green-500", tooltip: "Feedback submissions marked positive." },
-              { label: "Negative", value: feedback.negative, color: "text-red-400", tooltip: "Feedback submissions marked negative. Positive + Negative = Total Feedback." },
-            ].map((f) => (
-              <div key={f.label}>
-                <p className="text-xs text-gray-500 dark:text-slate-400">
-                  {f.label}
-                  {f.tooltip && <Tooltip content={f.tooltip}><InfoIcon /></Tooltip>}
-                </p>
-                <p className={`text-2xl font-bold ${f.color || ""}`}>{f.value}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Coverage: how many traces did or didn't get feedback. These two sum to Total Traces. */}
-          <p className="text-xs font-medium text-gray-400 dark:text-slate-500 uppercase tracking-wide mt-5 mb-2">Trace coverage</p>
-          <div className="grid grid-cols-2 gap-4">
-            {[
-              { label: "Traces with feedback", value: feedback.traces_with_feedback, color: "text-green-500", tooltip: "Distinct traces that received at least one feedback submission." },
-              { label: "No feedback", value: feedback.no_feedback_traces, color: "text-gray-400 dark:text-slate-500", tooltip: "Traces that received no feedback. Traces with feedback + No feedback = Total Traces." },
-            ].map((f) => (
-              <div key={f.label}>
-                <p className="text-xs text-gray-500 dark:text-slate-400">
-                  {f.label}
-                  {f.tooltip && <Tooltip content={f.tooltip}><InfoIcon /></Tooltip>}
-                </p>
-                <p className={`text-2xl font-bold ${f.color || ""}`}>{f.value}</p>
-              </div>
-            ))}
-          </div>
-
-          <p className="text-xs text-gray-400 dark:text-slate-500 mt-4">
-            {feedback.traces_with_feedback.toLocaleString()} of {totals.traces.toLocaleString()} traces have feedback.
-            Total Feedback counts submissions, not traces, so it won&apos;t add up with No feedback.
-          </p>
-        </div>
-
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6">
-          <h2 className="text-lg font-semibold mb-4">Top Failure Types</h2>
-          {top_failures.length === 0 ? (
-            <p className="text-gray-500 dark:text-slate-400 text-sm">No failures detected.</p>
-          ) : (
-            <ul className="space-y-3">
-              {top_failures.map((f) => (
-                <li key={f.failure_type} className="flex items-center justify-between">
-                  <span className="text-sm">{f.failure_type}</span>
-                  <span className="text-sm text-gray-500 dark:text-slate-400">{f.count} ({(f.percentage * 100).toFixed(1)}%)</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
