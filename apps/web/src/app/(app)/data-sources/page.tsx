@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 
 import { getIndexExplorerProviders, getIndexSummary } from "@/lib/api";
 import type {
@@ -10,14 +9,20 @@ import type {
 } from "@/lib/api-types/index-explorer";
 import { StatCard } from "@/components/eval-shared";
 import { IndexTree } from "@/components/data-sources/index-tree";
+import { ProviderManager } from "@/components/coverage/provider-manager";
+import { usePermissions } from "@/components/permissions-context";
 
 const inputCls =
   "px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm";
 
 export default function DataSourcesPage() {
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("coverage");
+
   const [providers, setProviders] = useState<IndexProviderOption[]>([]);
   const [providerId, setProviderId] = useState("");
   const [providersLoading, setProvidersLoading] = useState(true);
+  const [managerOpen, setManagerOpen] = useState(false);
 
   const [summary, setSummary] = useState<IndexSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -26,16 +31,25 @@ export default function DataSourcesPage() {
   // Ordered list of fields the tree groups by (top → bottom).
   const [groupBy, setGroupBy] = useState<string[]>([]);
 
+  const loadProviders = useCallback(async () => {
+    try {
+      const { data } = await getIndexExplorerProviders();
+      setProviders(data);
+      // Keep the current selection if it still exists; otherwise default to the first.
+      setProviderId((prev) =>
+        data.some((p) => p.id === prev) ? prev : (data[0]?.id ?? ""),
+      );
+    } catch {
+      // Ignore — the empty state covers a failed/empty load.
+    } finally {
+      setProvidersLoading(false);
+    }
+  }, []);
+
   // Load providers once.
   useEffect(() => {
-    getIndexExplorerProviders()
-      .then(({ data }) => {
-        setProviders(data);
-        if (data.length > 0) setProviderId(data[0].id);
-      })
-      .catch(() => {})
-      .finally(() => setProvidersLoading(false));
-  }, []);
+    loadProviders();
+  }, [loadProviders]);
 
   // Load summary + default grouping when the provider changes.
   useEffect(() => {
@@ -83,19 +97,27 @@ export default function DataSourcesPage() {
             type, space, or URL into the indexed documents.
           </p>
         </div>
-        {providers.length > 0 && (
-          <select
-            value={providerId}
-            onChange={(e) => setProviderId(e.target.value)}
-            className={inputCls}
+        <div className="flex items-center gap-2">
+          {providers.length > 0 && (
+            <select
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value)}
+              className={inputCls}
+            >
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={() => setManagerOpen(true)}
+            className="px-3 py-2 rounded-lg text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700"
           >
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        )}
+            Manage providers
+          </button>
+        </div>
       </div>
 
       {providersLoading ? (
@@ -105,12 +127,12 @@ export default function DataSourcesPage() {
           <p className="text-sm text-gray-500 dark:text-slate-400">
             No index providers connected yet. Connect a retrieval index to explore its contents.
           </p>
-          <Link
-            href="/coverage"
-            className="inline-block mt-3 px-3 py-2 rounded-lg text-sm bg-indigo-600 text-white hover:bg-indigo-500"
+          <button
+            onClick={() => setManagerOpen(true)}
+            className="mt-3 px-3 py-2 rounded-lg text-sm bg-indigo-600 text-white hover:bg-indigo-500"
           >
             Connect an index
-          </Link>
+          </button>
         </div>
       ) : (
         <>
@@ -188,6 +210,13 @@ export default function DataSourcesPage() {
           )}
         </>
       )}
+
+      <ProviderManager
+        open={managerOpen}
+        canEdit={canEdit}
+        onClose={() => setManagerOpen(false)}
+        onChanged={loadProviders}
+      />
     </div>
   );
 }
