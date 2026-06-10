@@ -36,6 +36,14 @@ const SEVERITY_COLORS: Record<string, string> = {
   low: "text-green-400",
 };
 
+function fmtDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0s";
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 function simpleDiff(a: string, b: string): { left: string[]; right: string[] } {
   const linesA = a.split("\n");
   const linesB = b.split("\n");
@@ -62,10 +70,19 @@ export default function PromptsPage() {
   const [importing, setImporting] = useState(false);
   const [githubRepo, setGithubRepo] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<PromptExtractionStatus | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const extracting = extraction?.status === "pending" || extraction?.status === "running";
+
+  // Tick a 1s clock while extracting so the elapsed timers count up live.
+  useEffect(() => {
+    if (!extracting) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [extracting]);
 
   const loadPrompts = () => {
     setLoading(true);
@@ -292,32 +309,57 @@ export default function PromptsPage() {
         <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">{error}</div>
       )}
 
-      {extracting && (
-        <div className="mb-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-sm">
-          <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-300 font-medium">
-            <span className="inline-block w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-            <span>
-              Extracting prompts from {githubRepo}
-              {extraction?.progress_message ? ` — ${extraction.progress_message}` : "…"}
-            </span>
+      {extracting && (() => {
+        const log = extraction?.progress_log ?? [];
+        const startTs = extraction?.started_at
+          ? Date.parse(extraction.started_at)
+          : (log[0] ? Date.parse(log[0].t) : now);
+        const visible = log.slice(-6);
+        const base = log.length - visible.length;
+        return (
+          <div className="mb-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-sm">
+            <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-300 font-medium">
+              <span className="inline-block w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+              <span className="flex-1">
+                Extracting prompts from {githubRepo}
+                {extraction?.progress_message ? ` — ${extraction.progress_message}` : "…"}
+              </span>
+              <span className="tabular-nums text-xs text-indigo-500/80 dark:text-indigo-400/80">
+                {fmtDuration(now - startTs)}
+              </span>
+            </div>
+            {visible.length > 0 && (
+              <ul className="mt-2 ml-5 space-y-0.5 font-mono text-[11px] text-gray-500 dark:text-slate-400">
+                {visible.map((entry, i) => {
+                  const fi = base + i;
+                  const isLast = fi === log.length - 1;
+                  const endTs = isLast ? now : Date.parse(log[fi + 1].t);
+                  return (
+                    <li
+                      key={`${entry.t}-${fi}`}
+                      className={`flex items-baseline gap-2 ${isLast ? "text-indigo-600 dark:text-indigo-300" : ""}`}
+                    >
+                      <span className="flex-1 truncate">
+                        <span className="text-gray-400 dark:text-slate-600">›</span> {entry.msg}
+                      </span>
+                      <span className="tabular-nums text-gray-400 dark:text-slate-600 shrink-0">
+                        {fmtDuration(endTs - Date.parse(entry.t))}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
-          {(extraction?.progress_log?.length ?? 0) > 0 && (
-            <ul className="mt-2 ml-5 space-y-0.5 font-mono text-[11px] text-gray-500 dark:text-slate-400">
-              {extraction!.progress_log.slice(-6).map((entry, i, arr) => (
-                <li
-                  key={`${entry.t}-${i}`}
-                  className={i === arr.length - 1 ? "text-indigo-600 dark:text-indigo-300" : ""}
-                >
-                  <span className="text-gray-400 dark:text-slate-600">›</span> {entry.msg}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+        );
+      })()}
       {extraction?.status === "completed" && (
         <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-600 dark:text-emerald-300 text-sm">
-          Extracted {extraction.extracted_count} prompt{extraction.extracted_count !== 1 ? "s" : ""} from {githubRepo}.
+          Extracted {extraction.extracted_count} prompt{extraction.extracted_count !== 1 ? "s" : ""} from {githubRepo}
+          {extraction.started_at && extraction.completed_at
+            ? ` in ${fmtDuration(Date.parse(extraction.completed_at) - Date.parse(extraction.started_at))}`
+            : ""}
+          .
         </div>
       )}
 

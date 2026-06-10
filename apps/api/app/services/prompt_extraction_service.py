@@ -33,6 +33,9 @@ from app.services.prompt_analysis import (
 logger = logging.getLogger(__name__)
 
 _EXTRACTION_REQUEST_LIMIT = 25
+# Wall-clock safety net: the request_limit caps turns but not time. A slow or
+# hung model turn would otherwise leave the run "stuck" forever — fail cleanly.
+_EXTRACTION_TIMEOUT_SECONDS = 900
 _USER_PROMPT = (
     "Find all LLM prompts defined in this repository and return them in the "
     "structured format. Start by grepping for common prompt signals, then read "
@@ -128,28 +131,44 @@ async def extract_prompts_from_repo(
             )
 
             turn_count = 0
-            output: PromptExtractionOutput | None = None
-            usage = None
 
-            async with agent.iter(_USER_PROMPT, deps=deps, usage_limits=usage_limits) as run_ctx:
-                async for node in run_ctx:
-                    if isinstance(node, ModelRequestNode):
-                        turn_count += 1
-                        await _update_progress(
-                            db, extraction,
-                            num_turns=turn_count,
-                            progress_message="Reading the codebase…" if turn_count == 1
-                            else "Analyzing the codebase…",
-                        )
-                    elif isinstance(node, CallToolsNode):
-                        progress_msg, log_msg = _describe_activity(node)
-                        await _update_progress(
-                            db, extraction,
-                            progress_message=progress_msg,
-                            log_entry=log_msg,
-                        )
-                output = run_ctx.result.output if run_ctx.result else None
-                usage = run_ctx.result.usage if run_ctx.result else None
+            async def _drive() -> tuple[PromptExtractionOutput | None, object]:
+                nonlocal turn_count
+                _output: PromptExtractionOutput | None = None
+                _usage = None
+                async with agent.iter(
+                    _USER_PROMPT, deps=deps, usage_limits=usage_limits
+                ) as run_ctx:
+                    async for node in run_ctx:
+                        if isinstance(node, ModelRequestNode):
+                            turn_count += 1
+                            await _update_progress(
+                                db, extraction,
+                                num_turns=turn_count,
+                                progress_message="Reading the codebase…" if turn_count == 1
+                                else "Analyzing the codebase…",
+                            )
+                        elif isinstance(node, CallToolsNode):
+                            progress_msg, log_msg = _describe_activity(node)
+                            await _update_progress(
+                                db, extraction,
+                                progress_message=progress_msg,
+                                log_entry=log_msg,
+                            )
+                    _output = run_ctx.result.output if run_ctx.result else None
+                    _usage = run_ctx.result.usage if run_ctx.result else None
+                return _output, _usage
+
+            try:
+                output, usage = await asyncio.wait_for(
+                    _drive(), timeout=_EXTRACTION_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError as exc:
+                minutes = _EXTRACTION_TIMEOUT_SECONDS // 60
+                raise RuntimeError(
+                    f"Extraction timed out after {minutes} minutes. The codebase may "
+                    f"be very large — try again or point the Code Agent at a narrower repo."
+                ) from exc
 
             if output is None:
                 raise RuntimeError("Extraction agent returned no output")
