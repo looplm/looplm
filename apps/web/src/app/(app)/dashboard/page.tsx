@@ -109,6 +109,13 @@ export default function DashboardPage() {
   const fmtRegression = (metric: string, v: number) =>
     metric === "latency_p95" ? fmtMs(Math.round(v)) : `${(v * 100).toFixed(1)}%`;
 
+  // "Previous period" = the equally-long window immediately before the selected one.
+  const periodStart = new Date(stats.period.start);
+  const prevWindowMs = new Date(stats.period.end).getTime() - periodStart.getTime();
+  const prevStart = new Date(periodStart.getTime() - prevWindowMs);
+  const fmtDay = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const prevRangeLabel = `${fmtDay(prevStart)} – ${fmtDay(periodStart)}`;
+
   // Chronological daily series for the KPI sparklines.
   const chrono = [...stats.trends].sort((a, b) => a.date.localeCompare(b.date));
 
@@ -121,6 +128,10 @@ export default function DashboardPage() {
         <div className="mb-8 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 p-4">
           <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">
             ⚠️ Regression vs previous period
+            <span className="font-normal text-amber-700 dark:text-amber-400/90"> ({prevRangeLabel})</span>
+            <Tooltip content={`Compared against the equally-long window immediately before the selected period — here ${prevRangeLabel}. A metric is flagged when it got materially worse.`}>
+              <InfoIcon />
+            </Tooltip>
           </p>
           <div className="flex flex-wrap gap-x-6 gap-y-1">
             {stats.regressions.map((r) => (
