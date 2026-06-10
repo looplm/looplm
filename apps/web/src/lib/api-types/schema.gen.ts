@@ -1828,6 +1828,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/index-explorer/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Providers
+         * @description Read-only provider list for the explorer's picker.
+         */
+        get: operations["list_providers_api_index_explorer_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/index-explorer/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Summary
+         * @description Total document count + the dimensions the corpus can be grouped by.
+         */
+        get: operations["summary_api_index_explorer_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/index-explorer/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tree
+         * @description One lazily-expanded level of the index tree.
+         *
+         *     ``path`` holds the already-selected values for ``group_by[:len(path)]``. When
+         *     grouping keys remain, return the next field's distribution (filtered by the
+         *     path); once the path is complete, return sampled documents for the leaf.
+         */
+        get: operations["tree_api_index_explorer_tree_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations": {
         parameters: {
             query?: never;
@@ -4682,6 +4746,22 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /** IndexPartitionKey */
+        IndexPartitionKey: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Multivalued
+             * @default false
+             */
+            multivalued: boolean;
+        };
         /** IndexProviderCreate */
         IndexProviderCreate: {
             /** Api Key */
@@ -4701,6 +4781,26 @@ export interface components {
         IndexProviderListResponse: {
             /** Data */
             data: components["schemas"]["IndexProviderResponse"][];
+        };
+        /**
+         * IndexProviderOption
+         * @description Minimal provider projection for the explorer's picker (read-only).
+         */
+        IndexProviderOption: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
+        };
+        /** IndexProviderOptionListResponse */
+        IndexProviderOptionListResponse: {
+            /** Data */
+            data: components["schemas"]["IndexProviderOption"][];
         };
         /** IndexProviderResponse */
         IndexProviderResponse: {
@@ -4742,6 +4842,65 @@ export interface components {
             } | null;
             /** Name */
             name?: string | null;
+        };
+        /**
+         * IndexSummaryResponse
+         * @description Headline numbers + the dimensions the corpus can be grouped by.
+         */
+        IndexSummaryResponse: {
+            /** Document Count */
+            document_count: number;
+            /** Partition Keys */
+            partition_keys: components["schemas"]["IndexPartitionKey"][];
+        };
+        /**
+         * IndexTreeDocument
+         * @description A sampled document leaf.
+         */
+        IndexTreeDocument: {
+            /** Id */
+            id: string;
+            /** Snippet */
+            snippet?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+        };
+        /**
+         * IndexTreeGroupNode
+         * @description One value of the current grouping field, with its document count.
+         */
+        IndexTreeGroupNode: {
+            /** Doc Count */
+            doc_count: number;
+            /** Has Children */
+            has_children: boolean;
+            /** Value */
+            value: string;
+        };
+        /**
+         * IndexTreeResponse
+         * @description One lazily-expanded level of the tree.
+         *
+         *     ``level == "group"`` → ``groups`` holds the next grouping field's values.
+         *     ``level == "documents"`` → ``documents`` holds sampled docs for the leaf
+         *     (``parent_doc_count`` is the value's total, so the UI can show "N of M").
+         */
+        IndexTreeResponse: {
+            /** Documents */
+            documents?: components["schemas"]["IndexTreeDocument"][];
+            /** Groups */
+            groups?: components["schemas"]["IndexTreeGroupNode"][];
+            /** Key */
+            key?: string | null;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "group" | "documents";
+            /** Parent Doc Count */
+            parent_doc_count?: number | null;
         };
         /** IngestKeyCreate */
         IngestKeyCreate: {
@@ -10617,6 +10776,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JsonImportListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_providers_api_index_explorer_providers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexProviderOptionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    summary_api_index_explorer_summary_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tree_api_index_explorer_tree_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+                group_by: string[];
+                path?: string[];
+                limit?: number;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexTreeResponse"];
                 };
             };
             /** @description Validation Error */
