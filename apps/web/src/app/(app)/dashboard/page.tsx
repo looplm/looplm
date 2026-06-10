@@ -257,8 +257,8 @@ export default function DashboardPage() {
               />
             </div>
             <div className="flex gap-4 mt-2 text-xs text-gray-500 dark:text-slate-400">
-              <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle" />With feedback {feedback.traces_with_feedback.toLocaleString()}</span>
-              <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 dark:bg-slate-700 mr-1.5 align-middle" />No feedback {feedback.no_feedback_traces.toLocaleString()}</span>
+              <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle" />With feedback {feedback.traces_with_feedback.toLocaleString()} <span className="text-gray-400 dark:text-slate-500">({totals.traces > 0 ? Math.round((feedback.traces_with_feedback / totals.traces) * 100) : 0}%)</span></span>
+              <span><span className="inline-block w-2 h-2 rounded-full bg-gray-200 dark:bg-slate-700 mr-1.5 align-middle" />No feedback {feedback.no_feedback_traces.toLocaleString()} <span className="text-gray-400 dark:text-slate-500">({totals.traces > 0 ? Math.round((feedback.no_feedback_traces / totals.traces) * 100) : 0}%)</span></span>
             </div>
           </div>
 
@@ -278,8 +278,8 @@ export default function DashboardPage() {
               <div className="bg-red-400" style={{ width: `${feedback.total > 0 ? (feedback.negative / feedback.total) * 100 : 0}%` }} />
             </div>
             <div className="flex gap-4 mt-2 text-xs text-gray-500 dark:text-slate-400">
-              <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle" />Positive {feedback.positive.toLocaleString()}</span>
-              <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5 align-middle" />Negative {feedback.negative.toLocaleString()}</span>
+              <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5 align-middle" />Positive {feedback.positive.toLocaleString()} <span className="text-gray-400 dark:text-slate-500">({feedback.total > 0 ? Math.round((feedback.positive / feedback.total) * 100) : 0}%)</span></span>
+              <span><span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5 align-middle" />Negative {feedback.negative.toLocaleString()} <span className="text-gray-400 dark:text-slate-500">({feedback.total > 0 ? Math.round((feedback.negative / feedback.total) * 100) : 0}%)</span></span>
             </div>
           </div>
         </div>
