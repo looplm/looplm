@@ -25,7 +25,7 @@ import type { TopQuestionsResponse, SuggestionRunResponse } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
 
-type Tab = "feedback" | "graders" | "suggestions" | "top-questions";
+type Tab = "feedback" | "suggestions" | "top-questions";
 
 export function useFeedbackPage() {
   const [tab, setTab] = useState<Tab>(() => {
@@ -41,7 +41,6 @@ export function useFeedbackPage() {
   const [page, setPage] = useState(1);
   const [filterValue, setFilterValue] = useState<string>("all");
   const [filterVerdict, setFilterVerdict] = useState<string>("all");
-  const [filterName, setFilterName] = useState<string>("all");
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const globalFilters = useGlobalFilters();
@@ -250,12 +249,6 @@ export function useFeedbackPage() {
         if (filterValue === "positive") params.value = "1";
         else if (filterValue === "negative") params.value = "0";
         if (filterVerdict !== "all") params.verdict = filterVerdict;
-      } else if (tab === "graders") {
-        // Grader tab: show non-user-feedback scores
-        if (filterName && filterName !== "all") params.score_name = filterName;
-        else params.exclude_score_name = "user-feedback";
-        if (filterValue === "positive") params.value = "1";
-        else if (filterValue === "negative") params.value = "0";
       }
 
       if (globalFilters.environment && globalFilters.environment !== "all") {
@@ -289,7 +282,7 @@ export function useFeedbackPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, filterValue, filterVerdict, filterName, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames, tab, evalCompleted]);
+  }, [page, filterValue, filterVerdict, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames, tab, evalCompleted]);
 
   const loadSuggestions = useCallback(async () => {
     setSugLoading(true);
@@ -433,7 +426,7 @@ export function useFeedbackPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [tab, filterValue, filterVerdict, filterName, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
+  }, [tab, filterValue, filterVerdict, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
 
   useEffect(() => {
     localStorage.setItem("feedback-tab", tab);
@@ -482,34 +475,6 @@ export function useFeedbackPage() {
     }
   }
 
-  // Build grader chart data
-  const graderChartData = (() => {
-    if (!stats || tab !== "graders") return null;
-    const graderTrends = stats.grader_trends ?? {};
-
-    if (filterName && filterName !== "all" && graderTrends[filterName]) {
-      return {
-        data: graderTrends[filterName].map((e) => ({ date: e.date, positive: e.passed, negative: e.failed, total: e.total })),
-        title: `${filterName.replace("grader_", "").replace(/_/g, " ")} Trend`,
-      };
-    }
-
-    // Aggregate all graders by date
-    const byDate: Record<string, { passed: number; failed: number; total: number }> = {};
-    for (const entries of Object.values(graderTrends)) {
-      for (const e of entries) {
-        const d = byDate[e.date] ?? (byDate[e.date] = { passed: 0, failed: 0, total: 0 });
-        d.passed += e.passed;
-        d.failed += e.failed;
-        d.total += e.total;
-      }
-    }
-    const data = Object.entries(byDate)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, v]) => ({ date, positive: v.passed, negative: v.failed, total: v.total }));
-    return data.length > 0 ? { data, title: "Grader Trend" } : null;
-  })();
-
   const tabClass = (t: Tab) =>
     `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
       tab === t
@@ -526,7 +491,6 @@ export function useFeedbackPage() {
     page, setPage,
     filterValue, setFilterValue,
     filterVerdict, setFilterVerdict,
-    filterName, setFilterName,
     hoveredBar, setHoveredBar,
     fileInputRef,
     suggestions,
@@ -551,7 +515,6 @@ export function useFeedbackPage() {
     // Computed
     evalRunning,
     configuredVerdicts,
-    graderChartData,
     tabClass,
     // Handlers
     handleSaveConfig,

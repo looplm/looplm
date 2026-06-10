@@ -25,7 +25,6 @@ export default function FeedbackPage() {
     page, setPage,
     filterValue, setFilterValue,
     filterVerdict, setFilterVerdict,
-    filterName, setFilterName,
     hoveredBar, setHoveredBar,
     fileInputRef,
     suggestions,
@@ -49,7 +48,6 @@ export default function FeedbackPage() {
     topQuestionsRunning,
     evalRunning,
     configuredVerdicts,
-    graderChartData,
     tabClass,
     handleSaveConfig,
     handleImport,
@@ -65,7 +63,7 @@ export default function FeedbackPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold">Feedback & Graders</h1>
+        <h1 className="text-3xl font-bold">Feedback</h1>
         <div className="flex gap-2">
           <input
             ref={fileInputRef}
@@ -230,32 +228,6 @@ export default function FeedbackPage() {
             </div>
           )}
 
-          {/* Grader Trends Chart */}
-          {graderChartData && (
-            <TrendBarChart
-              title={graderChartData.title}
-              data={graderChartData.data}
-              positiveLabel="Passed"
-              negativeLabel="Failed"
-              hoveredBar={hoveredBar}
-              hoverOffset={10000}
-              onHover={setHoveredBar}
-            />
-          )}
-
-          {stats && tab === "graders" && stats.grader_stats.length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              {stats.grader_stats.map((g) => (
-                <StatCard
-                  key={g.name}
-                  label={g.name.replace("grader_", "").replace(/_/g, " ")}
-                  value={`${(g.pass_rate * 100).toFixed(0)}%`}
-                  sub={`${g.passed}/${g.total} passed`}
-                />
-              ))}
-            </div>
-          )}
-
           {/* Evaluation progress indicator */}
           {evalRunning && evalResult && tab === "feedback" && (
             <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-900/50">
@@ -284,40 +256,23 @@ export default function FeedbackPage() {
               className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm text-gray-600 dark:text-slate-300"
             >
               <option value="all">All</option>
-              <option value="positive">{tab === "feedback" ? "Positive" : "Passed"}</option>
-              <option value="negative">{tab === "feedback" ? "Negative" : "Failed"}</option>
+              <option value="positive">Positive</option>
+              <option value="negative">Negative</option>
             </select>
 
-            {tab === "feedback" && (
-              <select
-                value={filterVerdict}
-                onChange={(e) => setFilterVerdict(e.target.value)}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm text-gray-600 dark:text-slate-300"
-              >
-                <option value="all">All Verdicts</option>
-                {configuredVerdicts.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-                <option value="none">Not evaluated</option>
-              </select>
-            )}
-
-            {tab === "graders" && stats && stats.grader_stats.length > 0 && (
-              <select
-                value={filterName}
-                onChange={(e) => setFilterName(e.target.value)}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm text-gray-600 dark:text-slate-300"
-              >
-                <option value="all">All Graders</option>
-                {stats.grader_stats.map((g) => (
-                  <option key={g.name} value={g.name}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            )}
+            <select
+              value={filterVerdict}
+              onChange={(e) => setFilterVerdict(e.target.value)}
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm text-gray-600 dark:text-slate-300"
+            >
+              <option value="all">All Verdicts</option>
+              {configuredVerdicts.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+              <option value="none">Not evaluated</option>
+            </select>
           </div>
 
           {/* Table */}
@@ -325,7 +280,7 @@ export default function FeedbackPage() {
             <p className="text-gray-500 dark:text-slate-400">Loading...</p>
           ) : !feedbackResp || feedbackResp.data.length === 0 ? (
             <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
-              No {tab === "feedback" ? "feedback" : "grader scores"} found yet. Sync your Langfuse integration to pull scores.
+              No feedback found yet. Sync your Langfuse integration to pull scores.
             </div>
           ) : (
             <>
@@ -334,14 +289,11 @@ export default function FeedbackPage() {
                   <thead>
                     <tr className="border-b border-gray-100 dark:border-slate-800 text-left text-gray-500 dark:text-slate-400">
                       <th className="px-4 py-3 font-medium">Time</th>
-                      {tab === "graders" && <th className="px-4 py-3 font-medium">Grader</th>}
                       <th className="px-4 py-3 font-medium">User Question</th>
-                      <th className="px-4 py-3 font-medium w-20 text-center">
-                        {tab === "feedback" ? "Value" : "Result"}
-                      </th>
+                      <th className="px-4 py-3 font-medium w-20 text-center">Value</th>
                       <th className="px-4 py-3 font-medium">Comment</th>
-                      {tab === "feedback" && <th className="px-4 py-3 font-medium">Verdict</th>}
-                      {tab === "feedback" && <th className="px-4 py-3 font-medium w-20 text-center">Conf.</th>}
+                      <th className="px-4 py-3 font-medium">Verdict</th>
+                      <th className="px-4 py-3 font-medium w-20 text-center">Conf.</th>
                       <th className="px-4 py-3 font-medium w-20">Trace</th>
                     </tr>
                   </thead>
@@ -350,7 +302,6 @@ export default function FeedbackPage() {
                       <FeedbackTableRow
                         key={item.id}
                         item={item}
-                        tab={tab}
                         configuredVerdicts={configuredVerdicts}
                         onSelect={setSelectedFeedback}
                       />
