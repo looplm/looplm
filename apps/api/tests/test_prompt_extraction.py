@@ -6,15 +6,14 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
 
 from app.models.models import Integration, IntegrationType, Prompt
 from app.models.project import Project
 from app.models.prompts import PromptExtraction
 from app.schemas.prompts import ExtractedPrompt, PromptLocation, PromptLocationList
-from app.services import prompt_extraction_service
-from app.services.prompt_extraction_service import extract_prompts_from_repo
+from app.services import prompt_extraction_service as pes
+from app.services.prompt_extraction_service import extract_prompts_from_repo, recheck_prompt
 
 
 class _Factory:
@@ -39,26 +38,23 @@ class _Usage:
         self.output_tokens = output_tokens
 
 
-@pytest_asyncio.fixture
-async def pending_extraction(db_session, test_project: Project):
-    extraction = PromptExtraction(id=uuid4(), project_id=test_project.id, status="pending")
-    db_session.add(extraction)
-    await db_session.commit()
-    await db_session.refresh(extraction)
-    return extraction
+def _patch_pipeline(monkeypatch, locations, extracts, *, calls: list | None = None):
+    """Stub the two LLM phases. `extracts` maps location name -> ExtractedPrompt.
 
-
-def _patch_pipeline(monkeypatch, locations, extracts):
-    """Stub the two LLM phases. `extracts` maps location name -> ExtractedPrompt."""
+    When `calls` is given, each extracted location name is appended to it so a
+    test can assert which prompts actually triggered an LLM extraction.
+    """
 
     async def fake_discover(agent, deps, limits, *, db, extraction):
         return PromptLocationList(summary="found prompts", locations=locations), _Usage()
 
     async def fake_extract(agent, deps, loc, limits):
+        if calls is not None:
+            calls.append(loc.name)
         return extracts.get(loc.name), _Usage()
 
-    monkeypatch.setattr(prompt_extraction_service, "_discover_locations", fake_discover)
-    monkeypatch.setattr(prompt_extraction_service, "_extract_one", fake_extract)
+    monkeypatch.setattr(pes, "_discover_locations", fake_discover)
+    monkeypatch.setattr(pes, "_extract_one", fake_extract)
 
 
 async def _run(db_session, project: Project, tmp_path: Path):
@@ -134,16 +130,13 @@ async def test_pipeline_extracts_and_persists_prompts(
 
 
 @pytest.mark.asyncio
-async def test_re_extraction_prunes_stale_prompts(
+async def test_resume_skips_already_saved(
     db_session, test_project: Project, monkeypatch, tmp_path: Path
 ):
-    # First run finds two prompts.
+    # First run saves A and B.
     _patch_pipeline(
         monkeypatch,
-        [
-            PromptLocation(name="A", file_path="a.py"),
-            PromptLocation(name="B", file_path="b.py"),
-        ],
+        [PromptLocation(name="A", file_path="a.py"), PromptLocation(name="B", file_path="b.py")],
         {
             "A": ExtractedPrompt(name="A", template="alpha", variables=[], file_path="a.py"),
             "B": ExtractedPrompt(name="B", template="beta", variables=[], file_path="b.py"),
@@ -151,14 +144,86 @@ async def test_re_extraction_prunes_stale_prompts(
     )
     await _run(db_session, test_project, tmp_path)
 
-    # Second run finds only A (with updated text); B should be pruned.
+    # Second run discovers A, B (already saved) and a new C. Only C is extracted.
+    calls: list[str] = []
+    _patch_pipeline(
+        monkeypatch,
+        [
+            PromptLocation(name="A", file_path="a.py"),
+            PromptLocation(name="B", file_path="b.py"),
+            PromptLocation(name="C", file_path="c.py"),
+        ],
+        {"C": ExtractedPrompt(name="C", template="gamma", variables=[], file_path="c.py")},
+        calls=calls,
+    )
+    await _run(db_session, test_project, tmp_path)
+
+    assert calls == ["C"]  # A and B were not re-extracted
+    _, prompts = await _github_prompts(db_session, test_project)
+    assert {p.name for p in prompts} == {"A", "B", "C"}
+
+
+@pytest.mark.asyncio
+async def test_reextraction_prunes_removed_prompts(
+    db_session, test_project: Project, monkeypatch, tmp_path: Path
+):
+    _patch_pipeline(
+        monkeypatch,
+        [PromptLocation(name="A", file_path="a.py"), PromptLocation(name="B", file_path="b.py")],
+        {
+            "A": ExtractedPrompt(name="A", template="alpha", variables=[], file_path="a.py"),
+            "B": ExtractedPrompt(name="B", template="beta", variables=[], file_path="b.py"),
+        },
+    )
+    await _run(db_session, test_project, tmp_path)
+
+    # B is gone from the repo now → discovery returns only A → B is pruned.
     _patch_pipeline(
         monkeypatch,
         [PromptLocation(name="A", file_path="a.py")],
-        {"A": ExtractedPrompt(name="A", template="alpha v2", variables=[], file_path="a.py")},
+        {"A": ExtractedPrompt(name="A", template="alpha", variables=[], file_path="a.py")},
     )
     await _run(db_session, test_project, tmp_path)
 
     _, prompts = await _github_prompts(db_session, test_project)
     assert {p.name for p in prompts} == {"A"}
-    assert prompts[0].template == "alpha v2"
+
+
+@pytest.mark.asyncio
+async def test_recheck_updates_when_changed(
+    db_session, test_project: Project, monkeypatch, tmp_path: Path
+):
+    _patch_pipeline(
+        monkeypatch,
+        [PromptLocation(name="A", file_path="a.py", line_start=3)],
+        {"A": ExtractedPrompt(name="A", template="alpha", variables=[], file_path="a.py")},
+    )
+    await _run(db_session, test_project, tmp_path)
+    _, prompts = await _github_prompts(db_session, test_project)
+    prompt = prompts[0]
+
+    async def changed_extract(agent, deps, loc, limits):
+        return ExtractedPrompt(name="A", template="alpha v2", variables=["x"], file_path="a.py"), _Usage()
+
+    monkeypatch.setattr(pes, "_extract_one", changed_extract)
+    changed = await recheck_prompt(
+        prompt, project_id=test_project.id, repo_path=str(tmp_path),
+        provider="openai", model="gpt-4o", api_key="sk-test",
+        azure_endpoint=None, azure_api_version=None, db=db_session,
+    )
+    assert changed is True
+    await db_session.refresh(prompt)
+    assert prompt.template == "alpha v2"
+    assert prompt.variables == ["x"]
+
+    # Re-checking with identical content reports no change.
+    async def same_extract(agent, deps, loc, limits):
+        return ExtractedPrompt(name="A", template="alpha v2", variables=["x"], file_path="a.py"), _Usage()
+
+    monkeypatch.setattr(pes, "_extract_one", same_extract)
+    changed_again = await recheck_prompt(
+        prompt, project_id=test_project.id, repo_path=str(tmp_path),
+        provider="openai", model="gpt-4o", api_key="sk-test",
+        azure_endpoint=None, azure_api_version=None, db=db_session,
+    )
+    assert changed_again is False

@@ -67,3 +67,11 @@ export const cancelGithubExtraction = () =>
   request<{ status: string; extraction_id: string }>("/api/prompts/extract/github/cancel", {
     method: "POST",
   });
+
+export interface PromptRecheckResult {
+  prompt: PromptItem;
+  changed: boolean;
+}
+
+export const recheckPrompt = (id: string) =>
+  request<PromptRecheckResult>(`/api/prompts/${id}/recheck`, { method: "POST" });

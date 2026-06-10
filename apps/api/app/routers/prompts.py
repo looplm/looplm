@@ -20,11 +20,13 @@ from app.schemas.prompts import (
     PromptImportRequest,
     PromptListResponse,
     PromptOut,
+    PromptRecheckResult,
     PromptReviewListResponse,
     PromptReviewResult,
     PromptSyncResponse,
 )
 from app.services import github_app
+from app.services.code_agent_service import CodeAgentConfigError
 from app.services.prompt_analysis import (
     get_prompt,
     import_prompts_from_json,
@@ -34,7 +36,7 @@ from app.services.prompt_analysis import (
     review_prompt,
     sync_prompts,
 )
-from app.services.prompt_extraction_service import extract_prompts_from_repo
+from app.services.prompt_extraction_service import extract_prompts_from_repo, recheck_prompt
 from app.services.repo_resolver import RepoPathError, resolve_project_repo
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,30 @@ router = APIRouter(prefix="/api/prompts", tags=["prompts"], dependencies=[requir
 
 _SUPPORTED_PROVIDERS = {"openai", "anthropic", "azure_openai"}
 _extraction_tasks: dict[UUID, asyncio.Task] = {}
+
+
+def _code_agent_params(project: Project) -> dict:
+    """Resolve the Code Agent provider/model/credentials from project settings.
+
+    Shared by GitHub extraction and per-prompt recheck — both read the repo with
+    the same agent infra. Unsupported provider values fall back to 'anthropic',
+    matching the Settings UI.
+    """
+    ps = dict(project.settings or {})
+    stored = ps.get("code_agent_provider", "anthropic")
+    provider = stored if stored in _SUPPORTED_PROVIDERS else "anthropic"
+    if provider != stored:
+        logger.warning(
+            "Project %s has unsupported code_agent_provider %r; falling back to 'anthropic'",
+            project.id, stored,
+        )
+    return {
+        "provider": provider,
+        "model": ps.get("code_agent_model"),
+        "api_key": ps.get("code_agent_api_key"),
+        "azure_endpoint": ps.get("code_agent_azure_endpoint"),
+        "azure_api_version": ps.get("code_agent_azure_api_version"),
+    }
 
 
 def _extraction_to_out(e: PromptExtraction) -> PromptExtractionResponse:
@@ -256,15 +282,6 @@ async def trigger_github_extraction(
     ).scalar_one_or_none()
     repo_full_name = installation.repo_full_name if installation else None
 
-    ps = dict(project.settings or {})
-    stored_provider = ps.get("code_agent_provider", "anthropic")
-    provider = stored_provider if stored_provider in _SUPPORTED_PROVIDERS else "anthropic"
-    if provider != stored_provider:
-        logger.warning(
-            "Project %s has unsupported code_agent_provider %r; falling back to 'anthropic'",
-            project.id, stored_provider,
-        )
-
     extraction = PromptExtraction(project_id=project.id, status="pending")
     db.add(extraction)
     await db.commit()
@@ -277,11 +294,7 @@ async def trigger_github_extraction(
             db_factory=async_session,
             repo_path=repo_path,
             repo_full_name=repo_full_name,
-            provider=provider,
-            model=ps.get("code_agent_model"),
-            api_key=ps.get("code_agent_api_key"),
-            azure_endpoint=ps.get("code_agent_azure_endpoint"),
-            azure_api_version=ps.get("code_agent_azure_api_version"),
+            **_code_agent_params(project),
         )
     )
     _extraction_tasks[extraction.id] = task
@@ -341,3 +354,49 @@ async def cancel_github_extraction(
     await db.commit()
 
     return {"status": "cancelled", "extraction_id": str(extraction.id)}
+
+
+@router.post(
+    "/{prompt_id}/recheck",
+    response_model=PromptRecheckResult,
+    dependencies=[require_write("improve", "prompts")],
+)
+async def recheck_github_prompt(
+    prompt_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Re-extract a single github-sourced prompt from the repo to detect changes."""
+    prompt = await get_prompt(prompt_id, project.id, db)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    if not prompt.integration or prompt.integration.type.value != "github":
+        raise HTTPException(
+            status_code=400,
+            detail="Only prompts extracted from GitHub can be re-checked.",
+        )
+
+    try:
+        repo_path = await resolve_project_repo(project, db)
+    except RepoPathError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (github_app.GithubAppDisabledError, github_app.GithubAppError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if not repo_path:
+        raise HTTPException(
+            status_code=400,
+            detail="No code repository is connected for this project.",
+        )
+
+    try:
+        changed = await recheck_prompt(
+            prompt, project_id=project.id, repo_path=repo_path, db=db,
+            **_code_agent_params(project),
+        )
+    except (ValueError, CodeAgentConfigError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Re-check failed: {exc}") from exc
+
+    return PromptRecheckResult(prompt=_prompt_to_out(prompt), changed=changed)

@@ -122,6 +122,13 @@ class PromptLocationList(BaseModel):
     locations: list[PromptLocation] = Field(default_factory=list)
 
 
+class PromptRecheckResult(BaseModel):
+    """Result of re-extracting a single prompt from the connected repo."""
+
+    prompt: PromptOut
+    changed: bool = False
+
+
 class PromptExtractionResponse(BaseModel):
     """Status of a background extraction run (polled by the frontend)."""
 

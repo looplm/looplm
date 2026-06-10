@@ -27,6 +27,7 @@ from pydantic_ai.messages import TextPart, ToolCallPart
 from pydantic_ai.usage import UsageLimits
 from sqlalchemy import select
 
+from app.models.models import Prompt
 from app.schemas.prompts import ExtractedPrompt, PromptLocation, PromptLocationList
 from app.services.code_agent_helpers import _update_progress
 from app.services.code_agent_prompts import (
@@ -97,6 +98,17 @@ def _describe_activity(node: CallToolsNode) -> tuple[str, str]:
             if snippet:
                 return "Analyzing the codebase…", snippet
     return "Analyzing the codebase…", "Analyzing"
+
+
+def _make_extract_agent(llm_model) -> Agent:
+    """Agent that reads one location and returns a single prompt verbatim."""
+    return Agent(
+        llm_model,
+        output_type=ExtractedPrompt,
+        system_prompt=PROMPT_EXTRACT_ONE_SYSTEM_PROMPT,
+        deps_type=RepoContext,
+        tools=(read_file, grep_files),
+    )
 
 
 async def _discover_locations(
@@ -191,13 +203,7 @@ async def extract_prompts_from_repo(
                 deps_type=RepoContext,
                 tools=(read_file, glob_files, grep_files),
             )
-            extract_agent = Agent(
-                llm_model,
-                output_type=ExtractedPrompt,
-                system_prompt=PROMPT_EXTRACT_ONE_SYSTEM_PROMPT,
-                deps_type=RepoContext,
-                tools=(read_file, grep_files),
-            )
+            extract_agent = _make_extract_agent(llm_model)
             discover_limits = UsageLimits(request_limit=_DISCOVERY_REQUEST_LIMIT)
             extract_limits = UsageLimits(request_limit=_EXTRACT_ONE_REQUEST_LIMIT)
 
@@ -226,19 +232,55 @@ async def extract_prompts_from_repo(
                     locations = locations[:_MAX_PROMPTS]
 
                 total = len(locations)
-                await _update_progress(
-                    db, extraction,
-                    progress_message=f"Found {total} prompt{'s' if total != 1 else ''}"
-                    " — extracting one by one…",
-                    log_entry=f"Found {total} prompt location{'s' if total != 1 else ''}",
-                )
 
                 # ── Phase 2: extract one by one, persisting as we go ─
                 integration = await get_or_create_github_integration(
                     project_id, db, repo_full_name
                 )
+                # Resume support: anything already saved under this integration is
+                # skipped — re-runs continue where the last one left off without
+                # spending an LLM call per already-extracted prompt.
+                existing_ids = set(
+                    (await db.execute(
+                        select(Prompt.external_id).where(
+                            Prompt.integration_id == integration.id
+                        )
+                    )).scalars().all()
+                )
+
+                def _ext_id(loc: PromptLocation) -> str:
+                    return f"{loc.file_path}::{loc.name}"[:512]
+
+                already = sum(1 for loc in locations if _ext_id(loc) in existing_ids)
+                await _update_progress(
+                    db, extraction,
+                    progress_message=(
+                        f"Resuming — {already} of {total} already saved, "
+                        f"extracting {total - already}…"
+                        if already
+                        else f"Found {total} prompt{'s' if total != 1 else ''}"
+                        " — extracting one by one…"
+                    ),
+                    log_entry=(
+                        f"Resuming: {already}/{total} already saved"
+                        if already
+                        else f"Found {total} prompt location{'s' if total != 1 else ''}"
+                    ),
+                )
+
                 seen: set[str] = set()
                 for i, loc in enumerate(locations):
+                    external_id = _ext_id(loc)
+                    if external_id in seen:
+                        continue
+
+                    # Already extracted in a prior run — keep it, skip the LLM call.
+                    if external_id in existing_ids:
+                        seen.add(external_id)
+                        extraction.extracted_count = len(seen)
+                        await db.commit()
+                        continue
+
                     await _update_progress(
                         db, extraction,
                         progress_message=f"Extracting {i + 1}/{total}: {loc.name}",
@@ -257,9 +299,6 @@ async def extract_prompts_from_repo(
                         )
                         continue
 
-                    external_id = f"{loc.file_path}::{loc.name}"[:512]
-                    if external_id in seen:
-                        continue
                     seen.add(external_id)
                     await upsert_prompts_for_integration(
                         integration.id,
@@ -344,10 +383,79 @@ async def extract_prompts_from_repo(
             await db.commit()
 
 
+async def recheck_prompt(
+    prompt,
+    *,
+    project_id: UUID,
+    repo_path: str,
+    provider: str,
+    model: str | None,
+    api_key: str | None,
+    azure_endpoint: str | None,
+    azure_api_version: str | None,
+    db,
+) -> bool:
+    """Re-extract a single github-sourced prompt from the repo; update if changed.
+
+    Returns True when the template or variables differ from what's stored.
+    """
+    md = prompt.prompt_metadata or {}
+    file_path = md.get("file_path")
+    if not file_path:
+        raise ValueError("This prompt has no source file recorded; re-run extraction first.")
+
+    llm_model = _build_model(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        azure_endpoint=azure_endpoint,
+        azure_api_version=azure_api_version,
+    )
+    agent = _make_extract_agent(llm_model)
+    deps = RepoContext(repo_root=Path(repo_path))
+    loc = PromptLocation(
+        name=prompt.name,
+        file_path=file_path,
+        line_start=md.get("line_start"),
+        role=md.get("role"),
+    )
+
+    ep, usage = await _extract_one(
+        agent, deps, loc, UsageLimits(request_limit=_EXTRACT_ONE_REQUEST_LIMIT)
+    )
+    in_tok, out_tok = _tokens(usage)
+    await _record_usage(
+        db,
+        project_id=project_id,
+        provider=provider,
+        model_name=getattr(llm_model, "model_name", model or ""),
+        input_tokens=in_tok,
+        output_tokens=out_tok,
+        extraction_id=None,
+        function_name="recheck_prompt",
+    )
+
+    new_template = (ep.template if ep else "") or ""
+    if not new_template.strip():
+        return False  # couldn't locate it now — keep what we have
+
+    new_vars = ep.variables or []
+    changed = new_template != prompt.template or new_vars != (prompt.variables or [])
+    if changed:
+        prompt.template = new_template
+        prompt.variables = new_vars
+        prompt.prompt_metadata = {
+            **md,
+            "line_start": ep.line_start or md.get("line_start"),
+            "role": ep.role or md.get("role"),
+        }
+        prompt.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+    return changed
+
+
 async def _prune_prompts(integration_id: UUID, keep: set[str], db) -> int:
     """Delete prompts under the integration whose external_id is not in `keep`."""
-    from app.models.models import Prompt
-
     rows = await db.execute(select(Prompt).where(Prompt.integration_id == integration_id))
     removed = 0
     for p in rows.scalars().all():
@@ -367,20 +475,21 @@ async def _record_usage(
     model_name: str,
     input_tokens: int,
     output_tokens: int,
-    extraction_id: UUID,
+    extraction_id: UUID | None,
+    function_name: str = "extract_prompts_from_repo",
 ) -> None:
     from app.models.llm_usage import LlmUsageRecord
 
     db.add(LlmUsageRecord(
         project_id=project_id,
         service_name="prompt_extraction",
-        function_name="extract_prompts_from_repo",
+        function_name=function_name,
         provider=provider,
         model=model_name or "unknown",
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
         cost_usd=calculate_cost(model_name, input_tokens, output_tokens) if model_name else None,
-        request_metadata={"extraction_id": str(extraction_id)},
+        request_metadata={"extraction_id": str(extraction_id)} if extraction_id else {},
     ))
     await db.commit()

@@ -13,6 +13,7 @@ import {
   extractGithubPrompts,
   getGithubExtractionStatus,
   cancelGithubExtraction,
+  recheckPrompt,
   type Integration,
   type PromptItem,
   type PromptReviewResult,
@@ -24,10 +25,19 @@ import { usePermissions } from "@/components/permissions-context";
 const PROMPTS_READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
 
 const SOURCE_BADGES: Record<string, string> = {
-  langfuse: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  langsmith: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  json_import: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-  github: "bg-slate-500/20 text-slate-300 border-slate-500/30",
+  langfuse: "bg-purple-500/20 text-purple-700 dark:text-purple-300 border-purple-500/40",
+  langsmith: "bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-500/40",
+  json_import: "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40",
+  json_file: "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40",
+  github: "bg-gray-800 text-white border-gray-800 dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  langfuse: "Langfuse",
+  langsmith: "LangSmith",
+  json_import: "JSON",
+  json_file: "JSON",
+  github: "GitHub",
 };
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -35,6 +45,21 @@ const SEVERITY_COLORS: Record<string, string> = {
   medium: "text-amber-400",
   low: "text-green-400",
 };
+
+function timeAgo(iso?: string): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
+  const sec = Math.round((Date.now() - then) / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.round(hr / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 function fmtDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "0s";
@@ -71,11 +96,16 @@ export default function PromptsPage() {
   const [githubRepo, setGithubRepo] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<PromptExtractionStatus | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [rechecking, setRechecking] = useState(false);
+  const [recheckMsg, setRecheckMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCountRef = useRef(0);
 
   const extracting = extraction?.status === "pending" || extraction?.status === "running";
+  const githubCount = prompts.filter((p) => p.source === "github").length;
+  const lastRunIncomplete =
+    extraction?.status === "failed" || extraction?.status === "cancelled";
 
   // Tick a 1s clock while extracting so the elapsed timers count up live.
   useEffect(() => {
@@ -185,6 +215,7 @@ export default function PromptsPage() {
   const selectPrompt = async (p: PromptItem) => {
     setSelectedPrompt(p);
     setReview(null);
+    setRecheckMsg(null);
     setActiveTab("review");
     setCompareA(null);
     setCompareB(null);
@@ -259,6 +290,26 @@ export default function PromptsPage() {
     alert("Apply to Langfuse: This would update the prompt in your connected platform. (Stubbed)");
   };
 
+  const handleRecheck = async (promptId: string) => {
+    setRechecking(true);
+    setRecheckMsg(null);
+    setError(null);
+    try {
+      const res = await recheckPrompt(promptId);
+      if (res.changed) {
+        setSelectedPrompt(res.prompt);
+        setRecheckMsg("Updated — the prompt changed in the codebase.");
+        refreshPromptsQuietly();
+      } else {
+        setRecheckMsg("No changes since last extraction.");
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setRechecking(false);
+    }
+  };
+
   const versionA = useMemo(() => versions.find((v) => v.version === compareA), [versions, compareA]);
   const versionB = useMemo(() => versions.find((v) => v.version === compareB), [versions, compareB]);
   const diff = useMemo(() => {
@@ -297,7 +348,9 @@ export default function PromptsPage() {
                 title={!canEdit ? PROMPTS_READ_ONLY_TITLE : `Extract prompts from ${githubRepo}`}
                 className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Extract from GitHub
+                {lastRunIncomplete && githubCount > 0
+                  ? `Resume (${githubCount} saved)`
+                  : "Extract from GitHub"}
               </button>
             )
           )}
@@ -396,12 +449,14 @@ export default function PromptsPage() {
                 }`}
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium text-sm truncate">{p.name}</span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded border ${SOURCE_BADGES[p.source] ?? "bg-slate-500/20 text-slate-300"}`}>
-                    {p.source}
+                  <span className="font-medium text-sm truncate flex-1">{p.name}</span>
+                  <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${SOURCE_BADGES[p.source] ?? "bg-slate-500/20 text-slate-600 dark:text-slate-300 border-slate-500/40"}`}>
+                    {SOURCE_LABELS[p.source] ?? p.source}
                   </span>
                 </div>
-                <div className="text-[10px] text-gray-400 dark:text-slate-500">v{p.version} · {p.variables?.length ?? 0} vars</div>
+                <div className="text-[10px] text-gray-400 dark:text-slate-500" title={p.updated_at ? new Date(p.updated_at).toLocaleString() : undefined}>
+                  v{p.version} · {p.variables?.length ?? 0} vars{p.updated_at ? ` · updated ${timeAgo(p.updated_at)}` : ""}
+                </div>
               </button>
             ))
           )}
@@ -414,17 +469,38 @@ export default function PromptsPage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-lg font-semibold">{selectedPrompt.name}</h2>
-                  <span className="text-xs text-gray-400 dark:text-slate-500">Version {selectedPrompt.version}</span>
+                  <span className="text-xs text-gray-400 dark:text-slate-500">
+                    Version {selectedPrompt.version}
+                    {selectedPrompt.updated_at ? ` · updated ${timeAgo(selectedPrompt.updated_at)}` : ""}
+                  </span>
                 </div>
-                <button
-                  onClick={() => handleReview(selectedPrompt.id)}
-                  disabled={reviewing || !canEdit}
-                  title={!canEdit ? PROMPTS_READ_ONLY_TITLE : undefined}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg"
-                >
-                  {reviewing ? "Reviewing..." : "Review"}
-                </button>
+                <div className="flex gap-2">
+                  {selectedPrompt.source === "github" && githubRepo && (
+                    <button
+                      onClick={() => handleRecheck(selectedPrompt.id)}
+                      disabled={rechecking || !canEdit}
+                      title={!canEdit ? PROMPTS_READ_ONLY_TITLE : `Re-extract from ${githubRepo}`}
+                      className="px-4 py-2 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm rounded-lg"
+                    >
+                      {rechecking ? "Checking…" : "Check for updates"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleReview(selectedPrompt.id)}
+                    disabled={reviewing || !canEdit}
+                    title={!canEdit ? PROMPTS_READ_ONLY_TITLE : undefined}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg"
+                  >
+                    {reviewing ? "Reviewing..." : "Review"}
+                  </button>
+                </div>
               </div>
+
+              {recheckMsg && (
+                <div className="mb-4 p-2 text-xs rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 border border-gray-200 dark:border-slate-700">
+                  {recheckMsg}
+                </div>
+              )}
 
               {(selectedPrompt.variables?.length ?? 0) > 0 && (
                 <div className="mb-4">
