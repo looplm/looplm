@@ -64,11 +64,6 @@ async def _poll_loop() -> None:
 
 async def run_detection_cycle() -> int:
     """Run detect + diagnose for every project with integrations. Returns project count."""
-    try:
-        llm: AnalysisLlmService | None = AnalysisLlmService()
-    except AnalysisLlmConfigError:
-        llm = None
-
     since = datetime.now(timezone.utc) - timedelta(days=settings.issue_detection_window_days)
 
     async with async_session() as db:
@@ -78,6 +73,16 @@ async def run_detection_cycle() -> int:
 
         for pid in project_ids:
             try:
+                # Each project uses its own shared LLM credentials, falling back
+                # to the instance env key; detection still runs deterministically
+                # without one.
+                project_settings = await AnalysisLlmService.load_project_settings(db, pid)
+                try:
+                    llm: AnalysisLlmService | None = AnalysisLlmService(
+                        project_settings=project_settings
+                    )
+                except AnalysisLlmConfigError:
+                    llm = None
                 await detect_issues(db, pid, since=since, llm=llm)
                 await diagnose_issues(db, pid, llm=llm)
             except Exception:

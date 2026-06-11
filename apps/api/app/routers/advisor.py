@@ -52,11 +52,15 @@ async def trigger_analysis(
     use_repo = bool(body and body.use_repo)
 
     if not use_repo:
+        from app.services.analysis_llm import merge_llm_settings
+
         try:
             return await analyze_architecture(
                 integration_id, project.id, db,
                 extra_context=body.extra_context if body else "",
-                user_settings=user.settings,
+                # Project-scoped settings are shared by all members; a user's
+                # personal settings fill any gaps.
+                user_settings=merge_llm_settings(project.settings, user.settings),
             )
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))

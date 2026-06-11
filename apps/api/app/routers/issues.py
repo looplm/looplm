@@ -99,7 +99,7 @@ async def run_detection(
 
     llm: AnalysisLlmService | None
     try:
-        llm = AnalysisLlmService(user_settings=user.settings)
+        llm = AnalysisLlmService(user_settings=user.settings, project_settings=project.settings)
     except AnalysisLlmConfigError:
         # No analysis LLM configured — still run, using deterministic clustering.
         llm = None

@@ -16,6 +16,7 @@ from app.db import get_db
 from app.models.models import EvalJob, EvalJobStatus, EvalReport, EvalResult, EvalRun, Evaluator, TestDataset
 from app.models.project import Project
 from app.models.user import User
+from app.services.analysis_llm import merge_llm_settings
 from app.schemas.eval_trigger import TriggerEvalResponse
 from app.schemas.evaluations import (
     EvalReportDetail,
@@ -120,7 +121,9 @@ async def generate_multi_run_report(
     total_failed = sum(r["summary"]["failed"] for r in per_run_reports)
     if total_failed > 0:
         try:
-            llm = AnalysisLlmService(user_settings=dict(user.settings or {}))
+            llm = AnalysisLlmService(
+                user_settings=dict(user.settings or {}), project_settings=project.settings
+            )
             recommendations = await generate_multi_run_recommendations(llm, per_run_reports, db=db, project_id=project.id)
             markdown = markdown.replace("{{RECOMMENDATIONS}}", recommendations)
         except Exception as e:
@@ -264,7 +267,9 @@ async def get_eval_report(
     # Generate LLM recommendations if there are failures
     if report["summary"]["failed"] > 0:
         try:
-            llm = AnalysisLlmService(user_settings=dict(user.settings or {}))
+            llm = AnalysisLlmService(
+                user_settings=dict(user.settings or {}), project_settings=project.settings
+            )
             recommendations = await generate_recommendations(llm, report, db=db, project_id=project.id)
             report["recommendations"] = recommendations
         except Exception as e:
@@ -346,7 +351,7 @@ async def rerun_eval(
 
     dataset_uuids = [UUID(d) for d in dataset_ids] if dataset_ids else None
     ps = dict(project.settings or {})
-    ps["_user_settings"] = dict(user.settings or {})
+    ps["_user_settings"] = merge_llm_settings(project.settings, user.settings)
     task = asyncio.create_task(
         _run_eval_background(
             job.id,

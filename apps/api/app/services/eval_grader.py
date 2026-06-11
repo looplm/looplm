@@ -16,7 +16,11 @@ from app.models.models import EvalResult, EvalRun, Trace
 from app.models.project import Project
 from app.routers.evaluations import _compute_summaries
 from app.schemas.evaluations import EvalResultImport, GraderResult
-from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
+from app.services.analysis_llm import (
+    AnalysisLlmConfigError,
+    AnalysisLlmService,
+    LlmUsageInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +63,8 @@ Output ONLY a JSON object with this exact structure (no markdown, no extra text)
 class TraceGrader:
     """LLM-based grader for production traces."""
 
-    def __init__(self) -> None:
-        self._llm = AnalysisLlmService()
+    def __init__(self, project_settings: dict | None = None) -> None:
+        self._llm = AnalysisLlmService(project_settings=project_settings)
 
     async def grade_trace(
         self,
@@ -266,8 +270,6 @@ async def _auto_grade_loop(
     db_factory,
 ) -> None:
     """Periodically grade new traces from an integration."""
-    grader = TraceGrader()
-
     while True:
         await asyncio.sleep(settings.auto_grade_interval_minutes * 60)
 
@@ -320,6 +322,21 @@ async def _auto_grade_loop(
                 retrieval_span_name = (
                     get_retrieval_span_name(project) if project is not None else None
                 )
+
+                # The grader uses the project's shared LLM credentials, falling
+                # back to the instance env key. Built per cycle so key changes are
+                # picked up; skip the cycle when no credentials are configured.
+                try:
+                    grader = TraceGrader(
+                        project_settings=project.settings if project is not None else None
+                    )
+                except AnalysisLlmConfigError:
+                    logger.info(
+                        "Auto-grade: no LLM configured for project %s; skipping cycle",
+                        project_id,
+                    )
+                    continue
+
                 results, meta, usages = await grader.grade_batch(
                     eligible, project_id, retrieval_span_name
                 )

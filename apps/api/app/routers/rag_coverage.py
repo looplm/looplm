@@ -234,6 +234,12 @@ async def analyze(
 ):
     await _get_provider_or_404(db, body.provider_id, project)
 
+    # Project-scoped LLM settings are shared by all members; a user's personal
+    # settings fill any gaps.
+    from app.services.analysis_llm import merge_llm_settings
+
+    llm_settings = merge_llm_settings(project.settings, user.settings)
+
     run = CoverageRun(
         project_id=project.id,
         provider_id=body.provider_id,
@@ -263,7 +269,7 @@ async def analyze(
             sample_n=body.sample_n,
             max_questions_per_gap=body.max_questions_per_gap,
             max_gaps_to_suggest=body.max_gaps_to_suggest,
-            user_settings=user.settings,
+            user_settings=llm_settings,
             db_factory=async_session,
         )
     )

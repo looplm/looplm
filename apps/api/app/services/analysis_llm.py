@@ -26,9 +26,30 @@ class AnalysisLlmConfigError(ValueError):
     pass
 
 
+def merge_llm_settings(
+    project_settings: dict | None, user_settings: dict | None
+) -> dict:
+    """Effective analysis-LLM settings.
+
+    Project settings are shared by all members and take priority; a user's
+    personal settings fill any gaps so an already-configured personal key keeps
+    working until the project-level key is set. Empty project values never clobber
+    a usable personal fallback.
+    """
+    merged = dict(user_settings or {})
+    for key, value in (project_settings or {}).items():
+        if value:
+            merged[key] = value
+    return merged
+
+
 class AnalysisLlmService:
-    def __init__(self, user_settings: dict | None = None) -> None:
-        us = user_settings or {}
+    def __init__(
+        self,
+        user_settings: dict | None = None,
+        project_settings: dict | None = None,
+    ) -> None:
+        us = merge_llm_settings(project_settings, user_settings)
 
         self.provider = us.get("llm_provider") or settings.analysis_llm_provider
 
@@ -71,6 +92,20 @@ class AnalysisLlmService:
     @property
     def model(self) -> str:
         return self._model
+
+    @staticmethod
+    async def load_project_settings(db: Any, project_id: Any) -> dict:
+        """Load a project's settings dict for project-scoped LLM config.
+
+        Returns ``{}`` when no project_id is given or the project is missing,
+        which falls back to per-user settings / env in the constructor.
+        """
+        if project_id is None:
+            return {}
+        from app.models.project import Project
+
+        project = await db.get(Project, project_id)
+        return dict(project.settings or {}) if project else {}
 
     async def tracked_chat_completion(
         self,

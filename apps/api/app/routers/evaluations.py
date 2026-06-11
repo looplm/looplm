@@ -428,7 +428,9 @@ async def classify_eval_failures(
 
     llm: AnalysisLlmService | None
     try:
-        llm = AnalysisLlmService(user_settings=dict(_user.settings or {}))
+        llm = AnalysisLlmService(
+            user_settings=dict(_user.settings or {}), project_settings=project.settings
+        )
     except AnalysisLlmConfigError as exc:
         logger.info("Classifying failures without LLM (config error: %s)", exc)
         llm = None

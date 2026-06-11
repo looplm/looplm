@@ -19,6 +19,7 @@ from app.db import async_session, get_db
 from app.models.models import EvalJobStatus, EvalRun, EvalSession, Experiment
 from app.models.project import Project
 from app.models.user import User
+from app.services.analysis_llm import merge_llm_settings
 from app.schemas.eval_trigger import (
     EvalSessionListResponse,
     EvalSessionResponse,
@@ -101,7 +102,7 @@ async def trigger_session(
     await db.refresh(session)
 
     ps = dict(project.settings or {})
-    ps["_user_settings"] = dict(user.settings or {})
+    ps["_user_settings"] = merge_llm_settings(project.settings, user.settings)
     task = asyncio.create_task(
         run_session_background(
             session_id=session.id,

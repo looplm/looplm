@@ -95,13 +95,20 @@ def select_traces_to_classify(
 
 async def classify_pending_batch() -> int:
     """Classify one batch of pending traces. Returns the number classified."""
-    try:
-        llm = AnalysisLlmService()
-    except AnalysisLlmConfigError:
-        logger.info("Signal classifier: no app-level LLM configured; skipping")
-        return 0
-
     async with async_session() as db:
+        # Each project uses its own shared LLM credentials, falling back to the
+        # instance env key. Built lazily and cached per project for this batch.
+        _llm_cache: dict[UUID, AnalysisLlmService | None] = {}
+
+        async def _llm_for_project(pid: UUID) -> AnalysisLlmService | None:
+            if pid not in _llm_cache:
+                project_settings = await AnalysisLlmService.load_project_settings(db, pid)
+                try:
+                    _llm_cache[pid] = AnalysisLlmService(project_settings=project_settings)
+                except AnalysisLlmConfigError:
+                    _llm_cache[pid] = None
+            return _llm_cache[pid]
+
         rows = (
             await db.execute(
                 select(Trace, Integration.project_id)
@@ -140,8 +147,14 @@ async def classify_pending_batch() -> int:
 
         # Classify the picked traces. Any LLM call raising is treated as an
         # infrastructure failure: abort without watermarking so the batch retries.
+        # Traces whose project has no LLM configured are left unwatermarked so
+        # they get picked up once a key is added.
+        classified = 0
         try:
             for t in picked:
+                llm = await _llm_for_project(project_by_trace[t.id])
+                if llm is None:
+                    continue
                 repr_text = build_trace_repr(
                     name=t.name,
                     trace_input=t.input,
@@ -158,6 +171,7 @@ async def classify_pending_batch() -> int:
                     model=llm.model,
                     usage=usage,
                 )
+                classified += 1
                 for sig in detected:
                     db.add(
                         TraceSignal(
@@ -172,13 +186,19 @@ async def classify_pending_batch() -> int:
             await db.rollback()
             return 0
 
-        # Watermark every scanned candidate — each is considered exactly once.
+        # Watermark scanned candidates whose project has an LLM configured — each
+        # is considered exactly once. Candidates from projects with no LLM stay
+        # pending so they are classified once a key is configured.
         now = datetime.now(timezone.utc)
+        watermarked = 0
         for t in candidates:
+            if await _llm_for_project(project_by_trace[t.id]) is None:
+                continue
             t.signals_classified_at = now
+            watermarked += 1
         await db.commit()
 
         logger.info(
-            "Signal classifier: scanned %d, classified %d", len(candidates), len(picked)
+            "Signal classifier: scanned %d, classified %d", watermarked, classified
         )
-        return len(picked)
+        return classified

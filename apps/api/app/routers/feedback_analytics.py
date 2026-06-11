@@ -286,6 +286,11 @@ async def generate_suggestions(
         _suggestion_tasks,
         run_suggestion_generation,
     )
+    from app.services.analysis_llm import merge_llm_settings
+
+    # Project-scoped settings are shared by all members; a user's personal
+    # settings fill any gaps.
+    llm_settings = merge_llm_settings(project.settings, _user.settings)
 
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
 
@@ -377,7 +382,7 @@ async def generate_suggestions(
             suggestions=suggestions,
             feedback_comments=feedback_comments,
             feedback_messages=feedback_messages,
-            user_settings=_user.settings,
+            user_settings=llm_settings,
             db_factory=async_session,
         )
     )
@@ -518,9 +523,11 @@ async def regenerate_expected_answer(
     try:
         from app.services.analysis_llm import AnalysisLlmService
 
-        llm_service = AnalysisLlmService(user_settings=_user.settings)
+        llm_service = AnalysisLlmService(
+            user_settings=_user.settings, project_settings=project.settings
+        )
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="LLM is not configured for this user") from exc
+        raise HTTPException(status_code=503, detail="LLM is not configured for this project") from exc
 
     # Match the suggestion-generation flow so re-rolled criteria see the same
     # context the original draft did. The summary captures topic only — never

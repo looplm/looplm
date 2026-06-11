@@ -8,16 +8,13 @@ import {
   getGithubStatus,
   getProjectGithubAppConfig,
   getProjectGithubInstallation,
-  getUserSettings,
   listRepoBranches,
   saveProjectGithubAppConfig,
   selectProjectGithubInstallation,
-  updateUserSettings,
   updateProject,
   type GithubAppConfig,
   type GithubInstallation,
   type GithubStatus,
-  type UserSettings,
   type Project,
 } from "@/lib/api";
 
@@ -33,20 +30,20 @@ interface GeneralSettingsProps {
 }
 
 export default function GeneralSettings({ currentProjectId, projects }: GeneralSettingsProps) {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
+  // Evaluator LLM (project-level — shared by all project members)
   const [provider, setProvider] = useState<Provider>("openai");
   const [openaiKey, setOpenaiKey] = useState("");
   const [azureKey, setAzureKey] = useState("");
   const [azureEndpoint, setAzureEndpoint] = useState("");
   const [azureDeployment, setAzureDeployment] = useState("");
   const [azureApiVersion, setAzureApiVersion] = useState("");
-
-  // Masked values from API (shown as placeholders)
-  const [masked, setMasked] = useState<UserSettings | null>(null);
+  // Masked secret values from the projects API (shown as placeholders)
+  const [openaiKeyMask, setOpenaiKeyMask] = useState("");
+  const [azureKeyMask, setAzureKeyMask] = useState("");
 
   // GitHub bridge (project-level)
   const [githubStatus, setGithubStatus] = useState<GithubStatus | null>(null);
@@ -86,28 +83,6 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
 
   const currentProject = projects.find((p) => p.id === currentProjectId);
 
-  async function loadSettings() {
-    try {
-      const data = await getUserSettings();
-      setMasked(data);
-      if (data.llm_provider === "openai" || data.llm_provider === "azure_openai") {
-        setProvider(data.llm_provider);
-      }
-      // Non-secret fields can be pre-filled
-      setAzureEndpoint(data.azure_openai_endpoint);
-      setAzureDeployment(data.azure_openai_deployment);
-      setAzureApiVersion(data.azure_openai_api_version);
-    } catch {
-      // Settings not available yet — use defaults
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
   // GitHub status, App config and the repo link are all per-project, so they
   // re-fetch whenever the active project changes.
   useEffect(() => {
@@ -140,6 +115,21 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
   useEffect(() => {
     if (currentProject) {
       const s = currentProject.settings || {};
+
+      // Evaluator LLM (project-level)
+      const evalProvider = (s.llm_provider as string) || "openai";
+      setProvider(evalProvider === "azure_openai" ? "azure_openai" : "openai");
+      setOpenaiKey("");
+      setAzureKey("");
+      setOpenaiKeyMask((s.openai_api_key as string) || "");
+      setAzureKeyMask((s.azure_openai_api_key as string) || "");
+      setAzureEndpoint((s.azure_openai_endpoint as string) || "");
+      setAzureDeployment((s.azure_openai_deployment as string) || "");
+      setAzureApiVersion((s.azure_openai_api_version as string) || "");
+      setError("");
+      setSaved(false);
+
+      // Code Agent LLM (project-level)
       const storedProvider = (s.code_agent_provider as string) || "anthropic";
       // Legacy values that are no longer supported fall back to anthropic in the UI.
       const isSupported = ["openai", "anthropic", "azure_openai"].includes(storedProvider);
@@ -154,21 +144,24 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
   }, [currentProjectId]);
 
   async function handleSave() {
+    if (!currentProjectId) return;
     setSaving(true);
     setError("");
     setSaved(false);
     try {
-      const body: Record<string, string> = { llm_provider: provider };
+      const settings: Record<string, unknown> = { llm_provider: provider };
       if (provider === "openai") {
-        if (openaiKey) body.openai_api_key = openaiKey;
+        if (openaiKey.trim()) settings.openai_api_key = openaiKey.trim();
       } else {
-        if (azureKey) body.azure_openai_api_key = azureKey;
-        body.azure_openai_endpoint = azureEndpoint;
-        body.azure_openai_deployment = azureDeployment;
-        body.azure_openai_api_version = azureApiVersion;
+        if (azureKey.trim()) settings.azure_openai_api_key = azureKey.trim();
+        settings.azure_openai_endpoint = azureEndpoint.trim();
+        settings.azure_openai_deployment = azureDeployment.trim();
+        settings.azure_openai_api_version = azureApiVersion.trim();
       }
-      const data = await updateUserSettings(body);
-      setMasked(data);
+      const updated = await updateProject(currentProjectId, { settings });
+      const s = updated.settings || {};
+      setOpenaiKeyMask((s.openai_api_key as string) || "");
+      setAzureKeyMask((s.azure_openai_api_key as string) || "");
       // Clear password fields after save
       setOpenaiKey("");
       setAzureKey("");
@@ -352,20 +345,16 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
     }
   }
 
-  if (loading) {
-    return (
-      <div className="max-w-2xl">
-        <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
-          <p className="text-sm text-gray-400">Loading settings...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6 max-w-2xl">
       <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
-        <h2 className="text-lg font-semibold mb-4">Evaluator LLM</h2>
+        <h2 className="text-lg font-semibold mb-1">Evaluator LLM</h2>
+        <p className="text-sm text-gray-400 dark:text-slate-500 mb-4">
+          {currentProject
+            ? <>LLM used for analysis, evaluations and feedback insights in project: <span className="font-medium text-gray-600 dark:text-slate-300">{currentProject.name}</span>. Shared by all members.</>
+            : "Select a project to configure the Evaluator LLM."}
+        </p>
+        {currentProject ? (
         <div className="space-y-4">
           {/* Provider selector */}
           <div>
@@ -387,7 +376,7 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
                 type="password"
                 value={openaiKey}
                 onChange={(e) => setOpenaiKey(e.target.value)}
-                placeholder={masked?.openai_api_key || "sk-..."}
+                placeholder={openaiKeyMask || "sk-..."}
                 className={inputClass}
               />
             </div>
@@ -401,7 +390,7 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
                   type="password"
                   value={azureKey}
                   onChange={(e) => setAzureKey(e.target.value)}
-                  placeholder={masked?.azure_openai_api_key || "Enter API key"}
+                  placeholder={azureKeyMask || "Enter API key"}
                   className={inputClass}
                 />
               </div>
@@ -450,6 +439,11 @@ export default function GeneralSettings({ currentProjectId, projects }: GeneralS
             {saving ? "Saving..." : saved ? "Saved!" : "Save"}
           </button>
         </div>
+        ) : (
+          <p className="text-sm text-gray-400 dark:text-slate-500 italic">
+            No project selected. Go to the Project tab to create or select one.
+          </p>
+        )}
       </div>
 
       <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">

@@ -33,7 +33,7 @@ from app.schemas.index_explorer import (
     IndexTreeResponse,
     IndexTreeSection,
 )
-from app.services.analysis_llm import AnalysisLlmConfigError
+from app.services.analysis_llm import AnalysisLlmConfigError, merge_llm_settings
 from app.services.index_grouping_advisor import suggest_grouping
 
 logger = logging.getLogger(__name__)
@@ -234,7 +234,8 @@ async def compute_grouping_suggestion(
     client = build_index_provider(provider)
     try:
         suggestion, model = await suggest_grouping(
-            client, project_id=project.id, db=db, user_settings=user.settings
+            client, project_id=project.id, db=db,
+            user_settings=merge_llm_settings(project.settings, user.settings),
         )
     except AnalysisLlmConfigError as e:
         raise HTTPException(

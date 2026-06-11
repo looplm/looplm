@@ -34,6 +34,7 @@ from app.schemas.prompts import (
     RemoveExclusionRequest,
 )
 from app.services import github_app
+from app.services.analysis_llm import merge_llm_settings
 from app.services.code_agent_service import CodeAgentConfigError
 from app.services.prompt_analysis import (
     add_exclusion,
@@ -196,7 +197,9 @@ async def recluster_prompts(
 ):
     """Re-run the LLM grouping over the project's GitHub prompts."""
     try:
-        count = await cluster_project_prompts(db, project.id, user_settings=user.settings)
+        count = await cluster_project_prompts(
+            db, project.id, user_settings=merge_llm_settings(project.settings, user.settings)
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Clustering failed: {exc}") from exc
     return PromptSyncResponse(synced=count, message=f"Organized {count} prompts")
@@ -312,7 +315,10 @@ async def trigger_review(
 ):
     """Trigger LLM-based prompt review."""
     try:
-        return await review_prompt(prompt_id, project.id, db, user_settings=user.settings)
+        return await review_prompt(
+            prompt_id, project.id, db,
+            user_settings=merge_llm_settings(project.settings, user.settings),
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

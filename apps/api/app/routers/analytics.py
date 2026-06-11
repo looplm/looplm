@@ -109,10 +109,17 @@ async def analyze_request_clusters(
 ):
     """Start background clustering of user requests into intent themes."""
     from app.models.analytics import RequestClusterAnalysis
-    from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
+    from app.services.analysis_llm import (
+        AnalysisLlmConfigError,
+        AnalysisLlmService,
+        merge_llm_settings,
+    )
 
+    # Project-scoped settings are shared by all members; a user's personal
+    # settings fill any gaps.
+    llm_settings = merge_llm_settings(project.settings, _user.settings)
     try:
-        AnalysisLlmService(user_settings=_user.settings)
+        AnalysisLlmService(user_settings=llm_settings)
     except AnalysisLlmConfigError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -182,7 +189,7 @@ async def analyze_request_clusters(
         run_request_cluster_analysis(
             analysis_id=analysis.id,
             requests=requests,
-            user_settings=_user.settings,
+            user_settings=llm_settings,
             db_factory=async_session,
         )
     )

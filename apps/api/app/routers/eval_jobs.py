@@ -15,6 +15,7 @@ from app.db import get_db
 from app.models.models import EvalJob, EvalJobStatus, TestDataset
 from app.models.project import Project
 from app.models.user import User
+from app.services.analysis_llm import merge_llm_settings
 from app.schemas.eval_trigger import (
     DatasetPickerItem,
     DatasetPickerResponse,
@@ -115,7 +116,7 @@ async def trigger_eval(
     await db.refresh(job)
 
     ps = dict(project.settings or {})
-    ps["_user_settings"] = dict(user.settings or {})
+    ps["_user_settings"] = merge_llm_settings(project.settings, user.settings)
     task = asyncio.create_task(
         _run_eval_background(
             job.id,
@@ -276,7 +277,7 @@ async def restart_eval_job(
 
     dataset_uuids = [UUID(d) for d in old_job.dataset_ids] if old_job.dataset_ids else None
     ps = dict(project.settings or {})
-    ps["_user_settings"] = dict(user.settings or {})
+    ps["_user_settings"] = merge_llm_settings(project.settings, user.settings)
     task = asyncio.create_task(
         _run_eval_background(
             new_job.id,

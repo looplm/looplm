@@ -5,7 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.auth import get_current_user
+from app.auth import get_current_project, get_current_user
+from app.models.project import Project
 from app.models.user import User
 from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
 
@@ -24,9 +25,13 @@ class AnalysisPreviewResponse(BaseModel):
 
 
 @router.post("/analysis/preview", response_model=AnalysisPreviewResponse)
-async def analysis_preview(payload: AnalysisPreviewRequest, _user: User = Depends(get_current_user)) -> AnalysisPreviewResponse:
+async def analysis_preview(
+    payload: AnalysisPreviewRequest,
+    _user: User = Depends(get_current_user),
+    project: Project = Depends(get_current_project),
+) -> AnalysisPreviewResponse:
     try:
-        service = AnalysisLlmService(user_settings=_user.settings)
+        service = AnalysisLlmService(user_settings=_user.settings, project_settings=project.settings)
     except AnalysisLlmConfigError as exc:
         raise HTTPException(status_code=400, detail="Analysis LLM not configured") from exc
 

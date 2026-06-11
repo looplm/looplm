@@ -22,7 +22,7 @@ from app.schemas.projects import (
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 # Settings keys that contain secrets — mask on read, skip no-op updates on write.
-_SECRET_SETTINGS_KEYS = {"code_agent_api_key"}
+_SECRET_SETTINGS_KEYS = {"code_agent_api_key", "openai_api_key", "azure_openai_api_key"}
 
 
 def _mask(value: str | None) -> str:

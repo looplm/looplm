@@ -628,8 +628,11 @@ async def confirm_extraction(
                 db, extraction, progress_message="Organizing prompts into groups…",
             )
             try:
+                from app.services.analysis_llm import AnalysisLlmService
                 from app.services.prompt_clustering import cluster_project_prompts
-                await cluster_project_prompts(db, project_id)
+
+                project_settings = await AnalysisLlmService.load_project_settings(db, project_id)
+                await cluster_project_prompts(db, project_id, user_settings=project_settings)
             except Exception:
                 logger.exception("Clustering failed for project %s (prompts kept)", project_id)
 
