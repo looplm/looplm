@@ -40,9 +40,29 @@ export const getPromptVersions = (id: string) =>
 
 // --- Extract prompts from a connected GitHub codebase ---
 
+export interface PlannedLocation {
+  external_id: string;
+  name: string;
+  file_path: string;
+  line_start: number | null;
+  role: string | null;
+  note: string | null;
+  already_saved: boolean;
+}
+
+export type ExtractionStatus =
+  | "pending"
+  | "discovering"
+  | "awaiting_selection"
+  | "running"
+  | "clustering"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 export interface PromptExtractionStatus {
   id: string;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  status: ExtractionStatus;
   error: string | null;
   summary: string | null;
   files_analyzed: string[];
@@ -51,13 +71,20 @@ export interface PromptExtractionStatus {
   num_turns: number | null;
   progress_message: string | null;
   progress_log: { t: string; msg: string }[];
+  planned_locations: PlannedLocation[];
   started_at: string | null;
   completed_at: string | null;
 }
 
-export const extractGithubPrompts = () =>
-  request<{ extraction_id: string; status: string }>("/api/prompts/extract/github", {
+export const discoverGithubPrompts = () =>
+  request<{ extraction_id: string; status: string }>("/api/prompts/extract/github/discover", {
     method: "POST",
+  });
+
+export const confirmGithubExtraction = (extractionId: string, selectedExternalIds: string[]) =>
+  request<{ extraction_id: string; status: string }>("/api/prompts/extract/github/confirm", {
+    method: "POST",
+    body: JSON.stringify({ extraction_id: extractionId, selected_external_ids: selectedExternalIds }),
   });
 
 export const getGithubExtractionStatus = () =>
@@ -75,3 +102,40 @@ export interface PromptRecheckResult {
 
 export const recheckPrompt = (id: string) =>
   request<PromptRecheckResult>(`/api/prompts/${id}/recheck`, { method: "POST" });
+
+// --- Clustering, edit, delete, exclude ---
+
+export const clusterPrompts = () =>
+  request<{ synced: number; message: string }>("/api/prompts/cluster", { method: "POST" });
+
+export const updatePromptCluster = (id: string, clusterPath: string[]) =>
+  request<PromptItem>(`/api/prompts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ cluster_path: clusterPath }),
+  });
+
+export const moveCluster = (fromPath: string[], toPath: string[]) =>
+  request<{ moved: number }>("/api/prompts/clusters/move", {
+    method: "POST",
+    body: JSON.stringify({ from_path: fromPath, to_path: toPath }),
+  });
+
+export const deletePrompt = (id: string) =>
+  request<{ status: string }>(`/api/prompts/${id}`, { method: "DELETE" });
+
+export const excludePrompt = (id: string) =>
+  request<{ status: string; external_id: string }>(`/api/prompts/${id}/exclude`, { method: "POST" });
+
+export interface ExclusionItem {
+  external_id: string;
+  name: string;
+}
+
+export const getExclusions = () =>
+  request<{ data: ExclusionItem[]; total: number }>("/api/prompts/exclusions");
+
+export const removeExclusion = (externalId: string) =>
+  request<{ status: string }>("/api/prompts/exclusions", {
+    method: "DELETE",
+    body: JSON.stringify({ external_id: externalId }),
+  });

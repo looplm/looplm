@@ -10,16 +10,26 @@ import {
   getPromptReviews,
   getPromptVersions,
   getProjectGithubInstallation,
-  extractGithubPrompts,
+  discoverGithubPrompts,
+  confirmGithubExtraction,
   getGithubExtractionStatus,
   cancelGithubExtraction,
   recheckPrompt,
+  clusterPrompts,
+  updatePromptCluster,
+  deletePrompt,
+  excludePrompt,
+  getExclusions,
+  removeExclusion,
   type Integration,
   type PromptItem,
   type PromptReviewResult,
   type PromptExtractionStatus,
+  type ExclusionItem,
 } from "@/lib/api";
 import { PromptReviewTab, sortBySeverity } from "./prompt-review-tab";
+import { PromptTree } from "./prompt-tree";
+import { ImportSelectionModal } from "./import-selection-modal";
 import { usePermissions } from "@/components/permissions-context";
 
 const PROMPTS_READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
@@ -98,22 +108,34 @@ export default function PromptsPage() {
   const [now, setNow] = useState(() => Date.now());
   const [rechecking, setRechecking] = useState(false);
   const [recheckMsg, setRecheckMsg] = useState<string | null>(null);
+  const [reclustering, setReclustering] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [clusterDraft, setClusterDraft] = useState<string>("");
+  const [exclusions, setExclusions] = useState<ExclusionItem[]>([]);
+  const [showExclusions, setShowExclusions] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastCountRef = useRef(0);
 
-  const extracting = extraction?.status === "pending" || extraction?.status === "running";
+  const inProgress = ["pending", "discovering", "running", "clustering"].includes(
+    extraction?.status ?? "",
+  );
+  const awaitingSelection = extraction?.status === "awaiting_selection";
   const githubCount = prompts.filter((p) => p.source === "github").length;
   const lastRunIncomplete =
     extraction?.status === "failed" || extraction?.status === "cancelled";
 
-  // Tick a 1s clock while extracting so the elapsed timers count up live.
+  // Tick a 1s clock while a run is active so the elapsed timers count up live.
   useEffect(() => {
-    if (!extracting) return;
+    if (!inProgress) return;
     setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [extracting]);
+  }, [inProgress]);
+
+  const loadExclusions = () => {
+    getExclusions().then((r) => setExclusions(r.data ?? [])).catch(() => setExclusions([]));
+  };
 
   const loadPrompts = () => {
     setLoading(true);
@@ -136,6 +158,8 @@ export default function PromptsPage() {
     }
   };
 
+  const POLL_ACTIVE = ["pending", "discovering", "running", "clustering"];
+
   const startPolling = () => {
     stopPolling();
     pollRef.current = setInterval(async () => {
@@ -147,7 +171,8 @@ export default function PromptsPage() {
           lastCountRef.current = status.extracted_count;
           refreshPromptsQuietly();
         }
-        if (["completed", "failed", "cancelled"].includes(status.status)) {
+        if (!POLL_ACTIVE.includes(status.status)) {
+          // awaiting_selection / completed / failed / cancelled — stop polling.
           stopPolling();
           lastCountRef.current = 0;
           if (status.status === "completed") loadPrompts();
@@ -162,42 +187,50 @@ export default function PromptsPage() {
   useEffect(() => {
     getIntegrations().then((r) => setIntegrations(r.data)).catch((e) => setError(e.message));
     loadPrompts();
+    loadExclusions();
     getProjectGithubInstallation()
       .then((inst) => setGithubRepo(inst?.repo_full_name ?? null))
       .catch(() => setGithubRepo(null));
-    // Resume polling if an extraction is already in flight (e.g. after a reload).
+    // Resume polling if a run is in flight (e.g. after a reload).
     getGithubExtractionStatus()
       .then((status) => {
         setExtraction(status);
-        if (status.status === "pending" || status.status === "running") startPolling();
+        if (POLL_ACTIVE.includes(status.status)) startPolling();
       })
       .catch(() => {});
     return stopPolling;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleExtractGithub = async () => {
+  const handleDiscover = async () => {
     setError(null);
     lastCountRef.current = 0;
     try {
-      await extractGithubPrompts();
+      await discoverGithubPrompts();
       setExtraction({
-        id: "",
-        status: "pending",
-        error: null,
-        summary: null,
-        files_analyzed: [],
-        extracted_count: 0,
-        total_cost_usd: null,
-        num_turns: null,
-        progress_message: "Starting…",
-        progress_log: [],
-        started_at: null,
-        completed_at: null,
+        id: "", status: "discovering", error: null, summary: null,
+        files_analyzed: [], extracted_count: 0, total_cost_usd: null, num_turns: null,
+        progress_message: "Scanning the repository…", progress_log: [],
+        planned_locations: [], started_at: null, completed_at: null,
       });
       startPolling();
     } catch (e: any) {
       setError(e.message);
+    }
+  };
+
+  const handleConfirmImport = async (selected: string[]) => {
+    if (!extraction) return;
+    setConfirming(true);
+    setError(null);
+    try {
+      await confirmGithubExtraction(extraction.id, selected);
+      setExtraction((prev) => (prev ? { ...prev, status: "pending", progress_message: "Starting…" } : prev));
+      startPolling();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -212,10 +245,68 @@ export default function PromptsPage() {
     }
   };
 
+  const handleRecluster = async () => {
+    setReclustering(true);
+    setError(null);
+    try {
+      await clusterPrompts();
+      loadPrompts();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setReclustering(false);
+    }
+  };
+
+  const handleSaveCluster = async () => {
+    if (!selectedPrompt) return;
+    const path = clusterDraft.split("/").map((s) => s.trim()).filter(Boolean);
+    try {
+      const updated = await updatePromptCluster(selectedPrompt.id, path);
+      setSelectedPrompt(updated);
+      refreshPromptsQuietly();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const handleDelete = async (promptId: string) => {
+    if (!confirm("Delete this prompt? Synced prompts may reappear on the next import — use Exclude to remove permanently.")) return;
+    try {
+      await deletePrompt(promptId);
+      setSelectedPrompt(null);
+      loadPrompts();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const handleExclude = async (promptId: string) => {
+    if (!confirm("Exclude this prompt from sync? It will be removed and never re-imported (you can lift the exclusion later).")) return;
+    try {
+      await excludePrompt(promptId);
+      setSelectedPrompt(null);
+      loadPrompts();
+      loadExclusions();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const handleRemoveExclusion = async (externalId: string) => {
+    try {
+      await removeExclusion(externalId);
+      loadExclusions();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
   const selectPrompt = async (p: PromptItem) => {
     setSelectedPrompt(p);
     setReview(null);
     setRecheckMsg(null);
+    setClusterDraft((p.cluster_path ?? []).join(" / "));
     setActiveTab("review");
     setCompareA(null);
     setCompareB(null);
@@ -333,17 +424,35 @@ export default function PromptsPage() {
               {syncing ? "Syncing..." : `Sync ${i.name}`}
             </button>
           ))}
+          {githubCount > 0 && (
+            <button
+              onClick={() => setShowExclusions((v) => !v)}
+              className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-sm rounded-lg"
+            >
+              Excluded ({exclusions.length})
+            </button>
+          )}
+          {githubCount > 0 && (
+            <button
+              onClick={handleRecluster}
+              disabled={reclustering || !canEdit || inProgress}
+              title={!canEdit ? PROMPTS_READ_ONLY_TITLE : "Re-organize prompts into groups"}
+              className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {reclustering ? "Organizing…" : "Re-cluster"}
+            </button>
+          )}
           {githubRepo && (
-            extracting ? (
+            inProgress || awaitingSelection ? (
               <button
                 onClick={handleCancelExtraction}
                 className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-sm rounded-lg"
               >
-                Cancel extraction
+                Cancel
               </button>
             ) : (
               <button
-                onClick={handleExtractGithub}
+                onClick={handleDiscover}
                 disabled={!canEdit}
                 title={!canEdit ? PROMPTS_READ_ONLY_TITLE : `Extract prompts from ${githubRepo}`}
                 className="px-3 py-1.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
@@ -376,7 +485,7 @@ export default function PromptsPage() {
         <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">{error}</div>
       )}
 
-      {extracting && (() => {
+      {inProgress && (() => {
         const log = extraction?.progress_log ?? [];
         const startTs = extraction?.started_at
           ? Date.parse(extraction.started_at)
@@ -430,6 +539,44 @@ export default function PromptsPage() {
         </div>
       )}
 
+      {awaitingSelection && extraction && (
+        <ImportSelectionModal
+          locations={extraction.planned_locations}
+          repo={githubRepo}
+          busy={confirming}
+          onConfirm={handleConfirmImport}
+          onCancel={handleCancelExtraction}
+        />
+      )}
+
+      {showExclusions && (
+        <div className="mb-4 p-3 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-lg text-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-medium">Excluded from sync ({exclusions.length})</span>
+            <button onClick={() => setShowExclusions(false)} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-slate-300">Close</button>
+          </div>
+          {exclusions.length === 0 ? (
+            <div className="text-xs text-gray-400 dark:text-slate-500">Nothing excluded. Excluding a prompt removes it and stops future imports from re-adding it.</div>
+          ) : (
+            <ul className="space-y-1">
+              {exclusions.map((ex) => (
+                <li key={ex.external_id} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-mono truncate text-gray-600 dark:text-slate-300" title={ex.external_id}>{ex.name || ex.external_id}</span>
+                  {canEdit && (
+                    <button
+                      onClick={() => handleRemoveExclusion(ex.external_id)}
+                      className="shrink-0 text-indigo-600 dark:text-indigo-400 hover:underline"
+                    >
+                      Un-exclude
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Prompt list */}
         <div className="lg:col-span-1 space-y-2 max-h-[calc(100vh-10rem)] overflow-y-auto pr-1">
@@ -438,27 +585,30 @@ export default function PromptsPage() {
           ) : prompts.length === 0 ? (
             <div className="text-gray-500 dark:text-slate-400 text-sm p-4">No prompts imported yet. Click Sync to import.</div>
           ) : (
-            [...prompts].sort((a, b) => new Date(b.updated_at ?? b.created_at).getTime() - new Date(a.updated_at ?? a.created_at).getTime()).map((p) => (
-              <button
-                key={p.id}
-                onClick={() => selectPrompt(p)}
-                className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                  selectedPrompt?.id === p.id
-                    ? "bg-indigo-50 dark:bg-indigo-600/20 border-indigo-500/30"
-                    : "bg-white dark:bg-slate-900 border-gray-100 dark:border-slate-800 hover:border-gray-200 dark:hover:border-slate-700"
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium text-sm truncate flex-1">{p.name}</span>
-                  <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${SOURCE_BADGES[p.source] ?? "bg-slate-500/20 text-slate-600 dark:text-slate-300 border-slate-500/40"}`}>
-                    {SOURCE_LABELS[p.source] ?? p.source}
-                  </span>
-                </div>
-                <div className="text-[10px] text-gray-400 dark:text-slate-500" title={p.updated_at ? new Date(p.updated_at).toLocaleString() : undefined}>
-                  v{p.version} · {p.variables?.length ?? 0} vars{p.updated_at ? ` · updated ${timeAgo(p.updated_at)}` : ""}
-                </div>
-              </button>
-            ))
+            <PromptTree
+              prompts={prompts}
+              renderPrompt={(p) => (
+                <button
+                  key={p.id}
+                  onClick={() => selectPrompt(p)}
+                  className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                    selectedPrompt?.id === p.id
+                      ? "bg-indigo-50 dark:bg-indigo-600/20 border-indigo-500/30"
+                      : "bg-white dark:bg-slate-900 border-gray-100 dark:border-slate-800 hover:border-gray-200 dark:hover:border-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-medium text-sm truncate flex-1">{p.name}</span>
+                    <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded border shrink-0 ${SOURCE_BADGES[p.source] ?? "bg-slate-500/20 text-slate-600 dark:text-slate-300 border-slate-500/40"}`}>
+                      {SOURCE_LABELS[p.source] ?? p.source}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 dark:text-slate-500" title={p.updated_at ? new Date(p.updated_at).toLocaleString() : undefined}>
+                    v{p.version} · {p.variables?.length ?? 0} vars{p.updated_at ? ` · updated ${timeAgo(p.updated_at)}` : ""}
+                  </div>
+                </button>
+              )}
+            />
           )}
         </div>
 
@@ -494,6 +644,43 @@ export default function PromptsPage() {
                     {reviewing ? "Reviewing..." : "Review"}
                   </button>
                 </div>
+              </div>
+
+              {/* Cluster (editable hierarchy) + destructive actions */}
+              <div className="flex flex-wrap items-center gap-2 mb-4 text-xs">
+                <span className="text-gray-400 dark:text-slate-500">Group:</span>
+                <input
+                  value={clusterDraft}
+                  onChange={(e) => setClusterDraft(e.target.value)}
+                  disabled={!canEdit}
+                  placeholder="e.g. Graders / Conciseness"
+                  className="flex-1 min-w-[12rem] bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded px-2 py-1 text-gray-700 dark:text-slate-200"
+                />
+                <button
+                  onClick={handleSaveCluster}
+                  disabled={!canEdit || clusterDraft === (selectedPrompt.cluster_path ?? []).join(" / ")}
+                  className="px-3 py-1 rounded bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Save group
+                </button>
+                <span className="flex-1" />
+                {selectedPrompt.source === "github" && (
+                  <button
+                    onClick={() => handleExclude(selectedPrompt.id)}
+                    disabled={!canEdit}
+                    title="Remove and never re-import"
+                    className="px-3 py-1 rounded border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Exclude from sync
+                  </button>
+                )}
+                <button
+                  onClick={() => handleDelete(selectedPrompt.id)}
+                  disabled={!canEdit}
+                  className="px-3 py-1 rounded border border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Delete
+                </button>
               </div>
 
               {recheckMsg && (

@@ -113,6 +113,40 @@ async def get_or_create_github_integration(
     return integration
 
 
+def get_excluded_ids(integration: Integration) -> set[str]:
+    """External IDs the user has excluded from sync, stored on the integration."""
+    return set((integration.config or {}).get("excluded_external_ids", []))
+
+
+async def add_exclusion(integration: Integration, external_id: str, db: AsyncSession) -> None:
+    cfg = dict(integration.config or {})
+    excluded = list(cfg.get("excluded_external_ids", []))
+    if external_id not in excluded:
+        excluded.append(external_id)
+    cfg["excluded_external_ids"] = excluded
+    integration.config = cfg  # reassign so SQLAlchemy tracks the JSONB change
+    await db.flush()
+
+
+async def remove_exclusion(integration: Integration, external_id: str, db: AsyncSession) -> None:
+    cfg = dict(integration.config or {})
+    cfg["excluded_external_ids"] = [
+        e for e in cfg.get("excluded_external_ids", []) if e != external_id
+    ]
+    integration.config = cfg
+    await db.flush()
+
+
+async def delete_prompt(prompt_id: UUID, project_id: UUID, db: AsyncSession) -> bool:
+    """Delete a prompt (and its reviews via cascade). Returns False if not found."""
+    prompt = await get_prompt(prompt_id, project_id, db)
+    if not prompt:
+        return False
+    await db.delete(prompt)
+    await db.commit()
+    return True
+
+
 async def upsert_prompts_for_integration(
     integration_id: UUID,
     items: list[dict],
@@ -205,6 +239,11 @@ async def sync_prompts(
             api_url=integration.base_url or "https://api.smith.langchain.com",
         )
         raw_prompts = await connector.sync_prompts()
+
+    # Honor user exclusions: never import (or re-add) excluded external_ids.
+    excluded = get_excluded_ids(integration)
+    if excluded:
+        raw_prompts = [rp for rp in raw_prompts if rp["external_id"] not in excluded]
 
     # Build set of (external_id, version) from the remote source
     remote_keys = {(rp["external_id"], rp.get("version", 1)) for rp in raw_prompts}

@@ -2362,6 +2362,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/prompts/cluster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recluster Prompts
+         * @description Re-run the LLM grouping over the project's GitHub prompts.
+         */
+        post: operations["recluster_prompts_api_prompts_cluster_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prompts/clusters/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move Prompt Cluster
+         * @description Bulk rename/move a cluster node (rewrite the path prefix).
+         */
+        post: operations["move_prompt_cluster_api_prompts_clusters_move_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prompts/exclusions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Exclusions
+         * @description List source locations excluded from GitHub sync.
+         */
+        get: operations["list_exclusions_api_prompts_exclusions_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Exclusion
+         * @description Lift an exclusion so the location can be imported again.
+         */
+        delete: operations["delete_exclusion_api_prompts_exclusions_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/prompts/extract/github": {
         parameters: {
             query?: never;
@@ -2396,6 +2460,46 @@ export interface paths {
          * @description Cancel the running extraction for this project.
          */
         post: operations["cancel_github_extraction_api_prompts_extract_github_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prompts/extract/github/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Github Extraction
+         * @description Phase 2: extract the locations the user selected in the discovery step.
+         */
+        post: operations["confirm_github_extraction_api_prompts_extract_github_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/prompts/extract/github/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discover Github Prompts
+         * @description Phase 1: discover prompt locations for the user to review before importing.
+         */
+        post: operations["discover_github_prompts_api_prompts_extract_github_discover_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2476,6 +2580,36 @@ export interface paths {
         get: operations["get_single_prompt_api_prompts__prompt_id__get"];
         put?: never;
         post?: never;
+        /**
+         * Remove Prompt
+         * @description Delete a prompt. Synced prompts may reappear on the next sync — use exclude
+         *     to remove permanently.
+         */
+        delete: operations["remove_prompt_api_prompts__prompt_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Prompt
+         * @description Edit a prompt's cluster assignment (move it within the hierarchy).
+         */
+        patch: operations["update_prompt_api_prompts__prompt_id__patch"];
+        trace?: never;
+    };
+    "/api/prompts/{prompt_id}/exclude": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exclude Prompt
+         * @description Exclude a github prompt from sync: record its location and delete the row so
+         *     future extractions never re-import it.
+         */
+        post: operations["exclude_prompt_api_prompts__prompt_id__exclude_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3535,6 +3669,26 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ClusterMoveRequest */
+        ClusterMoveRequest: {
+            /** From Path */
+            from_path: string[];
+            /** To Path */
+            to_path: string[];
+        };
+        /** ClusterMoveResult */
+        ClusterMoveResult: {
+            /**
+             * Moved
+             * @default 0
+             */
+            moved: number;
+        };
+        /** ClusterUpdateRequest */
+        ClusterUpdateRequest: {
+            /** Cluster Path */
+            cluster_path?: string[];
+        };
         /** CodeSuggestionItem */
         CodeSuggestionItem: {
             /** Confidence */
@@ -3581,6 +3735,13 @@ export interface components {
              * @description applied or dismissed
              */
             status: string;
+        };
+        /** ConfirmExtractionRequest */
+        ConfirmExtractionRequest: {
+            /** Extraction Id */
+            extraction_id: string;
+            /** Selected External Ids */
+            selected_external_ids?: string[];
         };
         /** CostDetailItem */
         CostDetailItem: {
@@ -4393,6 +4554,26 @@ export interface components {
             signal_type: string;
             /** Trace Id */
             trace_id: string | null;
+        };
+        /** ExclusionItem */
+        ExclusionItem: {
+            /** External Id */
+            external_id: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+        };
+        /** ExclusionListResponse */
+        ExclusionListResponse: {
+            /** Data */
+            data?: components["schemas"]["ExclusionItem"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
         };
         /** ExperimentCreate */
         ExperimentCreate: {
@@ -5862,6 +6043,29 @@ export interface components {
             /** Write Pages */
             write_pages?: string[] | null;
         };
+        /**
+         * PlannedLocation
+         * @description A discovered prompt location shown in the pre-import selection step.
+         */
+        PlannedLocation: {
+            /**
+             * Already Saved
+             * @default false
+             */
+            already_saved: boolean;
+            /** External Id */
+            external_id: string;
+            /** File Path */
+            file_path: string;
+            /** Line Start */
+            line_start?: number | null;
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /** Role */
+            role?: string | null;
+        };
         /** ProjectCreate */
         ProjectCreate: {
             /** Description */
@@ -5941,6 +6145,8 @@ export interface components {
             id: string;
             /** Num Turns */
             num_turns?: number | null;
+            /** Planned Locations */
+            planned_locations?: components["schemas"]["PlannedLocation"][];
             /** Progress Log */
             progress_log?: {
                 [key: string]: unknown;
@@ -5996,6 +6202,8 @@ export interface components {
         };
         /** PromptOut */
         PromptOut: {
+            /** Cluster Path */
+            cluster_path?: string[];
             /**
              * Created At
              * Format: date-time
@@ -6133,6 +6341,11 @@ export interface components {
             previous: number;
             /** Regressed */
             regressed: boolean;
+        };
+        /** RemoveExclusionRequest */
+        RemoveExclusionRequest: {
+            /** External Id */
+            external_id: string;
         };
         /** RepoListItem */
         RepoListItem: {
@@ -12468,6 +12681,138 @@ export interface operations {
             };
         };
     };
+    recluster_prompts_api_prompts_cluster_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptSyncResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    move_prompt_cluster_api_prompts_clusters_move_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterMoveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterMoveResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_exclusions_api_prompts_exclusions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExclusionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_exclusion_api_prompts_exclusions_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveExclusionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     trigger_github_extraction_api_prompts_extract_github_post: {
         parameters: {
             query?: never;
@@ -12512,6 +12857,72 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_github_extraction_api_prompts_extract_github_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmExtractionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discover_github_prompts_api_prompts_extract_github_discover_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12649,6 +13060,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PromptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_prompt_api_prompts__prompt_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                prompt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_prompt_api_prompts__prompt_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                prompt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    exclude_prompt_api_prompts__prompt_id__exclude_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                prompt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
