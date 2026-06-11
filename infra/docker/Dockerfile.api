@@ -14,8 +14,18 @@ WORKDIR /app
 ARG LOOPLM_GIT_SHA=""
 ENV LOOPLM_GIT_SHA=${LOOPLM_GIT_SHA}
 
+# git is required at runtime to clone connected GitHub repos (prompt extraction,
+# Code Agent, repo-aware Advisor) — the slim base image does not include it.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 1001 appuser && \
     useradd --uid 1001 --gid appuser --shell /bin/false appuser
+
+# Managed clone dir (GITHUB_CLONE_DIR default). Pre-create writable by appuser;
+# mount a persistent volume here in production so clones survive restarts.
+RUN mkdir -p /var/looplm/repos && chown -R appuser:appuser /var/looplm
 
 COPY --from=builder /usr/local /usr/local
 COPY apps/api/app ./app

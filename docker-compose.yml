@@ -30,6 +30,7 @@ services:
         condition: service_healthy
     volumes:
       - ./connectors:/app/connectors
+      - repo_clones:/var/looplm/repos
 
   postgres:
     image: postgres:16-alpine
@@ -75,3 +76,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  repo_clones:
