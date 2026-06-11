@@ -34,3 +34,7 @@ class ProjectResponse(BaseModel):
 
 class ProjectListResponse(BaseModel):
     data: list[ProjectResponse]
+
+
+class TransferOwnership(BaseModel):
+    new_owner_id: UUID

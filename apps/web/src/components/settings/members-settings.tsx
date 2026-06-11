@@ -6,9 +6,11 @@ import {
   inviteProjectMember,
   updateProjectMember,
   removeProjectMember,
+  transferProjectOwnership,
   type ProjectMember,
   type InviteResponse,
 } from "@/lib/api";
+import { usePermissions } from "@/components/permissions-context";
 
 const ALL_SECTIONS = ["observe", "evaluate", "improve"] as const;
 
@@ -25,6 +27,8 @@ function pagesForSections(sections: string[]): string[] {
 }
 
 export default function MembersSettings({ projectId }: { projectId: string | null }) {
+  const { role: currentRole, refresh: refreshPermissions } = usePermissions();
+  const isOwner = currentRole === "owner";
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -265,6 +269,24 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
     }
   }
 
+  async function handleTransfer(member: ProjectMember) {
+    if (!projectId) return;
+    if (
+      !confirm(
+        `Transfer ownership to ${member.email}?\n\nThey will become the project owner and you will become an admin. Only the new owner can transfer it back.`,
+      )
+    )
+      return;
+    try {
+      await transferProjectOwnership(projectId, member.user_id!);
+      await loadMembers();
+      // Current user is no longer the owner — refresh cached permissions.
+      refreshPermissions();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to transfer ownership");
+    }
+  }
+
   async function handleRemove(member: ProjectMember) {
     if (!projectId) return;
     const label = member.status === "pending" ? "Cancel invitation for" : "Remove";
@@ -452,6 +474,7 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
             </thead>
             <tbody>
               {members.map((member) => {
+                const isOwnerRow = member.role === "owner";
                 const isExpanded = expandedMembers.has(member.id);
                 const hasPageRestrictions = member.allowed_pages !== null;
                 const hasWriteRestrictions =
@@ -463,16 +486,18 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
                   >
                     <td className="px-6 py-3 text-gray-900 dark:text-white">
                       <div>{member.email}</div>
-                      <button
-                        onClick={() => toggleExpanded(member.id)}
-                        className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline mt-0.5"
-                      >
-                        {isExpanded
-                          ? "Hide pages"
-                          : hasPageRestrictions || hasWriteRestrictions
-                            ? "Edit pages (restricted)"
-                            : "Edit pages"}
-                      </button>
+                      {!isOwnerRow && (
+                        <button
+                          onClick={() => toggleExpanded(member.id)}
+                          className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline mt-0.5"
+                        >
+                          {isExpanded
+                            ? "Hide pages"
+                            : hasPageRestrictions || hasWriteRestrictions
+                              ? "Edit pages (restricted)"
+                              : "Edit pages"}
+                        </button>
+                      )}
                     </td>
                     <td className="px-6 py-3">
                       {member.status === "pending" ? (
@@ -486,22 +511,29 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
                       )}
                     </td>
                     <td className="px-6 py-3">
-                      <select
-                        value={member.role}
-                        onChange={(e) => handleRoleChange(member, e.target.value)}
-                        className="px-2 py-1 rounded border border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white text-xs"
-                      >
-                        <option value="member">Member</option>
-                        <option value="admin">Admin</option>
-                      </select>
+                      {isOwnerRow ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400">
+                          Owner
+                        </span>
+                      ) : (
+                        <select
+                          value={member.role}
+                          onChange={(e) => handleRoleChange(member, e.target.value)}
+                          className="px-2 py-1 rounded border border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white text-xs"
+                        >
+                          <option value="member">Member</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      )}
                     </td>
                     {ALL_SECTIONS.map((section) => (
                       <td key={section} className="px-4 py-3 text-center">
                         <input
                           type="checkbox"
                           checked={member.allowed_sections.includes(section)}
+                          disabled={isOwnerRow}
                           onChange={() => handleToggleSection(member, section)}
-                          className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
+                          className="rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
                         />
                         {isExpanded && member.allowed_sections.includes(section) && (
                           <div className="mt-1.5 space-y-1 text-left">
@@ -535,13 +567,27 @@ export default function MembersSettings({ projectId }: { projectId: string | nul
                         )}
                       </td>
                     ))}
-                    <td className="px-6 py-3 text-right">
-                      <button
-                        onClick={() => handleRemove(member)}
-                        className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-xs font-medium"
-                      >
-                        {member.status === "pending" ? "Cancel" : "Remove"}
-                      </button>
+                    <td className="px-6 py-3 text-right whitespace-nowrap">
+                      {isOwnerRow ? (
+                        <span className="text-xs text-gray-400 dark:text-slate-500">—</span>
+                      ) : (
+                        <div className="inline-flex items-center gap-3">
+                          {isOwner && member.status === "active" && member.user_id && (
+                            <button
+                              onClick={() => handleTransfer(member)}
+                              className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-xs font-medium"
+                            >
+                              Make owner
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleRemove(member)}
+                            className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-xs font-medium"
+                          >
+                            {member.status === "pending" ? "Cancel" : "Remove"}
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

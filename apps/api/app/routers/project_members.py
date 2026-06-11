@@ -89,6 +89,27 @@ def _invitation_response(inv: ProjectInvitation) -> MemberResponse:
     )
 
 
+def _owner_response(project: Project, email: str) -> MemberResponse:
+    """Synthetic, read-only member row for the project owner.
+
+    The owner lives on ``Project.owner_id`` (not in project_members), so this row
+    is built on the fly. ``id`` is the owner's user id — there is no member row to
+    target — and the ``owner`` role signals to the UI that it can't be edited or
+    removed, only transferred.
+    """
+    return MemberResponse(
+        id=project.owner_id,
+        user_id=project.owner_id,
+        email=email,
+        role="owner",
+        allowed_sections=list(ALL_SECTIONS),
+        allowed_pages=None,
+        write_pages=None,
+        status="active",
+        created_at=project.created_at,
+    )
+
+
 def _build_invite_url(token: str, email: str) -> str:
     return f"{app_settings.frontend_url}/register?invite={token}&email={quote(email)}"
 
@@ -101,6 +122,12 @@ async def list_members(
     _project: Project = Depends(get_current_project),
     _admin: None = Depends(require_project_admin),
 ):
+    # Owner row first (lives on Project.owner_id, not in project_members).
+    owner_email = (
+        await db.execute(select(User.email).where(User.id == _project.owner_id))
+    ).scalar_one()
+    members = [_owner_response(_project, owner_email)]
+
     # Active members
     result = await db.execute(
         select(ProjectMember, User.email)
@@ -108,7 +135,7 @@ async def list_members(
         .where(ProjectMember.project_id == project_id)
         .order_by(ProjectMember.created_at.asc())
     )
-    members = [_member_response(m, email) for m, email in result.all()]
+    members += [_member_response(m, email) for m, email in result.all()]
 
     # Pending invitations
     result = await db.execute(

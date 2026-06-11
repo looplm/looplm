@@ -10,13 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.db import get_db
 from app.models.project import Project
-from app.models.project_member import ProjectMember
+from app.models.project_member import ALL_SECTIONS, ProjectMember
 from app.models.user import User
 from app.schemas.projects import (
     ProjectCreate,
     ProjectListResponse,
     ProjectResponse,
     ProjectUpdate,
+    TransferOwnership,
 )
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -139,6 +140,66 @@ async def update_project(
                 continue
             merged[key] = value
         project.settings = merged
+    project.updated_at = datetime.now(timezone.utc)
+
+    await db.flush()
+    await db.refresh(project)
+    return _project_response(project)
+
+
+@router.post("/{project_id}/transfer-ownership", response_model=ProjectResponse)
+async def transfer_ownership(
+    project_id: UUID,
+    body: TransferOwnership,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Hand the project over to an existing member.
+
+    Owner-only. The chosen member is promoted out of the members table to become
+    the owner, and the previous owner stays on as an admin member so they keep
+    full access.
+    """
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.owner_id != _user.id:
+        raise HTTPException(
+            status_code=403, detail="Only the project owner can transfer ownership"
+        )
+    if body.new_owner_id == project.owner_id:
+        raise HTTPException(status_code=400, detail="That user is already the owner")
+
+    # The new owner must already be a member of this project.
+    result = await db.execute(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == body.new_owner_id,
+        )
+    )
+    new_owner_member = result.scalar_one_or_none()
+    if not new_owner_member:
+        raise HTTPException(
+            status_code=400, detail="New owner must be an existing project member"
+        )
+
+    previous_owner_id = project.owner_id
+
+    # Promote the new owner out of the members table, demote the previous owner
+    # to an admin member (the owner never had a member row — it can't conflict).
+    await db.delete(new_owner_member)
+    db.add(
+        ProjectMember(
+            project_id=project_id,
+            user_id=previous_owner_id,
+            role="admin",
+            allowed_sections=list(ALL_SECTIONS),
+            allowed_pages=None,
+            write_pages=None,
+        )
+    )
+    project.owner_id = body.new_owner_id
     project.updated_at = datetime.now(timezone.utc)
 
     await db.flush()

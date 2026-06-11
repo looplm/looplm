@@ -2342,6 +2342,30 @@ export interface paths {
         patch: operations["update_member_api_projects__project_id__members__member_id__patch"];
         trace?: never;
     };
+    "/api/projects/{project_id}/transfer-ownership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer Ownership
+         * @description Hand the project over to an existing member.
+         *
+         *     Owner-only. The chosen member is promoted out of the members table to become
+         *     the owner, and the previous owner stays on as an admin member so they keep
+         *     full access.
+         */
+        post: operations["transfer_ownership_api_projects__project_id__transfer_ownership_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/prompts": {
         parameters: {
             query?: never;
@@ -7534,6 +7558,14 @@ export interface components {
             /** Status */
             status?: string | null;
         };
+        /** TransferOwnership */
+        TransferOwnership: {
+            /**
+             * New Owner Id
+             * Format: uuid
+             */
+            new_owner_id: string;
+        };
         /** TrendPoint */
         TrendPoint: {
             /** Date */
@@ -7798,7 +7830,9 @@ export interface operations {
     analysis_preview_analysis_preview_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12635,6 +12669,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transfer_ownership_api_projects__project_id__transfer_ownership_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferOwnership"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectResponse"];
                 };
             };
             /** @description Validation Error */

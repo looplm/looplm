@@ -338,3 +338,9 @@ export const removeProjectMember = (projectId: string, memberId: string) =>
   request<void>(`/api/projects/${projectId}/members/${memberId}`, {
     method: "DELETE",
   });
+
+export const transferProjectOwnership = (projectId: string, newOwnerId: string) =>
+  request<Project>(`/api/projects/${projectId}/transfer-ownership`, {
+    method: "POST",
+    body: JSON.stringify({ new_owner_id: newOwnerId }),
+  });
