@@ -27,6 +27,17 @@ def test_extract_prefers_configured_key():
 def test_extract_falls_back_to_default_keys_when_unconfigured():
     assert extract_retrieval_context_from_payload({"retrievalContext": "c"}) == "c"
     assert extract_retrieval_context_from_payload({"context": "c"}) == "c"
+    # Common RAG payload shapes work without any configured key — critical for
+    # eval runs against a live endpoint, where span-kind config doesn't apply.
+    assert extract_retrieval_context_from_payload({"retrievedContext": "c"}) == "c"
+    assert extract_retrieval_context_from_payload({"formattedContext": "c"}) == "c"
+    out = extract_retrieval_context_from_payload({"searchSources": [{"a": 1}]})
+    assert json.loads(out) == [{"a": 1}]
+
+
+def test_extract_fallback_order_prefers_specific_over_generic():
+    parsed = {"context": "generic", "formattedContext": "specific"}
+    assert extract_retrieval_context_from_payload(parsed) == "specific"
 
 
 def test_extract_serializes_list_and_dict():
@@ -35,8 +46,6 @@ def test_extract_serializes_list_and_dict():
 
 
 def test_extract_returns_none_when_no_match():
-    # Real-world payload whose key isn't in the default list and isn't configured.
-    assert extract_retrieval_context_from_payload({"retrievedContext": "c"}) is None
     assert extract_retrieval_context_from_payload({"foo": "bar"}, payload_key="baz") is None
     assert extract_retrieval_context_from_payload("not a dict") is None
 

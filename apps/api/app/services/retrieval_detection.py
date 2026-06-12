@@ -41,6 +41,9 @@ _SYSTEM = (
     "- payload_key: a top-level key in the response payload whose value holds the "
     "retrieved context (e.g. retrievedContext, formattedContext, searchSources).\n"
     "- span: a span identified by name whose output holds the retrieved context.\n\n"
+    "When BOTH a payload key and a span plausibly hold the retrieved context, "
+    "prefer payload_key — it also applies to live eval-run responses, which have "
+    "no spans.\n\n"
     'Reply with JSON: {"kind": "payload_key"|"span"|"none", "value": "<key or '
     'span name>", "confidence": "high"|"medium"|"low", "reasoning": "<one '
     'sentence>"}. Use "none" only when no candidate plausibly holds retrieved '

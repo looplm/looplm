@@ -32,9 +32,19 @@ SOURCE_SETTINGS_KEY = "retrieval_source"
 DEFAULT_RETRIEVAL_SPAN_NAME = "retrieval-context"
 VALID_KINDS = ("span", "payload_key")
 
-# Top-level payload keys tried when no key is configured — keeps default-shaped
-# RAG responses working without detection.
-_FALLBACK_PAYLOAD_KEYS = ("retrieval_context", "retrievalContext", "context")
+# Top-level payload keys tried when no key is configured (or the configured key
+# doesn't match) — keeps common RAG response shapes working without detection.
+# Important for eval runs against a live endpoint: those responses have no spans,
+# so a span-kind ``retrieval_source`` contributes nothing there and these
+# fallbacks are the only way to capture retrieval context.
+_FALLBACK_PAYLOAD_KEYS = (
+    "retrieval_context",
+    "retrievalContext",
+    "retrievedContext",
+    "formattedContext",
+    "searchSources",
+    "context",
+)
 
 
 def get_retrieval_source_from_settings(settings: dict[str, Any] | None) -> dict[str, Any] | None:
