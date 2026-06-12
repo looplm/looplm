@@ -31,6 +31,7 @@ class TestDatasetItem(BaseModel):
     description: Optional[str] = None
     tags: list[str]
     test_count: int
+    needs_work_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -84,6 +85,8 @@ class TestCaseUpdate(BaseModel):
     follow_up_prompts: Optional[list[dict[str, Any]]] = None
     tags: Optional[list[str]] = None
     metadata: Optional[dict[str, Any]] = None
+    status: Optional[str] = Field(default=None, pattern="^(active|needs_work)$")
+    status_note: Optional[str] = None
 
 
 class TestCaseItem(BaseModel):
@@ -108,6 +111,8 @@ class TestCaseItem(BaseModel):
     source_trace_id: Optional[UUID] = None
     tags: list[str]
     metadata: dict[str, Any]
+    status: str = "active"
+    status_note: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -119,6 +124,7 @@ class TestDatasetDetail(BaseModel):
     description: Optional[str] = None
     tags: list[str]
     test_count: int
+    needs_work_count: int = 0
     created_at: datetime
     updated_at: datetime
     test_cases: list[TestCaseItem]
@@ -163,6 +169,8 @@ class ExportTestCase(BaseModel):
     maxAnswerLength: Optional[int] = None
     followUpPrompts: Optional[list[dict[str, Any]]] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    status: Optional[str] = None
+    statusNote: Optional[str] = None
 
 
 class ExportResponse(BaseModel):

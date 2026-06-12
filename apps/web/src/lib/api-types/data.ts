@@ -50,6 +50,7 @@ export type TestCaseItem = S["TestCaseItem"];
 export type TestDatasetDetail = S["TestDatasetDetail"];
 export type TestCaseSuggestion = S["TestCaseSuggestion"];
 export type TestCaseCreateBody = S["TestCaseCreate"];
+export type TestCaseUpdateBody = S["TestCaseUpdate"];
 
 // --- Import History ---
 export type JsonImportItem = S["JsonImportItem"];

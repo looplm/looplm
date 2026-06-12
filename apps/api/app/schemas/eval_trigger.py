@@ -39,6 +39,7 @@ class DatasetPickerItem(BaseModel):
     id: UUID
     name: str
     test_count: int
+    needs_work_count: int = 0
 
 
 class DatasetPickerResponse(BaseModel):

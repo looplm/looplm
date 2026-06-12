@@ -248,7 +248,14 @@ export default function DatasetsPage() {
                         </p>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-center">{ds.test_count}</td>
+                    <td className="px-4 py-3 text-center">
+                      {ds.test_count}
+                      {(ds.needs_work_count ?? 0) > 0 && (
+                        <span className="block text-xs text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                          {ds.needs_work_count} need work
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 flex-wrap">
                         {ds.tags.map((tag) => (

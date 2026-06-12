@@ -9,6 +9,7 @@ import type {
   TestDatasetDetail,
   TestCaseSuggestion,
   TestCaseCreateBody,
+  TestCaseUpdateBody,
   TestDatasetExport,
 } from "../api-types";
 import { request } from "./client";
@@ -47,7 +48,7 @@ export const createTestCase = (datasetId: string, body: TestCaseCreateBody) =>
     body: JSON.stringify(body),
   });
 
-export const updateTestCase = (datasetId: string, caseId: string, body: Partial<TestCaseCreateBody>) =>
+export const updateTestCase = (datasetId: string, caseId: string, body: TestCaseUpdateBody) =>
   request<TestCaseItem>(`/api/datasets/${datasetId}/cases/${caseId}`, {
     method: "PATCH",
     body: JSON.stringify(body),

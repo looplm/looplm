@@ -86,18 +86,26 @@ async def run_eval(
         response_path = ps.get("eval_response_path") or "choices.0.message.content"
         extra_headers = ps.get("eval_extra_headers") or {}
 
-        # Load test cases
+        # Load test cases (cases marked needs_work are excluded from runs)
         tc_query = select(TestCase).join(TestDataset)
         if dataset_ids:
             tc_query = tc_query.where(TestCase.dataset_id.in_(dataset_ids))
         tc_query = tc_query.where(TestDataset.project_id == project_id)
         tc_result = await db.execute(tc_query)
-        test_cases = list(tc_result.scalars().all())
+        all_cases = list(tc_result.scalars().all())
+        test_cases = [tc for tc in all_cases if tc.status != "needs_work"]
+        skipped = len(all_cases) - len(test_cases)
 
         if not test_cases:
-            raise ValueError("No test cases found for the selected datasets.")
+            raise ValueError(
+                "No runnable test cases found for the selected datasets"
+                + (" (all are marked as needs work)." if skipped else ".")
+            )
 
-        _log(f"Loaded {len(test_cases)} test cases (concurrency: {concurrency})")
+        _log(
+            f"Loaded {len(test_cases)} test cases (concurrency: {concurrency})"
+            + (f", skipped {skipped} marked needs-work" if skipped else "")
+        )
 
         # Load enabled evaluators
         ev_result = await db.execute(

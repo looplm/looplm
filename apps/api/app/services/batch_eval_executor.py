@@ -86,8 +86,8 @@ async def run_eval_batch(
         response_path = ps.get("eval_response_path") or "choices.0.message.content"
         extra_headers = ps.get("eval_extra_headers") or {}
 
-        # Load test cases
-        tc_query = select(TestCase).join(TestDataset)
+        # Load test cases (cases marked needs_work are excluded from runs)
+        tc_query = select(TestCase).join(TestDataset).where(TestCase.status != "needs_work")
         if dataset_ids:
             tc_query = tc_query.where(TestCase.dataset_id.in_(dataset_ids))
         tc_query = tc_query.where(TestDataset.project_id == project_id)

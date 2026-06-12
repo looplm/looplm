@@ -4231,6 +4231,11 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /**
+             * Needs Work Count
+             * @default 0
+             */
+            needs_work_count: number;
             /** Test Count */
             test_count: number;
         };
@@ -4853,6 +4858,10 @@ export interface components {
             };
             /** Prompt */
             prompt: string;
+            /** Status */
+            status?: string | null;
+            /** Statusnote */
+            statusNote?: string | null;
             /** Tagfilter */
             tagFilter?: string[];
             /** Teamfilter */
@@ -7415,6 +7424,13 @@ export interface components {
             source_feedback_id?: string | null;
             /** Source Trace Id */
             source_trace_id?: string | null;
+            /**
+             * Status
+             * @default active
+             */
+            status: string;
+            /** Status Note */
+            status_note?: string | null;
             /** Tag Filter */
             tag_filter: string[];
             /** Tags */
@@ -7499,6 +7515,10 @@ export interface components {
             } | null;
             /** Prompt */
             prompt?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Status Note */
+            status_note?: string | null;
             /** Tag Filter */
             tag_filter?: string[] | null;
             /** Tags */
@@ -7542,6 +7562,11 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /**
+             * Needs Work Count
+             * @default 0
+             */
+            needs_work_count: number;
             /** Tags */
             tags: string[];
             /** Test Cases */
@@ -7570,6 +7595,11 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /**
+             * Needs Work Count
+             * @default 0
+             */
+            needs_work_count: number;
             /** Tags */
             tags: string[];
             /** Test Count */

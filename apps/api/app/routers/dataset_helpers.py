@@ -84,6 +84,8 @@ def _tc_to_item(tc: TestCase) -> TestCaseItem:
         source_trace_id=tc.source_trace_id,
         tags=tc.tags or [],
         metadata=tc.test_case_metadata or {},
+        status=tc.status or "active",
+        status_note=tc.status_note,
         created_at=tc.created_at,
     )
 

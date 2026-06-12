@@ -9,6 +9,7 @@ export interface TestCaseFormData {
   prompt: string;
   expected_answer: string;
   config_json: string;
+  reactivate?: boolean;
 }
 
 const KNOWN_CONFIG_KEYS = [
@@ -92,6 +93,27 @@ export function TestCaseModal({
 
           {/* Body */}
           <div className="p-4 space-y-4 overflow-y-auto flex-1">
+            {/* Needs-work banner */}
+            {editingCase?.status === "needs_work" && (
+              <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-3 space-y-2">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  This test case is marked as needing work and is excluded from eval runs.
+                </p>
+                {editingCase.status_note && (
+                  <p className="text-sm text-amber-700 dark:text-amber-400">{editingCase.status_note}</p>
+                )}
+                <label className="flex items-center gap-2 text-sm text-amber-800 dark:text-amber-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!form.reactivate}
+                    onChange={(e) => setForm({ ...form, reactivate: e.target.checked })}
+                    className="rounded border-amber-300 dark:border-amber-700"
+                  />
+                  Mark as fixed when saving (include in eval runs again)
+                </label>
+              </div>
+            )}
+
             {/* Test ID */}
             <div>
               <label className="block text-sm font-medium mb-1">Test ID</label>

@@ -70,12 +70,18 @@ async def list_datasets(
         count = (await db.execute(
             select(func.count(TestCase.id)).where(TestCase.dataset_id == ds.id)
         )).scalar() or 0
+        needs_work = (await db.execute(
+            select(func.count(TestCase.id)).where(
+                TestCase.dataset_id == ds.id, TestCase.status == "needs_work"
+            )
+        )).scalar() or 0
         data.append(TestDatasetItem(
             id=ds.id,
             name=ds.name,
             description=ds.description,
             tags=ds.tags or [],
             test_count=count,
+            needs_work_count=needs_work,
             created_at=ds.created_at,
             updated_at=ds.updated_at,
         ))
@@ -192,6 +198,8 @@ async def import_dataset(
             follow_up_prompts=tc_data.get("followUpPrompts"),
             tags=[],
             test_case_metadata=tc_data.get("metadata", {}),
+            status="needs_work" if tc_data.get("status") == "needs_work" else "active",
+            status_note=tc_data.get("statusNote"),
         )
         db.add(tc)
 
@@ -200,6 +208,11 @@ async def import_dataset(
 
     count = (await db.execute(
         select(func.count(TestCase.id)).where(TestCase.dataset_id == ds.id)
+    )).scalar() or 0
+    needs_work = (await db.execute(
+        select(func.count(TestCase.id)).where(
+            TestCase.dataset_id == ds.id, TestCase.status == "needs_work"
+        )
     )).scalar() or 0
 
     # Record import history
@@ -217,6 +230,7 @@ async def import_dataset(
         description=ds.description,
         tags=ds.tags or [],
         test_count=count,
+        needs_work_count=needs_work,
         created_at=ds.created_at,
         updated_at=ds.updated_at,
     )
@@ -246,6 +260,7 @@ async def get_dataset(
         description=ds.description,
         tags=ds.tags or [],
         test_count=len(cases),
+        needs_work_count=sum(1 for tc in cases if tc.status == "needs_work"),
         created_at=ds.created_at,
         updated_at=ds.updated_at,
         test_cases=[_tc_to_item(tc) for tc in cases],
@@ -283,6 +298,11 @@ async def update_dataset(
     count = (await db.execute(
         select(func.count(TestCase.id)).where(TestCase.dataset_id == ds.id)
     )).scalar() or 0
+    needs_work = (await db.execute(
+        select(func.count(TestCase.id)).where(
+            TestCase.dataset_id == ds.id, TestCase.status == "needs_work"
+        )
+    )).scalar() or 0
 
     return TestDatasetItem(
         id=ds.id,
@@ -290,6 +310,7 @@ async def update_dataset(
         description=ds.description,
         tags=ds.tags or [],
         test_count=count,
+        needs_work_count=needs_work,
         created_at=ds.created_at,
         updated_at=ds.updated_at,
     )
@@ -353,6 +374,8 @@ async def export_dataset(
                 maxAnswerLength=tc.max_answer_length,
                 followUpPrompts=tc.follow_up_prompts,
                 metadata=tc.test_case_metadata or {},
+                status=tc.status or "active",
+                statusNote=tc.status_note,
             )
             for tc in cases
         ],

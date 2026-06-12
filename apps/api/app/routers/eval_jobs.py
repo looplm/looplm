@@ -6,13 +6,13 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.config import settings
 from app.db import get_db
-from app.models.models import EvalJob, EvalJobStatus, TestDataset
+from app.models.models import EvalJob, EvalJobStatus, TestCase, TestDataset
 from app.models.project import Project
 from app.models.user import User
 from app.services.analysis_llm import merge_llm_settings
@@ -54,7 +54,10 @@ async def list_datasets_for_trigger(
         select(
             TestDataset.id,
             TestDataset.name,
-            func.count(TestDataset.id).label("test_count"),
+            func.count(TestCase.id).label("test_count"),
+            func.count(case((TestCase.status == "needs_work", TestCase.id))).label(
+                "needs_work_count"
+            ),
         )
         .outerjoin(TestDataset.test_cases)
         .where(TestDataset.project_id == project.id)
@@ -63,7 +66,10 @@ async def list_datasets_for_trigger(
     )
     rows = result.all()
     return DatasetPickerResponse(
-        datasets=[DatasetPickerItem(id=r[0], name=r[1], test_count=r[2]) for r in rows]
+        datasets=[
+            DatasetPickerItem(id=r[0], name=r[1], test_count=r[2], needs_work_count=r[3])
+            for r in rows
+        ]
     )
 
 

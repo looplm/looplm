@@ -160,7 +160,7 @@ export default function EvaluationsLayout({ children }: { children: React.ReactN
   const totalSelected = selectedDatasets.size;
   const totalTests = datasets
     .filter((d) => selectedDatasets.has(d.id))
-    .reduce((sum, d) => sum + d.test_count, 0);
+    .reduce((sum, d) => sum + d.test_count - (d.needs_work_count ?? 0), 0);
 
   return (
     <div>
@@ -235,7 +235,10 @@ export default function EvaluationsLayout({ children }: { children: React.ReactN
                             />
                             <span className="text-sm">{d.name}</span>
                             <span className="ml-auto text-xs text-gray-400 dark:text-slate-500">
-                              {d.test_count} tests
+                              {d.test_count - (d.needs_work_count ?? 0)} tests
+                              {(d.needs_work_count ?? 0) > 0 && (
+                                <span className="text-amber-500 dark:text-amber-400"> · {d.needs_work_count} need work</span>
+                              )}
                             </span>
                           </label>
                         ))}

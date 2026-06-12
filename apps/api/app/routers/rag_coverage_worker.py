@@ -143,7 +143,7 @@ async def run_coverage_analysis(
 
             tc_query = select(TestCase).join(
                 TestDataset, TestCase.dataset_id == TestDataset.id
-            ).where(TestDataset.project_id == project_id)
+            ).where(TestDataset.project_id == project_id, TestCase.status != "needs_work")
             if dataset_ids:
                 tc_query = tc_query.where(TestCase.dataset_id.in_(dataset_ids))
             test_cases = list((await db.execute(tc_query)).scalars().all())

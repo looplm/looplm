@@ -76,6 +76,8 @@ class TestCase(Base):
     source_trace_id = Column(UUID(as_uuid=True), nullable=True)
     tags = Column(JSONB, nullable=False, server_default=text("'[]'"))
     test_case_metadata = Column("metadata", JSONB, nullable=False, server_default=text("'{}'"))
+    status = Column(String(32), nullable=False, server_default=text("'active'"))  # active | needs_work
+    status_note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
