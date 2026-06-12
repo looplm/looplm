@@ -24,6 +24,19 @@ import { usePermissions } from "@/components/permissions-context";
 const inputCls =
   "px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm";
 
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`w-3.5 h-3.5 flex-shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
 export default function DataSourcesPage() {
   const { canWrite } = usePermissions();
   const canEdit = canWrite("coverage");
@@ -40,6 +53,8 @@ export default function DataSourcesPage() {
   // Ordered grouping levels (top → bottom). Each level holds one or more fields;
   // more than one field at a level = parallel facets shown side by side.
   const [levels, setLevels] = useState<string[][]>([]);
+  // The composer is collapsed by default — the breakdown below is the payload.
+  const [composerOpen, setComposerOpen] = useState(false);
 
   // LLM grouping advisor (auto-run on provider load, cached server-side).
   const [suggestion, setSuggestion] = useState<IndexGroupingSuggestion | null>(null);
@@ -73,9 +88,12 @@ export default function DataSourcesPage() {
       const sug = resp.suggestion;
       setSuggestion(sug);
       if (sug && sug.suggested_levels.length > 0) {
+        // Adopt a single primary field per level — the calm default. Parallel
+        // ("or") fields stay available in the composer but aren't auto-applied.
         const valid = sug.suggested_levels
-          .map((lvl) => lvl.filter((k) => available.some((pk) => pk.key === k)))
-          .filter((lvl) => lvl.length > 0);
+          .map((lvl) => lvl.find((k) => available.some((pk) => pk.key === k)))
+          .filter((k): k is string => Boolean(k))
+          .map((k) => [k]);
         if (valid.length > 0) setLevels(valid);
       }
     },
@@ -185,6 +203,13 @@ export default function DataSourcesPage() {
 
   const canAddMore = usedCount < keys.length && levels.length > 0;
 
+  // Human-readable summary of the current grouping for the collapsed composer.
+  const groupingSummary = levels
+    .map((lvl) =>
+      lvl.map((k) => keys.find((x) => x.key === k)?.label ?? k).join(" or "),
+    )
+    .join(" → ");
+
   return (
     <div>
       {/* Header */}
@@ -242,7 +267,7 @@ export default function DataSourcesPage() {
           )}
 
           {/* Summary */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
             <StatCard
               label="Documents in index"
               value={summary ? summary.document_count.toLocaleString() : "—"}
@@ -251,7 +276,6 @@ export default function DataSourcesPage() {
               label="Groupable fields"
               value={summary ? summary.partition_keys.length : "—"}
             />
-            <StatCard label="Provider" value={providers.find((p) => p.id === providerId)?.name ?? "—"} />
           </div>
 
           {/* LLM-suggested hierarchy + metadata hints */}
@@ -266,71 +290,111 @@ export default function DataSourcesPage() {
             />
           )}
 
-          {/* Group-by composer. Each level can hold several parallel fields. */}
+          {/* Index breakdown: collapsible grouping composer + the live tree. */}
           {!summaryLoading && keys.length > 0 && (
-            <div className="rounded-xl border border-gray-100 dark:border-slate-800 p-4 mb-4">
-              <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-                {levels.map((level, i) => (
-                  <div key={i} className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-500 dark:text-slate-400">
-                      {i === 0 ? "Group by" : "then by"}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {level.map((field, j) => (
-                        <div key={j} className="flex items-center gap-1.5">
-                          {j > 0 && (
-                            <span className="text-xs text-gray-400 dark:text-slate-500">
-                              or
-                            </span>
-                          )}
-                          <select
-                            value={field}
-                            onChange={(e) => changeField(i, j, e.target.value)}
-                            className={inputCls}
-                          >
-                            {optionsFor(field).map((k) => (
-                              <option key={k.key} value={k.key}>
-                                {k.label}
-                                {k.multivalued ? " (multi)" : ""}
-                              </option>
+            <section className="rounded-xl border border-gray-100 dark:border-slate-800 p-4 mb-4">
+              <div className="mb-3">
+                <h2 className="text-lg font-semibold">Index breakdown</h2>
+                <p className="text-xs text-gray-500 dark:text-slate-400">
+                  Drill down into the indexed documents by the fields below.
+                </p>
+              </div>
+
+              {/* Grouping summary; the field composer is collapsed by default. */}
+              <div className="rounded-lg border border-gray-100 dark:border-slate-800 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setComposerOpen((v) => !v)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm"
+                  aria-expanded={composerOpen}
+                >
+                  <Chevron open={composerOpen} />
+                  <span className="flex-shrink-0 text-gray-500 dark:text-slate-400">
+                    Grouped by
+                  </span>
+                  <span className="truncate font-medium text-gray-700 dark:text-slate-200">
+                    {groupingSummary || "—"}
+                  </span>
+                  <span className="ml-auto flex-shrink-0 text-xs text-indigo-600 dark:text-indigo-400">
+                    {composerOpen ? "Done" : "Edit"}
+                  </span>
+                </button>
+
+                {composerOpen && (
+                  <div className="border-t border-gray-100 dark:border-slate-800 p-3">
+                    <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+                      {levels.map((level, i) => (
+                        <div key={i} className="flex flex-col gap-1">
+                          <span className="text-xs text-gray-500 dark:text-slate-400">
+                            {i === 0 ? "Group by" : "then by"}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {level.map((field, j) => (
+                              <div key={j} className="flex items-center gap-1.5">
+                                {j > 0 && (
+                                  <span className="text-xs text-gray-400 dark:text-slate-500">
+                                    or
+                                  </span>
+                                )}
+                                <select
+                                  value={field}
+                                  onChange={(e) => changeField(i, j, e.target.value)}
+                                  className={inputCls}
+                                >
+                                  {optionsFor(field).map((k) => (
+                                    <option key={k.key} value={k.key}>
+                                      {k.label}
+                                      {k.multivalued ? " (multi)" : ""}
+                                    </option>
+                                  ))}
+                                </select>
+                                {/* Remove this field. The very first field always
+                                    stays so there's at least one grouping dimension. */}
+                                {!(i === 0 && j === 0) && (
+                                  <button
+                                    onClick={() => changeField(i, j, "")}
+                                    title="Remove this field"
+                                    aria-label="Remove this field"
+                                    className="text-gray-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded px-1.5 py-1 text-sm leading-none"
+                                  >
+                                    ×
+                                  </button>
+                                )}
+                              </div>
                             ))}
-                          </select>
-                          {/* Remove this field. The very first field always stays
-                              so there's at least one grouping dimension. */}
-                          {!(i === 0 && j === 0) && (
-                            <button
-                              onClick={() => changeField(i, j, "")}
-                              title="Remove this field"
-                              aria-label="Remove this field"
-                              className="text-gray-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded px-1.5 py-1 text-sm leading-none"
-                            >
-                              ×
-                            </button>
-                          )}
+                            {canAddMore && (
+                              <button
+                                onClick={() => addParallel(i)}
+                                title="Add a parallel field at this level (shown side by side)"
+                                className="text-sm text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded px-1.5 py-1"
+                              >
+                                + or
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ))}
                       {canAddMore && (
                         <button
-                          onClick={() => addParallel(i)}
-                          title="Add a parallel field at this level (shown side by side)"
-                          className="text-sm text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded px-1.5 py-1"
+                          onClick={addLevel}
+                          className="self-end px-3 py-2 rounded-lg text-sm text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800"
                         >
-                          + or
+                          + Add level
                         </button>
                       )}
                     </div>
                   </div>
-                ))}
-                {canAddMore && (
-                  <button
-                    onClick={addLevel}
-                    className="self-end px-3 py-2 rounded-lg text-sm text-indigo-600 dark:text-indigo-400 hover:bg-gray-100 dark:hover:bg-slate-800"
-                  >
-                    + Add level
-                  </button>
                 )}
               </div>
-            </div>
+
+              {providerId && levels.length > 0 && (
+                <IndexTree
+                  key={`${providerId}:${levels.map((l) => l.join(",")).join(">")}`}
+                  providerId={providerId}
+                  levels={levels}
+                />
+              )}
+            </section>
           )}
 
           {summaryLoading && (
@@ -341,14 +405,6 @@ export default function DataSourcesPage() {
             <p className="text-sm text-gray-400 dark:text-slate-500 py-4">
               This index exposes no groupable (facetable) fields.
             </p>
-          )}
-
-          {!summaryLoading && providerId && levels.length > 0 && (
-            <IndexTree
-              key={`${providerId}:${levels.map((l) => l.join(",")).join(">")}`}
-              providerId={providerId}
-              levels={levels}
-            />
           )}
 
           {/* Wanted status: declared sources vs what the index actually holds. */}

@@ -134,9 +134,9 @@ function TreeSections({
       {sections.map((sec) => {
         const max = Math.max(1, ...sec.groups.map((g) => g.doc_count));
         return (
-          <div key={sec.key} className={labeled ? "mt-1" : ""}>
+          <div key={sec.key} className={labeled ? "mt-2 first:mt-0" : ""}>
             {labeled && (
-              <div className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-slate-500 px-1 pt-1">
+              <div className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-slate-500 px-1 pb-0.5">
                 By {sec.label}
               </div>
             )}
@@ -285,7 +285,7 @@ export function IndexTree({
   }
 
   return (
-    <div className="rounded-xl border border-gray-100 dark:border-slate-800 p-3">
+    <div className="rounded-lg bg-gray-50/60 dark:bg-slate-900/40 p-3">
       <TreeSections
         providerId={providerId}
         levels={levels}
