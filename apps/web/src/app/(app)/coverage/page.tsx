@@ -80,7 +80,7 @@ export default function CoveragePage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold">RAG Coverage</h1>
+          <h1 className="text-3xl font-bold">Coverage</h1>
           <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
             See which slices of your indexed knowledge base have eval coverage — and draft questions
             for the gaps.

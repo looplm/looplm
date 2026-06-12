@@ -156,7 +156,7 @@ function AcceptModal({
   onAccepted: (index: number) => void;
 }) {
   const [datasetId, setDatasetId] = useState<string>(datasets[0]?.id || "__new__");
-  const [newName, setNewName] = useState("RAG coverage");
+  const [newName, setNewName] = useState("Eval coverage");
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -164,7 +164,7 @@ function AcceptModal({
     try {
       let targetId = datasetId;
       if (datasetId === "__new__") {
-        const ds = await createDataset({ name: newName.trim() || "RAG coverage" });
+        const ds = await createDataset({ name: newName.trim() || "Eval coverage" });
         targetId = ds.id;
       }
       await createTestCase(targetId, suggestionToBody(suggestion, index));
