@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import type {
   IndexGroupingSuggestion,
   IndexPartitionKey,
@@ -7,6 +9,19 @@ import type {
 
 function labelFor(key: string, keys: IndexPartitionKey[]): string {
   return keys.find((k) => k.key === key)?.label ?? key;
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`w-3.5 h-3.5 flex-shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  );
 }
 
 function HintRow({
@@ -62,6 +77,8 @@ export function GroupingSuggestionCallout({
   onReanalyze: () => void;
   canReanalyze: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+
   // Nothing to show until we have a result, an error, or work in flight.
   if (!loading && !error && !suggestion) return null;
 
@@ -73,21 +90,44 @@ export function GroupingSuggestionCallout({
     );
   };
 
+  // Compact teaser for the collapsed header: the suggested hierarchy as a short
+  // inline path, falling back to a tip count.
+  const teaser = (() => {
+    if (loading) return "analyzing index…";
+    if (!suggestion) return "";
+    if (suggestion.suggested_levels.length > 0) {
+      return suggestion.suggested_levels
+        .map((lvl) => lvl.map((k) => labelFor(k, keys)).join(" or "))
+        .join(" → ");
+    }
+    const n = suggestion.hints.length;
+    return n > 0 ? `${n} tip${n === 1 ? "" : "s"}` : "";
+  })();
+
   return (
     <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/50 dark:bg-indigo-900/10 p-4 mb-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-medium text-indigo-700 dark:text-indigo-300">
-          <span>✨ Suggested grouping</span>
-          {loading && (
-            <span className="text-xs font-normal text-indigo-500/80 dark:text-indigo-400/80">
-              analyzing index…
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 items-center gap-2 text-left text-sm font-medium text-indigo-700 dark:text-indigo-300"
+          aria-expanded={open}
+        >
+          <Chevron open={open} />
+          <span className="flex-shrink-0">✨ Suggested grouping</span>
+          {!open && teaser && (
+            <span className="truncate text-xs font-normal text-indigo-500/80 dark:text-indigo-400/80">
+              {teaser}
             </span>
           )}
-        </div>
+        </button>
         <button
-          onClick={onReanalyze}
+          onClick={(e) => {
+            e.stopPropagation();
+            onReanalyze();
+          }}
           disabled={loading || !canReanalyze}
-          className="text-xs px-2 py-1 rounded-md text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100/60 dark:hover:bg-indigo-900/30 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex-shrink-0 text-xs px-2 py-1 rounded-md text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100/60 dark:hover:bg-indigo-900/30 disabled:opacity-40 disabled:cursor-not-allowed"
           title={canReanalyze ? "Re-run the analysis" : "You don't have permission to re-run"}
         >
           Re-analyze
@@ -98,7 +138,7 @@ export function GroupingSuggestionCallout({
         <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
       )}
 
-      {suggestion && (
+      {open && suggestion && (
         <>
           {suggestion.summary && (
             <p className="mt-2 text-sm text-gray-600 dark:text-slate-300">
@@ -134,16 +174,25 @@ export function GroupingSuggestionCallout({
           )}
 
           {suggestion.hints.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              {suggestion.hints.map((h, idx) => (
-                <HintRow
-                  key={idx}
-                  severity={h.severity}
-                  title={h.title}
-                  message={h.message}
-                  suggestedField={h.suggested_field}
-                />
-              ))}
+            <div className="mt-4">
+              <p className="text-xs font-medium text-gray-700 dark:text-slate-200">
+                Tips for restructuring your index
+              </p>
+              <p className="mt-0.5 text-[11px] text-gray-500 dark:text-slate-400">
+                These suggest metadata/index changes for clearer grouping and drill-down in
+                LoopLM — they are not aimed at better search or retrieval performance.
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {suggestion.hints.map((h, idx) => (
+                  <HintRow
+                    key={idx}
+                    severity={h.severity}
+                    title={h.title}
+                    message={h.message}
+                    suggestedField={h.suggested_field}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </>
