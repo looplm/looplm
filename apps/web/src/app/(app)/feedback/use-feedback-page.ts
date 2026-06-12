@@ -391,6 +391,8 @@ export function useFeedbackPage() {
     try {
       const data = await getLatestTopQuestions();
       setTopQuestionsResult(data);
+      // Resume polling if the latest analysis is still in progress.
+      if (["pending", "running"].includes(data.status)) setTopQuestionsId(data.id);
     } catch {
       // No previous analysis found — that's fine
       setTopQuestionsResult(null);
@@ -404,6 +406,8 @@ export function useFeedbackPage() {
     try {
       const data = await getLatestFeedbackThemes();
       setFeedbackThemesResult(data);
+      // Resume polling if the latest analysis is still in progress.
+      if (["pending", "running"].includes(data.status)) setFeedbackThemesId(data.id);
     } catch {
       // No previous analysis found — that's fine
       setFeedbackThemesResult(null);

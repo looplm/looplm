@@ -137,7 +137,10 @@ async def analyze_top_questions(
         filter_environment=body.environment,
     )
     db.add(analysis)
-    await db.flush()
+    # Commit before launching the task: the worker reads this row from its own
+    # session, where an uncommitted row is invisible — the task would crash and
+    # leave the analysis stuck at 'pending' forever.
+    await db.commit()
     await db.refresh(analysis)
 
     # Launch background task

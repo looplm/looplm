@@ -114,17 +114,24 @@ async def run_feedback_themes_analysis(
     from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
 
     async with db_factory() as db:
+        analysis = await db.get(FeedbackThemeAnalysis, analysis_id)
+        if analysis is None:
+            # The launching request commits the row before spawning this task,
+            # so a missing row means it was deleted out from under us.
+            logger.error("Feedback theme analysis %s not found; aborting", analysis_id)
+            _feedback_theme_tasks.pop(analysis_id, None)
+            return
+
         try:
             llm_service = AnalysisLlmService(user_settings=user_settings)
         except AnalysisLlmConfigError as e:
-            analysis = await db.get(FeedbackThemeAnalysis, analysis_id)
             analysis.status = "failed"
             analysis.error = str(e)
             analysis.completed_at = datetime.now(timezone.utc)
             await db.commit()
+            _feedback_theme_tasks.pop(analysis_id, None)
             return
 
-        analysis = await db.get(FeedbackThemeAnalysis, analysis_id)
         analysis.status = "running"
         analysis.started_at = datetime.now(timezone.utc)
         await db.commit()
