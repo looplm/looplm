@@ -186,6 +186,64 @@ class AzureSearchIndexProvider(BaseIndexProvider):
             )
         return docs
 
+    _LOOKUP_BATCH = 200  # keep the search.in literal well under filter size limits
+
+    async def lookup_ids(self, key: str, values: list[str]) -> dict[str, int]:
+        info = await self._field(key)
+        if not info.facetable:
+            raise ValueError(f"Field '{key}' is not facetable; cannot bulk-count by it")
+        found: dict[str, int] = {}
+        # search.in is the cheap membership test; a facet on the same field
+        # gives the per-value counts in one round trip per batch.
+        for i in range(0, len(values), self._LOOKUP_BATCH):
+            batch = [v for v in values[i : i + self._LOOKUP_BATCH] if v]
+            if not batch:
+                continue
+            literal = _odata_escape("|".join(batch))
+            results = await self._search_client.search(
+                search_text="*",
+                filter=f"search.in({key}, '{literal}', '|')",
+                facets=[f"{key},count:{_MAX_FACET_VALUES}"],
+                top=0,
+            )
+            facets = await results.get_facets() or {}
+            for b in facets.get(key, []) or []:
+                if b.get("value") is not None:
+                    found[str(b["value"])] = int(b.get("count") or 0)
+        return found
+
+    async def search_documents(
+        self, query: str, n: int, filters: dict[str, str] | None = None
+    ) -> list[CorpusDoc]:
+        fields = await self._get_fields()
+        select = [f for f in _PREFERRED_SAMPLE_FIELDS if f in fields]
+        key_field = next((f.name for f in fields.values() if f.is_key), None)
+        if key_field and key_field not in select:
+            select.append(key_field)
+
+        results = await self._search_client.search(
+            search_text=query,
+            filter=await self._build_filter(filters),
+            select=select or None,
+            top=max(1, n),
+        )
+        docs: list[CorpusDoc] = []
+        async for doc in results:
+            snippet = doc.get("chunk_text")
+            if isinstance(snippet, str) and len(snippet) > 600:
+                snippet = snippet[:600] + "…"
+            docs.append(
+                CorpusDoc(
+                    id=str(doc.get("page_id") or doc.get(key_field) or doc.get("id") or ""),
+                    # Prefer the descriptive page title for text matching —
+                    # attachment filenames are often opaque (e.g. "12080.pdf").
+                    title=doc.get("page_title") or doc.get("attachment_filename"),
+                    url=doc.get("page_url") or doc.get("attachment_url"),
+                    snippet=snippet,
+                )
+            )
+        return docs
+
     async def aclose(self) -> None:
         await self._search_client.close()
         await self._index_client.close()

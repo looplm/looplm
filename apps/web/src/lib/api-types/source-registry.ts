@@ -1,0 +1,89 @@
+/**
+ * Types for the wanted-status source registry (Data Sources page).
+ * Hand-written mirror of apps/api/app/schemas/source_registry.py.
+ */
+
+export interface SourceExpectation {
+  id: string;
+  provider_id: string;
+  name: string;
+  html_url: string | null;
+  pdf_url: string | null;
+  adapter_tag: string | null;
+  typ: string | null;
+  sparte: string | null;
+  thema: string | null;
+  publisher: string | null;
+  hierarchie: string | null;
+  update_frequency: string | null;
+  comment: string | null;
+  ack_note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CsvImportResult {
+  created: number;
+  updated: number;
+  deleted: number;
+  skipped_rows: number;
+  total: number;
+  warnings: string[];
+}
+
+export type GapRowStatus =
+  | "covered_url"
+  | "covered_title"
+  | "review"
+  | "missing"
+  | "acked";
+
+export interface GapRowResult {
+  expectation_id: string;
+  name: string;
+  adapter_tag: string | null;
+  status: GapRowStatus;
+  detail: string;
+  chunk_count: number;
+  matched_title: string | null;
+  matched_url: string | null;
+  title_score: number | null;
+}
+
+export interface GapRunSummary {
+  id: string;
+  provider_id: string;
+  status: string;
+  total: number;
+  processed: number;
+  covered: number;
+  missing: number;
+  review: number;
+  acked: number;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface GapRunDetail {
+  id: string;
+  provider_id: string;
+  status: string;
+  total: number;
+  processed: number;
+  error: string | null;
+  results: {
+    summary: {
+      total: number;
+      by_status: Record<string, number>;
+      covered: number;
+      missing: number;
+      review: number;
+      acked: number;
+    };
+    rows: GapRowResult[];
+  } | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}

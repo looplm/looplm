@@ -99,6 +99,27 @@ class BaseIndexProvider(ABC):
         """
         ...
 
+    async def lookup_ids(self, key: str, values: list[str]) -> dict[str, int]:
+        """Count indexed documents per ``key`` value, for an explicit value list.
+
+        Used by wanted-status gap analysis to check expected document IDs in
+        bulk (e.g. Azure ``page_id`` hashes). Returns ``{value: doc_count}``
+        containing only values that exist in the index. Optional capability —
+        backends without an efficient implementation keep the default.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support lookup_ids")
+
+    async def search_documents(
+        self, query: str, n: int, filters: dict[str, str] | None = None
+    ) -> list[CorpusDoc]:
+        """Full-text search returning up to ``n`` best-matching documents.
+
+        Used as a fallback matching strategy when an expected source has no
+        directly checkable ID (platform/crawler-discovered documents). Optional
+        capability — backends without text search keep the default.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support search_documents")
+
     async def aclose(self) -> None:
         """Release any underlying clients. Override if needed; safe no-op default."""
         return None

@@ -17,6 +17,7 @@ import type {
 import { StatCard } from "@/components/eval-shared";
 import { IndexTree } from "@/components/data-sources/index-tree";
 import { GroupingSuggestionCallout } from "@/components/data-sources/grouping-suggestion-callout";
+import { WantedSourcesPanel } from "@/components/data-sources/wanted-sources-panel";
 import { ProviderManager } from "@/components/coverage/provider-manager";
 import { usePermissions } from "@/components/permissions-context";
 
@@ -349,6 +350,9 @@ export default function DataSourcesPage() {
               levels={levels}
             />
           )}
+
+          {/* Wanted status: declared sources vs what the index actually holds. */}
+          {providerId && <WantedSourcesPanel providerId={providerId} canEdit={canEdit} />}
         </>
       )}
 

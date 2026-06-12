@@ -3,6 +3,7 @@
 from app.models.base import *          # noqa: F401,F403
 from app.models.integrations import *  # noqa: F401,F403
 from app.models.index_providers import *  # noqa: F401,F403
+from app.models.source_registry import *  # noqa: F401,F403
 from app.models.analysis import *      # noqa: F401,F403
 from app.models.issues import *        # noqa: F401,F403
 from app.models.trace_signal import *  # noqa: F401,F403
