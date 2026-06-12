@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   classifyEvalFailures,
   getEvalRun,
@@ -9,6 +10,7 @@ import {
   getEvaluators,
   generateMultiRunReport,
   rerunEval,
+  type RerunScope,
   type EvalRunDetail,
   type EvalResultItem,
   type EvalResultSummary,
@@ -22,6 +24,7 @@ import { CodeSuggestionsTab } from "./code-suggestions-tab";
 import { toast } from "sonner";
 import { RelevanceFilterDropdown } from "@/components/relevance-filter-dropdown";
 import FilterComboBox from "@/components/filter-combo-box";
+import { usePermissions } from "@/components/permissions-context";
 
 type Filter = "all" | "passed" | "failed";
 type Tab = "results" | "suggestions";
@@ -29,7 +32,10 @@ type Tab = "results" | "suggestions";
 export default function EvalRunDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const id = params.id as string;
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("evaluations");
 
   const [run, setRun] = useState<EvalRunDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,9 +49,12 @@ export default function EvalRunDetailPage() {
   const [reportMarkdown, setReportMarkdown] = useState<string | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
-  const [rerunning, setRerunning] = useState(false);
+  const [rerunningScope, setRerunningScope] = useState<string | null>(null);
   const [patternFilter, setPatternFilter] = useState<string[]>([]);
   const [patternMode, setPatternMode] = useState<"include" | "exclude">("include");
+  const [rootCauseFilter, setRootCauseFilter] = useState<string[]>([]);
+  const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set());
+  const [testIdFilter, setTestIdFilter] = useState<string | null>(searchParams.get("test_id"));
   const [classifying, setClassifying] = useState(false);
   useEffect(() => {
     setLoading(true);
@@ -103,30 +112,50 @@ export default function EvalRunDetailPage() {
     }));
   }, [run, disabledGraders]);
 
+  const testIdFiltered = useMemo(() => {
+    if (!testIdFilter) return computedResults;
+    const q = testIdFilter.toLowerCase();
+    return computedResults.filter((r) => r.test_id.toLowerCase().includes(q));
+  }, [computedResults, testIdFilter]);
+
   const patternFiltered = useMemo(() => {
-    if (patternFilter.length === 0) return computedResults;
+    if (patternFilter.length === 0) return testIdFiltered;
     const set = new Set(patternFilter);
     if (patternMode === "include") {
       // Keep only failed results whose pattern matches.
-      return computedResults.filter((r) => r.failure_pattern && set.has(r.failure_pattern));
+      return testIdFiltered.filter((r) => r.failure_pattern && set.has(r.failure_pattern));
     }
     // Exclude: drop failed results whose pattern matches; passed tests stay.
-    return computedResults.filter((r) => !r.failure_pattern || !set.has(r.failure_pattern));
-  }, [computedResults, patternFilter, patternMode]);
+    return testIdFiltered.filter((r) => !r.failure_pattern || !set.has(r.failure_pattern));
+  }, [testIdFiltered, patternFilter, patternMode]);
+
+  const rootCauseFiltered = useMemo(() => {
+    if (rootCauseFilter.length === 0) return patternFiltered;
+    const set = new Set(rootCauseFilter);
+    // Keep only failed results whose root cause matches (mirrors pattern include mode).
+    return patternFiltered.filter((r) => !r.pass && r.root_cause && set.has(r.root_cause));
+  }, [patternFiltered, rootCauseFilter]);
 
   const filteredResults = useMemo(() => {
-    if (filter === "all") return patternFiltered;
-    return patternFiltered.filter((r) =>
+    if (filter === "all") return rootCauseFiltered;
+    return rootCauseFiltered.filter((r) =>
       filter === "passed" ? r.pass : !r.pass
     );
-  }, [patternFiltered, filter]);
+  }, [rootCauseFiltered, filter]);
 
   const computedStats = useMemo(() => {
-    const total = patternFiltered.length;
-    const passed = patternFiltered.filter((r) => r.pass).length;
+    const total = rootCauseFiltered.length;
+    const passed = rootCauseFiltered.filter((r) => r.pass).length;
     const failed = total - passed;
     return { total, passed, failed, passRate: total > 0 ? passed / total : 0 };
-  }, [patternFiltered]);
+  }, [rootCauseFiltered]);
+
+  const subsetFilterActive = patternFilter.length > 0 || rootCauseFilter.length > 0 || !!testIdFilter;
+
+  const visibleFailingTestIds = useMemo(
+    () => rootCauseFiltered.filter((r) => !r.pass).map((r) => r.test_id),
+    [rootCauseFiltered],
+  );
 
   const failurePatternSummary = useMemo(() => {
     const fromRun = run?.metadata?.failure_pattern_summary;
@@ -159,15 +188,32 @@ export default function EvalRunDetailPage() {
     [id],
   );
 
-  async function handleRerun() {
-    setRerunning(true);
+  async function handleRerun(scope?: RerunScope, testIds?: string[]) {
+    setRerunningScope(scope ?? "all");
     try {
-      const res = await rerunEval(id);
+      const res = await rerunEval(id, scope ? { scope, testIds } : undefined);
       router.push(`/evaluations/jobs?highlight=${res.job_id}`);
-    } catch {
-      setRerunning(false);
+    } catch (err: any) {
+      toast.error("Failed to start rerun", { description: err?.message });
+      setRerunningScope(null);
     }
   }
+
+  const toggleSelectTestId = useCallback((testId: string) => {
+    setSelectedTestIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(testId)) next.delete(testId);
+      else next.add(testId);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAllTestIds = useCallback(() => {
+    setSelectedTestIds((prev) => {
+      if (prev.size === filteredResults.length) return new Set<string>();
+      return new Set(filteredResults.map((r) => r.test_id));
+    });
+  }, [filteredResults]);
 
   async function handleClassifyFailures() {
     setClassifying(true);
@@ -253,13 +299,23 @@ export default function EvalRunDetailPage() {
                     : "Classify failures"}
               </button>
             )}
-            {run.source === "triggered" && (
+            {run.source === "triggered" && canEdit && run.failed > 0 && (
               <button
-                onClick={handleRerun}
-                disabled={rerunning}
+                onClick={() => handleRerun("failed")}
+                disabled={rerunningScope !== null}
+                title="Rerun all failed test cases as a new linked run. Uses stored results — ignores grader toggles."
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-red-400 dark:border-red-500/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-600/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {rerunningScope === "failed" ? "Starting..." : `Rerun failed (${run.failed})`}
+              </button>
+            )}
+            {run.source === "triggered" && canEdit && (
+              <button
+                onClick={() => handleRerun()}
+                disabled={rerunningScope !== null}
                 className="px-4 py-2 rounded-lg text-sm font-medium border border-indigo-500 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-600/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {rerunning ? "Starting..." : "Rerun"}
+                {rerunningScope === "all" ? "Starting..." : "Rerun"}
               </button>
             )}
             <RelevanceFilterDropdown
@@ -268,6 +324,34 @@ export default function EvalRunDetailPage() {
             />
           </div>
         </div>
+        {(run.rerun_of || (run.reruns?.length ?? 0) > 0) && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            {run.rerun_of && (
+              <Link
+                href={`/evaluations/${run.rerun_of.id}`}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30 hover:bg-indigo-100 dark:hover:bg-indigo-600/20 transition-colors"
+                title={`Original run: ${run.rerun_of.passed}/${run.rerun_of.total} passed`}
+              >
+                ↩ Rerun of: {run.rerun_of.name}
+              </Link>
+            )}
+            {(run.reruns?.length ?? 0) > 0 && (
+              <span className="inline-flex flex-wrap items-center gap-1.5 text-gray-500 dark:text-slate-400">
+                Reruns:
+                {(run.reruns ?? []).map((r) => (
+                  <Link
+                    key={r.id}
+                    href={`/evaluations/${r.id}`}
+                    className="px-2 py-0.5 rounded-md bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+                    title={r.name}
+                  >
+                    {new Date(r.created_at).toLocaleString()} · {r.passed}/{r.total} passed
+                  </Link>
+                ))}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Tab Navigation */}
@@ -391,26 +475,44 @@ export default function EvalRunDetailPage() {
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold">Failure root cause</h3>
                 <span className="text-xs text-gray-400 dark:text-slate-500">
-                  Where failing tests broke
+                  Where failing tests broke — click to filter
                 </span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {Object.entries(rootCauseSummary)
                   .sort(([, a], [, b]) => b - a)
                   .map(([category, count]) => {
                     const style = rootCauseStyle(category);
                     if (!style) return null;
+                    const active = rootCauseFilter.includes(category);
                     return (
-                      <span
+                      <button
                         key={category}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium ${style.badge}`}
+                        onClick={() =>
+                          setRootCauseFilter((prev) =>
+                            prev.includes(category)
+                              ? prev.filter((c) => c !== category)
+                              : [...prev, category],
+                          )
+                        }
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium transition-shadow cursor-pointer ${style.badge} ${
+                          active ? "ring-2 ring-indigo-500 dark:ring-indigo-400" : "hover:ring-1 hover:ring-gray-300 dark:hover:ring-slate-600"
+                        }`}
                         title={style.description}
                       >
                         {style.label}
                         <span className="font-semibold tabular-nums">{count}</span>
-                      </span>
+                      </button>
                     );
                   })}
+                {rootCauseFilter.length > 0 && (
+                  <button
+                    onClick={() => setRootCauseFilter([])}
+                    className="text-xs text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200 underline"
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -449,7 +551,7 @@ export default function EvalRunDetailPage() {
           )}
 
           {/* Filter */}
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex flex-wrap items-center gap-2 mb-4">
             {(["all", "passed", "failed"] as Filter[]).map((f) => (
               <button
                 key={f}
@@ -466,7 +568,55 @@ export default function EvalRunDetailPage() {
                 {f === "failed" && ` (${computedStats.failed})`}
               </button>
             ))}
+            {testIdFilter && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-700/40">
+                Test ID: {testIdFilter}
+                <button
+                  onClick={() => setTestIdFilter(null)}
+                  className="hover:text-amber-900 dark:hover:text-amber-200"
+                  aria-label="Clear test ID filter"
+                >
+                  &times;
+                </button>
+              </span>
+            )}
+            {run.source === "triggered" && canEdit && subsetFilterActive && visibleFailingTestIds.length > 0 && (
+              <button
+                onClick={() => handleRerun("filtered", visibleFailingTestIds)}
+                disabled={rerunningScope !== null}
+                title="Rerun the failing test cases matching the current filters as a new linked run"
+                className="ml-auto px-4 py-2 rounded-lg text-base font-medium border border-indigo-500 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-600/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {rerunningScope === "filtered"
+                  ? "Starting..."
+                  : `Rerun ${visibleFailingTestIds.length} filtered failure${visibleFailingTestIds.length !== 1 ? "s" : ""}`}
+              </button>
+            )}
           </div>
+
+          {/* Bulk selection bar */}
+          {selectedTestIds.size > 0 && (
+            <div className="mb-4 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-600/10 border border-indigo-200 dark:border-indigo-500/30">
+              <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
+                {selectedTestIds.size} test case{selectedTestIds.size !== 1 ? "s" : ""} selected
+              </span>
+              {run.source === "triggered" && canEdit && (
+                <button
+                  onClick={() => handleRerun("selected", Array.from(selectedTestIds))}
+                  disabled={rerunningScope !== null}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {rerunningScope === "selected" ? "Starting..." : "Rerun selected"}
+                </button>
+              )}
+              <button
+                onClick={() => setSelectedTestIds(new Set())}
+                className="text-sm text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200 underline"
+              >
+                Clear
+              </button>
+            </div>
+          )}
 
           {/* Results Table */}
           <EvalResultsTable
@@ -475,6 +625,10 @@ export default function EvalRunDetailPage() {
             evaluatorMap={evaluatorMap}
             onSelectResult={handleSelectResult}
             loadingResultId={loadingResultId}
+            selectable={run.source === "triggered" && canEdit}
+            selectedTestIds={selectedTestIds}
+            onToggleSelect={toggleSelectTestId}
+            onToggleSelectAll={toggleSelectAllTestIds}
           />
 
           {selectedResult && (

@@ -21,6 +21,12 @@ export type ClassifyFailuresResponse = S["ClassifyFailuresResponse"];
 export type EvalResultItem = S["EvalResultItem"];
 export type EvalRunDetail = S["EvalRunDetail"];
 export type EvalRunStats = S["EvalRunStats"];
+export type RerunLinkItem = S["RerunLinkItem"];
+
+// --- Test Case History ---
+export type TestCaseHistoryItem = S["TestCaseHistoryItem"];
+export type TestCaseHistoryResponse = S["TestCaseHistoryResponse"];
+export type TestCaseTrendPoint = S["TestCaseTrendPoint"];
 
 // --- Eval Trigger ---
 export type DatasetPickerItem = S["DatasetPickerItem"];

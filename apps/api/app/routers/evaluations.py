@@ -29,6 +29,7 @@ from app.schemas.evaluations import (
     GraderResultSummary,
     GraderSummaryItem,
     PaginationInfo,
+    RerunLinkItem,
     ScoreSummaryItem,
 )
 from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
@@ -173,10 +174,12 @@ async def list_eval_runs(
 
 # ── Include sub-routers (fixed-path routes — before /{run_id}) ──
 
+from .eval_history import router as eval_history_router
 from .eval_jobs import router as eval_jobs_router
 from .eval_reports_router import router as eval_reports_router
 from .eval_sessions import router as eval_sessions_router
 
+router.include_router(eval_history_router)
 router.include_router(eval_jobs_router)
 router.include_router(eval_reports_router)
 router.include_router(eval_sessions_router)
@@ -261,6 +264,37 @@ async def get_eval_run(
 
     pass_rate = run.passed / run.total if run.total > 0 else 0.0
 
+    # Resolve rerun links in both directions (rerun_of lives in JSONB metadata;
+    # children are filtered in Python so SQLite-backed tests exercise this too)
+    rerun_of_item: RerunLinkItem | None = None
+    parent_id = (run.run_metadata or {}).get("rerun_of")
+    if parent_id:
+        parent_result = await db.execute(
+            select(EvalRun.id, EvalRun.name, EvalRun.total, EvalRun.passed, EvalRun.failed, EvalRun.created_at)
+            .where(EvalRun.id == UUID(parent_id), EvalRun.project_id == project.id)
+        )
+        parent = parent_result.first()
+        if parent:
+            rerun_of_item = RerunLinkItem(
+                id=parent.id, name=parent.name, total=parent.total,
+                passed=parent.passed, failed=parent.failed, created_at=parent.created_at,
+            )
+
+    children_result = await db.execute(
+        select(EvalRun.id, EvalRun.name, EvalRun.total, EvalRun.passed, EvalRun.failed, EvalRun.created_at, EvalRun.run_metadata)
+        .where(EvalRun.project_id == project.id)
+        .order_by(EvalRun.created_at.desc())
+        .limit(500)
+    )
+    reruns = [
+        RerunLinkItem(
+            id=r.id, name=r.name, total=r.total,
+            passed=r.passed, failed=r.failed, created_at=r.created_at,
+        )
+        for r in children_result.all()
+        if (r.run_metadata or {}).get("rerun_of") == str(run_id)
+    ]
+
     return EvalRunDetail(
         id=run.id,
         name=run.name,
@@ -274,6 +308,8 @@ async def get_eval_run(
         score_summary={k: ScoreSummaryItem(**v) for k, v in (run.score_summary or {}).items()},
         metadata=run.run_metadata or {},
         created_at=run.created_at,
+        rerun_of=rerun_of_item,
+        reruns=reruns,
         results=[
             EvalResultSummary(
                 id=r.id,

@@ -41,6 +41,7 @@ from app.services.failure_pattern import (
     aggregate_run_patterns,
     compute_failure_pattern,
     compute_root_cause,
+    normalize_result_test_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,10 @@ async def run_eval(
     session_id: UUID | None = None,
     experiment_id: UUID | None = None,
     experiment_name: str | None = None,
+    include_test_ids: list[str] | None = None,
+    rerun_of: UUID | None = None,
+    rerun_scope: str | None = None,
+    rerun_source_name: str | None = None,
 ) -> None:
     """Execute a native eval run: load test cases, call API, run evaluators, save results."""
     ps = project_settings or {}
@@ -95,6 +100,16 @@ async def run_eval(
         all_cases = list(tc_result.scalars().all())
         test_cases = [tc for tc in all_cases if tc.status != "needs_work"]
         skipped = len(all_cases) - len(test_cases)
+
+        if include_test_ids:
+            wanted = {normalize_result_test_id(tid) for tid in include_test_ids}
+            test_cases = [tc for tc in test_cases if tc.test_id in wanted]
+            missing = wanted - {tc.test_id for tc in test_cases}
+            if missing:
+                _log(
+                    f"Skipping {len(missing)} requested test id(s) not found or not runnable: "
+                    + ", ".join(sorted(missing)[:10])
+                )
 
         if not test_cases:
             raise ValueError(
@@ -171,6 +186,9 @@ async def run_eval(
         elif effective_filter_mode != "as_configured":
             run_name += f" ({effective_filter_mode})"
 
+        if rerun_of:
+            run_name = f"Rerun ({rerun_scope or 'subset'}): {rerun_source_name or run_name}"
+
         # Create EvalRun early so intermediate results are visible
         run_meta = {
             "filter_mode": effective_filter_mode,
@@ -186,6 +204,10 @@ async def run_eval(
             run_meta["experiment_variables"] = experiment_variables
         if experiment_name:
             run_meta["experiment_name"] = experiment_name
+        if rerun_of:
+            run_meta["rerun_of"] = str(rerun_of)
+            run_meta["rerun_scope"] = rerun_scope or "subset"
+            run_meta["rerun_test_count"] = len(test_cases)
 
         run = EvalRun(
             project_id=project_id,

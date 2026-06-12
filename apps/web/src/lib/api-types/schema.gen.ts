@@ -904,6 +904,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/evals/test-case-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Test Case History */
+        get: operations["get_test_case_history_api_evals_test_case_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/evals/trigger": {
         parameters: {
             query?: never;
@@ -1060,6 +1077,10 @@ export interface paths {
         /**
          * Rerun Eval
          * @description Rerun an evaluation using the same datasets as the original run.
+         *
+         *     With a body, only a subset is rerun: explicit ``test_ids``, or all failed
+         *     results when ``scope == "failed"``. Subset reruns create a new run linked
+         *     to the original via ``run_metadata.rerun_of``.
          */
         post: operations["rerun_eval_api_evals__run_id__rerun_post"];
         delete?: never;
@@ -4476,6 +4497,9 @@ export interface components {
             pass_rate: number;
             /** Passed */
             passed: number;
+            rerun_of?: components["schemas"]["RerunLinkItem"] | null;
+            /** Reruns */
+            reruns?: components["schemas"]["RerunLinkItem"][];
             /** Results */
             results: components["schemas"]["EvalResultSummary"][];
             /** Score Summary */
@@ -6874,6 +6898,43 @@ export interface components {
              */
             success: number;
         };
+        /** RerunEvalRequest */
+        RerunEvalRequest: {
+            /**
+             * Scope
+             * @description If 'failed' and test_ids is omitted, the server reruns all failed results of the run. Otherwise a label recorded in run metadata.
+             */
+            scope?: ("failed" | "filtered" | "selected") | null;
+            /**
+             * Test Ids
+             * @description Exact test_ids from the original run to rerun. '[filtered]'/'[unfiltered]' suffixes are stripped server-side.
+             */
+            test_ids?: string[] | null;
+        };
+        /**
+         * RerunLinkItem
+         * @description Compact reference to a run linked via run_metadata.rerun_of.
+         */
+        RerunLinkItem: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Failed */
+            failed: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Passed */
+            passed: number;
+            /** Total */
+            total: number;
+        };
         /** RetrievalActivityPoint */
         RetrievalActivityPoint: {
             /** Count */
@@ -7371,6 +7432,64 @@ export interface components {
             /** Test Id */
             test_id: string;
         };
+        /** TestCaseHistoryItem */
+        TestCaseHistoryItem: {
+            /** Case Status */
+            case_status?: string | null;
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Dataset Name */
+            dataset_name?: string | null;
+            /** Dominant Failure Pattern */
+            dominant_failure_pattern?: string | null;
+            /**
+             * Dominant Failure Pattern Count
+             * @default 0
+             */
+            dominant_failure_pattern_count: number;
+            /** Dominant Root Cause */
+            dominant_root_cause?: string | null;
+            /**
+             * Dominant Root Cause Count
+             * @default 0
+             */
+            dominant_root_cause_count: number;
+            /**
+             * Exists
+             * @default true
+             */
+            exists: boolean;
+            /** Fail Count */
+            fail_count: number;
+            /** Last Failed At */
+            last_failed_at?: string | null;
+            /** Last Failed Run Id */
+            last_failed_run_id?: string | null;
+            /** Pass Count */
+            pass_count: number;
+            /** Pass Rate */
+            pass_rate: number;
+            /** Runs Participated */
+            runs_participated: number;
+            /** Test Id */
+            test_id: string;
+            /** Trend */
+            trend?: components["schemas"]["TestCaseTrendPoint"][];
+            /**
+             * Unclassified Failures
+             * @default 0
+             */
+            unclassified_failures: number;
+        };
+        /** TestCaseHistoryResponse */
+        TestCaseHistoryResponse: {
+            /** Data */
+            data: components["schemas"]["TestCaseHistoryItem"][];
+            /** Oldest Run At */
+            oldest_run_at?: string | null;
+            /** Runs Considered */
+            runs_considered: number;
+        };
         /** TestCaseItem */
         TestCaseItem: {
             /** Context Filters */
@@ -7480,6 +7599,29 @@ export interface components {
             team_filter?: string[];
             /** Trace Id */
             trace_id?: string | null;
+        };
+        /**
+         * TestCaseTrendPoint
+         * @description One run's outcome for a test case, newest-first in the trend list.
+         */
+        TestCaseTrendPoint: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Is Rerun
+             * @default false
+             */
+            is_rerun: boolean;
+            /** Passed */
+            passed: boolean;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
         };
         /** TestCaseUpdate */
         TestCaseUpdate: {
@@ -9975,6 +10117,44 @@ export interface operations {
             };
         };
     };
+    get_test_case_history_api_evals_test_case_history_get: {
+        parameters: {
+            query?: {
+                dataset_id?: string | null;
+                run_limit?: number;
+                min_failures?: number;
+                include_reruns?: boolean;
+                /** @description Comma-separated run sources, e.g. 'triggered' */
+                sources?: string | null;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestCaseHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     trigger_eval_api_evals_trigger_post: {
         parameters: {
             query?: never;
@@ -10250,7 +10430,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RerunEvalRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {

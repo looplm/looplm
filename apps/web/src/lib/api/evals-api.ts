@@ -96,10 +96,20 @@ export const triggerEval = (datasetIds?: string[], concurrency?: number, filterM
     body: JSON.stringify({ dataset_ids: datasetIds || null, concurrency, filter_mode: filterMode, use_batch: useBatch }),
   });
 
-export const rerunEval = (runId: string) =>
+export type RerunScope = "failed" | "filtered" | "selected";
+
+export const rerunEval = (runId: string, opts?: { testIds?: string[]; scope?: RerunScope }) =>
   request<TriggerEvalResponse>(`/api/evals/${runId}/rerun`, {
     method: "POST",
+    ...(opts
+      ? { body: JSON.stringify({ test_ids: opts.testIds ?? null, scope: opts.scope ?? null }) }
+      : {}),
   });
+
+export const getTestCaseHistory = (params?: Record<string, string>) => {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return request<import("../api-types").TestCaseHistoryResponse>(`/api/evals/test-case-history${qs}`);
+};
 
 export const getEvalJobs = (status?: string) => {
   const qs = status ? `?status=${status}` : "";

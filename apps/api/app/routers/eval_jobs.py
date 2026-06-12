@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.config import settings
 from app.db import get_db
-from app.models.models import EvalJob, EvalJobStatus, TestCase, TestDataset
+from app.models.models import EvalJob, EvalJobStatus, EvalRun, TestCase, TestDataset
 from app.models.project import Project
 from app.models.user import User
 from app.services.analysis_llm import merge_llm_settings
@@ -269,6 +269,10 @@ async def restart_eval_job(
     filter_mode = old_config.get("filter_mode", "as_configured")
     max_turns = old_config.get("max_turns", 1)
     use_batch = old_config.get("use_batch", False)
+    # Preserve partial-rerun scope so restarting a cancelled subset rerun stays partial
+    include_test_ids = old_config.get("include_test_ids")
+    rerun_of = old_config.get("rerun_of")
+    rerun_scope = old_config.get("rerun_scope")
 
     new_job = EvalJob(
         project_id=project.id,
@@ -280,6 +284,13 @@ async def restart_eval_job(
     db.add(new_job)
     await db.commit()
     await db.refresh(new_job)
+
+    rerun_source_name: str | None = None
+    if rerun_of:
+        name_result = await db.execute(
+            select(EvalRun.name).where(EvalRun.id == UUID(rerun_of))
+        )
+        rerun_source_name = name_result.scalar_one_or_none()
 
     dataset_uuids = [UUID(d) for d in old_job.dataset_ids] if old_job.dataset_ids else None
     ps = dict(project.settings or {})
@@ -293,7 +304,11 @@ async def restart_eval_job(
             ps,
             filter_mode=filter_mode,
             max_turns=max_turns,
-            use_batch=use_batch,
+            use_batch=use_batch and not include_test_ids,
+            include_test_ids=include_test_ids,
+            rerun_of=UUID(rerun_of) if rerun_of else None,
+            rerun_scope=rerun_scope,
+            rerun_source_name=rerun_source_name,
         )
     )
     _eval_tasks[new_job.id] = task

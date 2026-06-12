@@ -22,6 +22,7 @@ const tabs = [
   { label: "Jobs", href: "/evaluations/jobs" },
   { label: "Experiments", href: "/evaluations/experiments" },
   { label: "Reports", href: "/evaluations/reports" },
+  { label: "Test Case History", href: "/evaluations/history" },
 ];
 
 export default function EvaluationsLayout({ children }: { children: React.ReactNode }) {
@@ -49,7 +50,7 @@ export default function EvaluationsLayout({ children }: { children: React.ReactN
   const isDetailPage =
     (pathname.startsWith("/evaluations/jobs/") && pathname !== "/evaluations/jobs") ||
     (pathname.startsWith("/evaluations/reports/") && pathname !== "/evaluations/reports") ||
-    (pathname.match(/^\/evaluations\/[^/]+$/) && pathname !== "/evaluations" && pathname !== "/evaluations/jobs" && pathname !== "/evaluations/reports" && pathname !== "/evaluations/experiments");
+    (pathname.match(/^\/evaluations\/[^/]+$/) && pathname !== "/evaluations" && pathname !== "/evaluations/jobs" && pathname !== "/evaluations/reports" && pathname !== "/evaluations/experiments" && pathname !== "/evaluations/history");
 
   async function handleOpenTriggerMenu() {
     setShowTriggerMenu(true);

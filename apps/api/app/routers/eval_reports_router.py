@@ -13,11 +13,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.config import settings
 from app.db import get_db
-from app.models.models import EvalJob, EvalJobStatus, EvalReport, EvalResult, EvalRun, Evaluator, TestDataset
+from app.models.models import (
+    EvalJob,
+    EvalJobStatus,
+    EvalReport,
+    EvalResult,
+    EvalRun,
+    Evaluator,
+    TestCase,
+    TestDataset,
+)
 from app.models.project import Project
 from app.models.user import User
 from app.services.analysis_llm import merge_llm_settings
-from app.schemas.eval_trigger import TriggerEvalResponse
+from app.services.failure_pattern import normalize_result_test_id
+from app.schemas.eval_trigger import RerunEvalRequest, TriggerEvalResponse
 from app.schemas.evaluations import (
     EvalReportDetail,
     EvalReportListItem,
@@ -290,11 +300,17 @@ async def get_eval_report(
 )
 async def rerun_eval(
     run_id: UUID,
+    body: RerunEvalRequest | None = None,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
     user: User = Depends(get_current_user),
 ):
-    """Rerun an evaluation using the same datasets as the original run."""
+    """Rerun an evaluation using the same datasets as the original run.
+
+    With a body, only a subset is rerun: explicit ``test_ids``, or all failed
+    results when ``scope == "failed"``. Subset reruns create a new run linked
+    to the original via ``run_metadata.rerun_of``.
+    """
     # Find the original run
     result = await db.execute(
         select(EvalRun).where(EvalRun.id == run_id, EvalRun.project_id == project.id)
@@ -328,28 +344,86 @@ async def rerun_eval(
     concurrency = original_config.get("concurrency", settings.eval_default_concurrency)
     filter_mode = original_config.get("filter_mode", "as_configured")
     max_turns = original_config.get("max_turns", 1)
+    # dataset_ids come from JSONB as strings; UUID-typed columns need real UUIDs
+    dataset_uuids = [UUID(d) for d in dataset_ids] if dataset_ids else None
 
-    if dataset_ids:
+    # Resolve the subset of test cases to rerun (None = full rerun)
+    include_test_ids: list[str] | None = None
+    rerun_scope: str | None = None
+    if body and (body.test_ids or body.scope == "failed"):
+        if body.test_ids:
+            requested = {normalize_result_test_id(tid) for tid in body.test_ids}
+            rerun_scope = body.scope or "selected"
+        else:
+            failed_result = await db.execute(
+                select(EvalResult.test_id).where(
+                    EvalResult.run_id == run_id,
+                    EvalResult.pass_ == False,  # noqa: E712
+                )
+            )
+            requested = {normalize_result_test_id(r[0]) for r in failed_result.all()}
+            rerun_scope = "failed"
+
+        if not requested:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"code": "NO_MATCHING_TEST_CASES", "message": "No test cases to rerun: the run has no failed results."}},
+            )
+
+        # Validate overlap with currently runnable test cases before spawning the job
+        tc_query = (
+            select(TestCase.test_id)
+            .join(TestDataset)
+            .where(
+                TestDataset.project_id == project.id,
+                TestCase.status != "needs_work",
+            )
+        )
+        if dataset_uuids:
+            tc_query = tc_query.where(TestCase.dataset_id.in_(dataset_uuids))
+        tc_result = await db.execute(tc_query)
+        runnable = {r[0] for r in tc_result.all()}
+        include = sorted(requested & runnable)
+        if not include:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"code": "NO_MATCHING_TEST_CASES", "message": f"None of the {len(requested)} requested test case(s) are runnable — they may have been deleted, renamed, or marked as needs work."}},
+            )
+        include_test_ids = include
+
+    if dataset_uuids:
         ds_result = await db.execute(
-            select(TestDataset.name).where(TestDataset.id.in_(dataset_ids))
+            select(TestDataset.name).where(TestDataset.id.in_(dataset_uuids))
         )
         ds_names = [r[0] for r in ds_result.all()]
         dataset_label = ", ".join(ds_names) if ds_names else f"{len(dataset_ids)} dataset(s)"
     else:
         dataset_label = "all datasets"
 
+    job_config = dict(original_config)
+    job_label = dataset_label
+    if include_test_ids:
+        job_config.update(
+            {
+                "use_batch": False,
+                "include_test_ids": include_test_ids,
+                "rerun_of": str(run_id),
+                "rerun_scope": rerun_scope,
+            }
+        )
+        job_label = f"{dataset_label} (rerun: {len(include_test_ids)} {rerun_scope})"
+
     job = EvalJob(
         project_id=project.id,
-        test_suite=dataset_label,
+        test_suite=job_label,
         dataset_ids=dataset_ids,
         status=EvalJobStatus.pending,
-        config=original_config,
+        config=job_config,
     )
     db.add(job)
     await db.flush()
     await db.refresh(job)
 
-    dataset_uuids = [UUID(d) for d in dataset_ids] if dataset_ids else None
     ps = dict(project.settings or {})
     ps["_user_settings"] = merge_llm_settings(project.settings, user.settings)
     task = asyncio.create_task(
@@ -361,6 +435,10 @@ async def rerun_eval(
             ps,
             filter_mode=filter_mode,
             max_turns=max_turns,
+            include_test_ids=include_test_ids,
+            rerun_of=run_id if include_test_ids else None,
+            rerun_scope=rerun_scope,
+            rerun_source_name=run.name if include_test_ids else None,
         )
     )
     _eval_tasks[job.id] = task

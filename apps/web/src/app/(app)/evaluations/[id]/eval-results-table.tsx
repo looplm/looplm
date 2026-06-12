@@ -26,6 +26,10 @@ interface EvalResultsTableProps {
   evaluatorMap: Record<string, EvaluatorItem>;
   onSelectResult: (result: EvalResultSummary) => void;
   loadingResultId?: string | null;
+  selectable?: boolean;
+  selectedTestIds?: Set<string>;
+  onToggleSelect?: (testId: string) => void;
+  onToggleSelectAll?: () => void;
 }
 
 export function EvalResultsTable({
@@ -34,6 +38,10 @@ export function EvalResultsTable({
   evaluatorMap,
   onSelectResult,
   loadingResultId,
+  selectable,
+  selectedTestIds,
+  onToggleSelect,
+  onToggleSelectAll,
 }: EvalResultsTableProps) {
   const defaultSort: SortEntry[] = [
     { col: "result", dir: "desc" },
@@ -101,6 +109,17 @@ export function EvalResultsTable({
       <table className="w-full text-base">
         <thead className="sticky top-0 z-10 bg-white dark:bg-slate-900">
           <tr className="border-b border-gray-100 dark:border-slate-800 text-left text-gray-500 dark:text-slate-400">
+            {selectable && (
+              <th className="px-4 py-3 w-10">
+                <input
+                  type="checkbox"
+                  checked={filteredResults.length > 0 && selectedTestIds?.size === filteredResults.length}
+                  onChange={() => onToggleSelectAll?.()}
+                  className="rounded border-gray-300 dark:border-slate-600"
+                  aria-label="Select all"
+                />
+              </th>
+            )}
             {([
               ["test_id", "Test ID", ""],
               ["result", "Result", "w-20 text-center"],
@@ -134,6 +153,17 @@ export function EvalResultsTable({
                   loadingResultId ? "cursor-wait" : "cursor-pointer"
                 } ${isLoading ? "opacity-60" : ""}`}
               >
+                {selectable && (
+                  <td className="px-4 py-3 w-10" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTestIds?.has(result.test_id) ?? false}
+                      onChange={() => onToggleSelect?.(result.test_id)}
+                      className="rounded border-gray-300 dark:border-slate-600 cursor-pointer"
+                      aria-label={`Select ${result.test_id}`}
+                    />
+                  </td>
+                )}
                 <td className="px-4 py-3 text-sm">{result.test_id}</td>
                 <td className="px-4 py-3 text-center">
                   <div className="flex items-center justify-center gap-1.5">

@@ -309,6 +309,10 @@ async def _run_eval_background(
     experiment_id: UUID | None = None,
     experiment_name: str | None = None,
     use_batch: bool = False,
+    include_test_ids: list[str] | None = None,
+    rerun_of: UUID | None = None,
+    rerun_scope: str | None = None,
+    rerun_source_name: str | None = None,
 ) -> None:
     """Run eval in a background task with its own DB session."""
     import asyncio
@@ -316,6 +320,8 @@ async def _run_eval_background(
     try:
         async with async_session() as db:
             if use_batch:
+                # Subset reruns always run non-batch — the rerun endpoint forces
+                # use_batch=False, so include_test_ids never reaches this branch.
                 from app.services.batch_eval_executor import run_eval_batch
                 await run_eval_batch(
                     job_id, project_id, dataset_ids, concurrency, db,
@@ -338,6 +344,10 @@ async def _run_eval_background(
                     session_id=session_id,
                     experiment_id=experiment_id,
                     experiment_name=experiment_name,
+                    include_test_ids=include_test_ids,
+                    rerun_of=rerun_of,
+                    rerun_scope=rerun_scope,
+                    rerun_source_name=rerun_source_name,
                 )
     except asyncio.CancelledError:
         logger.info("Background eval task cancelled for job %s", job_id)

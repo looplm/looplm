@@ -144,6 +144,16 @@ class EvalResultItem(BaseModel):
     model_config = {"from_attributes": True, "populate_by_name": True}
 
 
+class RerunLinkItem(BaseModel):
+    """Compact reference to a run linked via run_metadata.rerun_of."""
+    id: UUID
+    name: str
+    total: int
+    passed: int
+    failed: int
+    created_at: datetime
+
+
 class EvalRunDetail(BaseModel):
     id: UUID
     name: str
@@ -158,6 +168,8 @@ class EvalRunDetail(BaseModel):
     metadata: dict[str, Any]
     created_at: datetime
     results: list[EvalResultSummary]
+    rerun_of: Optional[RerunLinkItem] = None
+    reruns: list[RerunLinkItem] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

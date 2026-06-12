@@ -35,6 +35,27 @@ class TriggerEvalRequest(BaseModel):
     )
 
 
+RerunScope = Literal["failed", "filtered", "selected"]
+
+
+class RerunEvalRequest(BaseModel):
+    test_ids: list[str] | None = Field(
+        None,
+        max_length=5000,
+        description=(
+            "Exact test_ids from the original run to rerun. "
+            "'[filtered]'/'[unfiltered]' suffixes are stripped server-side."
+        ),
+    )
+    scope: RerunScope | None = Field(
+        None,
+        description=(
+            "If 'failed' and test_ids is omitted, the server reruns all failed "
+            "results of the run. Otherwise a label recorded in run metadata."
+        ),
+    )
+
+
 class DatasetPickerItem(BaseModel):
     id: UUID
     name: str

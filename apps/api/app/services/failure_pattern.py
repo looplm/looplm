@@ -18,12 +18,22 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Iterable
 from typing import Any, Literal
 
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
 
 logger = logging.getLogger(__name__)
+
+# In "both" filter mode the executor stores each variant under a suffixed
+# test_id (see eval_executor.run_eval). Strip it to recover the TestCase.test_id.
+_VARIANT_SUFFIX_RE = re.compile(r" \[(?:un)?filtered\]$")
+
+
+def normalize_result_test_id(test_id: str) -> str:
+    """Map an ``EvalResult.test_id`` back to its ``TestCase.test_id``."""
+    return _VARIANT_SUFFIX_RE.sub("", test_id)
 
 Intent = Literal["answer", "clarifying_question", "refusal", "other"]
 _INTENT_VALUES: tuple[str, ...] = ("answer", "clarifying_question", "refusal", "other")
