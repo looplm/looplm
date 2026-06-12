@@ -148,13 +148,17 @@ def normalize_source_url(url: str) -> str:
 def extract_retrieval_source_urls(span_output: Any) -> list[str]:
     """Pull source URLs out of a retrieval-context span's output payload.
 
-    The expected shape is ``{"sources": [{"url": "...", ...}, ...]}``.
-    Returns a de-duplicated list preserving original order. Non-string and
-    blank URLs are skipped so we never persist garbage as expected sources.
+    Accepts ``{"sources": [{"url": "...", ...}, ...]}`` as well as a bare
+    list of source dicts — payload keys like ``searchSources`` hold the list
+    directly rather than wrapping it. Each source's ``url`` is read, falling
+    back to ``pageUrl``. Returns a de-duplicated list preserving original
+    order. Non-string and blank URLs are skipped so we never persist garbage
+    as expected sources.
     """
-    if not isinstance(span_output, dict):
-        return []
-    sources = span_output.get("sources")
+    if isinstance(span_output, dict):
+        sources = span_output.get("sources")
+    else:
+        sources = span_output
     if not isinstance(sources, list):
         return []
     seen: set[str] = set()
@@ -162,7 +166,7 @@ def extract_retrieval_source_urls(span_output: Any) -> list[str]:
     for src in sources:
         if not isinstance(src, dict):
             continue
-        url = src.get("url")
+        url = src.get("url") or src.get("pageUrl")
         if not isinstance(url, str):
             continue
         url = normalize_source_url(url.strip())
@@ -207,15 +211,23 @@ def extract_retrieved_urls(
                     break
 
     if not urls:
-        text = None
+        # Regex the retrieval-context text first so answer-only URLs don't leak
+        # in; when it holds no URLs (e.g. plain-text chunks), fall back to the
+        # full raw response rather than reporting nothing was retrieved.
+        texts = []
         if isinstance(parsed, dict):
-            text = extract_retrieval_context_from_payload(parsed, payload_key=payload_key)
-        text = text or raw_response
-        seen: set[str] = set()
-        for match in _URL_RE.finditer(text):
-            url = normalize_source_url(match.group(0).rstrip(".,;:!?"))
-            if url and url not in seen:
-                seen.add(url)
-                urls.append(url)
+            ctx = extract_retrieval_context_from_payload(parsed, payload_key=payload_key)
+            if ctx:
+                texts.append(ctx)
+        texts.append(raw_response)
+        for text in texts:
+            seen: set[str] = set()
+            for match in _URL_RE.finditer(text):
+                url = normalize_source_url(match.group(0).rstrip(".,;:!?"))
+                if url and url not in seen:
+                    seen.add(url)
+                    urls.append(url)
+            if urls:
+                break
 
     return urls[:limit]

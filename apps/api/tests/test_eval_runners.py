@@ -41,6 +41,35 @@ def test_retrieved_urls_from_sources_under_fallback_key():
     assert extract_retrieved_urls(raw) == ["https://a.example/x"]
 
 
+def test_retrieved_urls_from_bare_source_list_under_fallback_key():
+    # searchSources holds the source list directly (no {"sources": ...} wrapper),
+    # and sources may carry pageUrl instead of url.
+    raw = json.dumps({
+        "answer": "hi [1]",
+        "searchSources": [
+            {"id": "page_1", "url": "https://co.example/wiki/spaces/AB/pages/111/Slug%20One"},
+            {"id": "page_2", "pageUrl": "https://co.example/wiki/spaces/AB/pages/222/Slug+Two"},
+        ],
+    })
+    assert extract_retrieved_urls(raw) == [
+        "https://co.example/wiki/spaces/AB/pages/111",
+        "https://co.example/wiki/spaces/AB/pages/222",
+    ]
+
+
+def test_retrieved_urls_url_free_context_falls_back_to_raw_response():
+    # retrievedContext matches first but holds plain-text chunks without URLs —
+    # extraction must fall through to the raw response instead of returning [].
+    raw = json.dumps({
+        "answer": "hi",
+        "retrievedContext": ["Gefundene Dokumente (2 von 10): [1] Some chunk text, no links."],
+        "pageImageGroups": [{"imageUrl": "https://co.example/wiki/download/attachments/1/a.png"}],
+    })
+    assert extract_retrieved_urls(raw) == [
+        "https://co.example/wiki/download/attachments/1/a.png"
+    ]
+
+
 def test_retrieved_urls_regex_fallback_over_retrieval_context():
     raw = json.dumps({
         "answer": "see https://unrelated.example/in-answer",
