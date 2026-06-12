@@ -87,6 +87,12 @@ class Trace(Base):
         Index("idx_traces_parent_trace_id", "parent_trace_id"),
         Index("idx_traces_root_trace_id", "root_trace_id"),
         Index("idx_traces_user_id", "user_id", postgresql_where=text("user_id IS NOT NULL")),
+        # Partial index drives the signal poller's "not yet classified" scan cheaply.
+        Index(
+            "idx_traces_unclassified",
+            text("created_at DESC"),
+            postgresql_where=text("signals_classified_at IS NULL"),
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)

@@ -113,6 +113,7 @@ class EvalRun(Base):
     __table_args__ = (
         Index("idx_eval_runs_project_id", "project_id"),
         Index("idx_eval_runs_created_at", text("created_at DESC")),
+        Index("idx_eval_runs_session_id", "session_id"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
