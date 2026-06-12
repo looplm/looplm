@@ -122,13 +122,15 @@ export function Section({
   );
 }
 
-/** Show found vs missing URLs for source-retrieval graders */
+/** Show found vs missing expected URLs (plus actually retrieved URLs) for source-retrieval graders */
 export function UrlDetails({
   found,
   missing,
+  retrieved = [],
 }: {
   found: string[];
   missing: string[];
+  retrieved?: string[];
 }) {
   return (
     <div className="text-sm space-y-1.5 mt-1">
@@ -153,6 +155,20 @@ export function UrlDetails({
           </span>
           <ul className="mt-0.5 space-y-0.5">
             {missing.map((url) => (
+              <li key={url} className="text-gray-500 dark:text-slate-400 truncate" title={url}>
+                {url}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {retrieved.length > 0 && (
+        <div>
+          <span className="text-gray-600 dark:text-slate-300 font-medium">
+            Retrieved ({retrieved.length})
+          </span>
+          <ul className="mt-0.5 space-y-0.5">
+            {retrieved.map((url) => (
               <li key={url} className="text-gray-500 dark:text-slate-400 truncate" title={url}>
                 {url}
               </li>

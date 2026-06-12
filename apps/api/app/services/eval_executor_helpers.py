@@ -59,6 +59,7 @@ async def _run_evaluators_for_turn(
     raw_response: str,
     test_case: TestCase,
     elapsed_ms: int | None = None,
+    payload_key: str | None = None,
 ) -> tuple[dict[str, GraderResult], bool, dict[str, float], list[LlmUsageInfo]]:
     """Run all evaluators for a single turn and return (graders, overall_pass, scores, llm_usages).
 
@@ -79,9 +80,11 @@ async def _run_evaluators_for_turn(
             evaluator = _with_elapsed_ms(evaluator, elapsed_ms)
 
         if evaluator.type == EvaluatorType.deterministic:
-            result = _run_deterministic(evaluator, output_text, test_case, context=raw_response)
+            result = _run_deterministic(
+                evaluator, output_text, test_case, context=raw_response, payload_key=payload_key
+            )
             graders[evaluator.name] = GraderResult(
-                **{"pass": result.get("pass", False), "reason": result.get("reason"), "skipped": result.get("skipped", False)}
+                **{"pass": result.get("pass", False), "reason": result.get("reason"), "skipped": result.get("skipped", False), "details": result.get("details")}
             )
             if evaluator.affects_pass and not result.get("skipped") and not result.get("pass"):
                 overall_pass = False
@@ -94,12 +97,14 @@ async def _run_evaluators_for_turn(
 
         else:
             # hybrid: run deterministic first, then LLM if needed
-            result = _run_deterministic(evaluator, output_text, test_case, context=raw_response)
+            result = _run_deterministic(
+                evaluator, output_text, test_case, context=raw_response, payload_key=payload_key
+            )
             if not result.get("skipped") and not result.get("pass") and llm:
                 pending_llm.append((evaluator, _run_llm_judge(llm, evaluator, input_text, output_text, expected_output, context=raw_response)))
             else:
                 graders[evaluator.name] = GraderResult(
-                    **{"pass": result.get("pass", False), "reason": result.get("reason"), "skipped": result.get("skipped", False)}
+                    **{"pass": result.get("pass", False), "reason": result.get("reason"), "skipped": result.get("skipped", False), "details": result.get("details")}
                 )
                 if evaluator.affects_pass and not result.get("skipped") and not result.get("pass"):
                     overall_pass = False
@@ -243,6 +248,7 @@ async def _evaluate_single_test_case(
         graders, overall_pass, turn_scores, turn_usages = await _run_evaluators_for_turn(
             evaluators, llm, turn_prompt, output_text, turn_expected, raw_response, test_case,
             elapsed_ms=elapsed_ms,
+            payload_key=payload_key,
         )
         all_llm_usages.extend(turn_usages)
 

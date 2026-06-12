@@ -21,6 +21,7 @@ default, and the extraction fallback.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.models.project import Project
@@ -125,3 +126,96 @@ def extract_retrieval_context_from_payload(
         if isinstance(ctx, (dict, list)):
             return json.dumps(ctx, ensure_ascii=False, default=str)[:max_chars]
     return None
+
+
+# Confluence Cloud URLs in retrieval payloads carry a trailing slug after
+# ``/pages/<id>/`` that often contains malformed or double-encoded characters.
+# Confluence resolves the bare ``/pages/<id>`` form to the same page, so trim
+# the slug to keep the link clickable.
+_CONFLUENCE_PAGE_URL = re.compile(
+    r"^(https?://[^/]+/wiki/spaces/[^/]+/pages/\d+)(?:/.*)?$",
+    re.IGNORECASE,
+)
+
+
+def normalize_source_url(url: str) -> str:
+    match = _CONFLUENCE_PAGE_URL.match(url)
+    if match:
+        return match.group(1)
+    return url
+
+
+def extract_retrieval_source_urls(span_output: Any) -> list[str]:
+    """Pull source URLs out of a retrieval-context span's output payload.
+
+    The expected shape is ``{"sources": [{"url": "...", ...}, ...]}``.
+    Returns a de-duplicated list preserving original order. Non-string and
+    blank URLs are skipped so we never persist garbage as expected sources.
+    """
+    if not isinstance(span_output, dict):
+        return []
+    sources = span_output.get("sources")
+    if not isinstance(sources, list):
+        return []
+    seen: set[str] = set()
+    urls: list[str] = []
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        url = src.get("url")
+        if not isinstance(url, str):
+            continue
+        url = normalize_source_url(url.strip())
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+
+_URL_RE = re.compile(r"""https?://[^\s"'<>\)\]\\]+""")
+
+
+def extract_retrieved_urls(
+    raw_response: str, *, payload_key: str | None = None, limit: int = 30
+) -> list[str]:
+    """Extract the URLs a RAG response actually retrieved, for grader details.
+
+    Tries the structured ``{"sources": [{"url": ...}]}`` shape first (top level,
+    then under the retrieval-context payload key), falling back to regexing URLs
+    out of the retrieval context text, then the full raw response. Returns a
+    de-duplicated, order-preserving list capped at ``limit``.
+    """
+    if not raw_response:
+        return []
+    try:
+        parsed = json.loads(raw_response)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+
+    urls: list[str] = []
+    if isinstance(parsed, dict):
+        urls = extract_retrieval_source_urls(parsed)
+        if not urls:
+            keys: list[str] = []
+            if payload_key:
+                keys.append(payload_key)
+            keys.extend(k for k in _FALLBACK_PAYLOAD_KEYS if k != payload_key)
+            for key in keys:
+                urls = extract_retrieval_source_urls(parsed.get(key))
+                if urls:
+                    break
+
+    if not urls:
+        text = None
+        if isinstance(parsed, dict):
+            text = extract_retrieval_context_from_payload(parsed, payload_key=payload_key)
+        text = text or raw_response
+        seen: set[str] = set()
+        for match in _URL_RE.finditer(text):
+            url = normalize_source_url(match.group(0).rstrip(".,;:!?"))
+            if url and url not in seen:
+                seen.add(url)
+                urls.append(url)
+
+    return urls[:limit]

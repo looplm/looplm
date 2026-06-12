@@ -10,7 +10,11 @@ from urllib.parse import unquote, urlparse
 
 from app.models.models import FeedbackScore, Span, TestCase, Trace
 from app.schemas.datasets import TestCaseItem, TestCaseSuggestion
-from app.services.retrieval_config import DEFAULT_RETRIEVAL_SPAN_NAME
+from app.services.retrieval_config import (
+    DEFAULT_RETRIEVAL_SPAN_NAME,
+    extract_retrieval_source_urls,
+    normalize_source_url as _normalize_source_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -373,51 +377,6 @@ async def load_trace_source_urls(
                 seen_set.add(url)
                 bucket.append(url)
     return by_trace
-
-
-# Confluence Cloud URLs in retrieval payloads carry a trailing slug after
-# ``/pages/<id>/`` that often contains malformed or double-encoded characters.
-# Confluence resolves the bare ``/pages/<id>`` form to the same page, so trim
-# the slug to keep the link clickable.
-_CONFLUENCE_PAGE_URL = re.compile(
-    r"^(https?://[^/]+/wiki/spaces/[^/]+/pages/\d+)(?:/.*)?$",
-    re.IGNORECASE,
-)
-
-
-def _normalize_source_url(url: str) -> str:
-    match = _CONFLUENCE_PAGE_URL.match(url)
-    if match:
-        return match.group(1)
-    return url
-
-
-def extract_retrieval_source_urls(span_output: Any) -> list[str]:
-    """Pull source URLs out of a retrieval-context span's output payload.
-
-    The expected shape is ``{"sources": [{"url": "...", ...}, ...]}``.
-    Returns a de-duplicated list preserving original order. Non-string and
-    blank URLs are skipped so we never persist garbage as expected sources.
-    """
-    if not isinstance(span_output, dict):
-        return []
-    sources = span_output.get("sources")
-    if not isinstance(sources, list):
-        return []
-    seen: set[str] = set()
-    urls: list[str] = []
-    for src in sources:
-        if not isinstance(src, dict):
-            continue
-        url = src.get("url")
-        if not isinstance(url, str):
-            continue
-        url = _normalize_source_url(url.strip())
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        urls.append(url)
-    return urls
 
 
 def _source_label(raw_url: str, src: dict) -> str:

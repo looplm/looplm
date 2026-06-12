@@ -16,6 +16,7 @@ import httpx
 
 from app.models.models import Evaluator, TestCase
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
+from app.services.retrieval_config import extract_retrieved_urls
 
 
 def _resolve_dot_path(data: Any, path: str) -> Any:
@@ -202,6 +203,7 @@ def _run_deterministic(
     output_text: str,
     test_case: TestCase,
     context: str | None = None,
+    payload_key: str | None = None,
 ) -> dict:
     """Run a deterministic evaluator check."""
     config = evaluator.config or {}
@@ -218,11 +220,16 @@ def _run_deterministic(
         missing = [url for url in expected_urls if url.lower() not in search_text]
         passed = len(missing) == 0
         reason = "All expected URLs found" if passed else f"Missing URLs: {', '.join(missing)}"
+        retrieved = extract_retrieved_urls(context or output_text, payload_key=payload_key)
         return {
             "pass": passed,
             "reason": reason,
             "skipped": False,
-            "details": {"found_urls": found_urls, "missing_urls": missing},
+            "details": {
+                "found_urls": found_urls,
+                "missing_urls": missing,
+                "retrieved_urls": retrieved,
+            },
         }
 
     if check_type == "contains_sources":

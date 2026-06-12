@@ -22,11 +22,13 @@ export function getGraderCardCopyText(
   const displayName = graderDisplayName(name, evaluatorMap);
   const status = g.skipped ? "SKIPPED" : g.pass ? "PASS" : "FAIL";
   let body = "";
-  if (g.details && (g.details.found_urls || g.details.missing_urls)) {
+  if (g.details && (g.details.found_urls || g.details.missing_urls || g.details.retrieved_urls)) {
     const found = (g.details.found_urls ?? []) as string[];
     const missing = (g.details.missing_urls ?? []) as string[];
+    const retrieved = (g.details.retrieved_urls ?? []) as string[];
     if (found.length) body += `Found URLs:\n${found.join("\n")}\n`;
-    if (missing.length) body += `Missing URLs:\n${missing.join("\n")}`;
+    if (missing.length) body += `Missing URLs:\n${missing.join("\n")}\n`;
+    if (retrieved.length) body += `Retrieved URLs:\n${retrieved.join("\n")}`;
   } else if (g.reason) {
     body = g.reason;
   }
@@ -85,10 +87,11 @@ export function GraderResultCard({
           )}
         </div>
       </div>
-      {g.details && (g.details.found_urls || g.details.missing_urls) ? (
+      {g.details && (g.details.found_urls || g.details.missing_urls || g.details.retrieved_urls) ? (
         <UrlDetails
           found={(g.details.found_urls ?? []) as string[]}
           missing={(g.details.missing_urls ?? []) as string[]}
+          retrieved={(g.details.retrieved_urls ?? []) as string[]}
         />
       ) : (
         g.reason ? <ClampedText text={g.reason} /> : null
