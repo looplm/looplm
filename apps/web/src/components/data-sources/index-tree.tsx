@@ -113,8 +113,66 @@ function DocumentLeaves({
   );
 }
 
-/** Render one level's distribution(s). Multiple sections (parallel fields) get
- *  a small "By <label>" header each; a single section renders bare. */
+/** One parallel-field distribution. When the level has several sections each is
+ *  a collapsible "By <label>" group (collapsed by default); a lone section
+ *  renders bare and always-open. */
+function TreeSection({
+  providerId,
+  levels,
+  basePath,
+  sec,
+  labeled,
+  depth,
+}: {
+  providerId: string;
+  levels: string[][];
+  basePath: PathStep[];
+  sec: IndexTreeSection;
+  labeled: boolean;
+  depth: number;
+}) {
+  const [open, setOpen] = useState(false); // labeled sections start collapsed
+  const max = Math.max(1, ...sec.groups.map((g) => g.doc_count));
+
+  const body = (
+    <div className={labeled ? "pl-2" : ""}>
+      {sec.groups.length === 0 ? (
+        <p className="text-xs text-gray-400 dark:text-slate-500 py-1 px-1">No values.</p>
+      ) : (
+        sec.groups.map((g) => (
+          <GroupNode
+            key={`${sec.key}:${g.value}@${depth}`}
+            providerId={providerId}
+            levels={levels}
+            path={[...basePath, { key: sec.key, value: g.value }]}
+            node={g}
+            maxSiblingCount={max}
+            depth={depth}
+          />
+        ))
+      )}
+    </div>
+  );
+
+  if (!labeled) return body;
+
+  return (
+    <div className="mt-2 first:mt-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-1.5 px-1 pb-0.5 text-[11px] uppercase tracking-wide text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300"
+      >
+        <Chevron open={open} />
+        <span>By {sec.label}</span>
+        <span className="normal-case tracking-normal">({sec.groups.length})</span>
+      </button>
+      {open && body}
+    </div>
+  );
+}
+
+/** Render one level's distribution(s). */
 function TreeSections({
   providerId,
   levels,
@@ -131,37 +189,17 @@ function TreeSections({
   const labeled = sections.length > 1;
   return (
     <>
-      {sections.map((sec) => {
-        const max = Math.max(1, ...sec.groups.map((g) => g.doc_count));
-        return (
-          <div key={sec.key} className={labeled ? "mt-2 first:mt-0" : ""}>
-            {labeled && (
-              <div className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-slate-500 px-1 pb-0.5">
-                By {sec.label}
-              </div>
-            )}
-            <div className={labeled ? "pl-2" : ""}>
-              {sec.groups.length === 0 ? (
-                <p className="text-xs text-gray-400 dark:text-slate-500 py-1 px-1">
-                  No values.
-                </p>
-              ) : (
-                sec.groups.map((g) => (
-                  <GroupNode
-                    key={`${sec.key}:${g.value}@${depth}`}
-                    providerId={providerId}
-                    levels={levels}
-                    path={[...basePath, { key: sec.key, value: g.value }]}
-                    node={g}
-                    maxSiblingCount={max}
-                    depth={depth}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-        );
-      })}
+      {sections.map((sec) => (
+        <TreeSection
+          key={sec.key}
+          providerId={providerId}
+          levels={levels}
+          basePath={basePath}
+          sec={sec}
+          labeled={labeled}
+          depth={depth}
+        />
+      ))}
     </>
   );
 }
