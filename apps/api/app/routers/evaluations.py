@@ -33,8 +33,14 @@ from app.schemas.evaluations import (
 )
 from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
 from app.services.failure_pattern import aggregate_run_patterns, compute_failure_pattern
+from app.services.retrieval_config import (
+    extract_retrieval_context_from_payload,
+    get_retrieval_payload_key,
+)
 
-def _enrich_result_metadata(meta: dict[str, Any] | None) -> dict[str, Any]:
+def _enrich_result_metadata(
+    meta: dict[str, Any] | None, *, payload_key: str | None = None
+) -> dict[str, Any]:
     """Enrich eval result metadata with retrieval_context extracted from raw_response."""
     meta = meta or {}
     if "retrieval_context" in meta:
@@ -46,15 +52,10 @@ def _enrich_result_metadata(meta: dict[str, Any] | None) -> dict[str, Any]:
         parsed = json.loads(raw) if isinstance(raw, str) else raw
     except (json.JSONDecodeError, TypeError):
         return meta
-    if not isinstance(parsed, dict):
-        return meta
-    ctx = parsed.get("retrieval_context") or parsed.get("retrievalContext") or parsed.get("context")
+    ctx = extract_retrieval_context_from_payload(parsed, payload_key=payload_key)
     if ctx:
         enriched = dict(meta)
-        if isinstance(ctx, str):
-            enriched["retrieval_context"] = ctx[:10000]
-        elif isinstance(ctx, (dict, list)):
-            enriched["retrieval_context"] = json.dumps(ctx, ensure_ascii=False, default=str)[:10000]
+        enriched["retrieval_context"] = ctx
         return enriched
     return meta
 
@@ -324,7 +325,9 @@ async def get_eval_result(
         tags=row.tags or [],
         graders=row.graders or {},
         scores=row.scores or {},
-        metadata=_enrich_result_metadata(row.result_metadata),
+        metadata=_enrich_result_metadata(
+            row.result_metadata, payload_key=get_retrieval_payload_key(project)
+        ),
         turns_to_pass=row.turns_to_pass,
         created_at=row.created_at,
     )

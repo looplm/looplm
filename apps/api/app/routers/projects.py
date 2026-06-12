@@ -1,5 +1,6 @@
 """Project CRUD endpoints."""
 
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -17,8 +18,14 @@ from app.schemas.projects import (
     ProjectListResponse,
     ProjectResponse,
     ProjectUpdate,
+    RetrievalSourceDetection,
     TransferOwnership,
 )
+from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
+from app.services.llm_usage_tracker import record_llm_usage
+from app.services.retrieval_detection import detect_retrieval_source
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -145,6 +152,60 @@ async def update_project(
     await db.flush()
     await db.refresh(project)
     return _project_response(project)
+
+
+@router.post(
+    "/{project_id}/detect-retrieval-source", response_model=RetrievalSourceDetection
+)
+async def detect_retrieval_source_endpoint(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> RetrievalSourceDetection:
+    """Use LLM reasoning to pick the project's retrieval-context source.
+
+    Owner-only. Samples recent traces, asks the analysis LLM which payload key or
+    span carries the retrieved RAG context, and returns the suggestion plus the
+    candidates considered. Does not persist — the client saves the accepted
+    source via PATCH ``settings.retrieval_source``.
+    """
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.owner_id == _user.id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        llm = AnalysisLlmService(
+            user_settings=_user.settings, project_settings=project.settings
+        )
+    except AnalysisLlmConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        result = await detect_retrieval_source(db, project, llm)
+    except Exception as exc:
+        logger.exception("Retrieval-source detection failed")
+        raise HTTPException(status_code=502, detail="Retrieval-source detection failed") from exc
+
+    usage = result.get("usage")
+    if usage is not None:
+        await record_llm_usage(
+            db,
+            project_id=project.id,
+            service_name="retrieval_detection",
+            function_name="detect_retrieval_source",
+            provider=llm.provider,
+            model=llm.model,
+            usage=usage,
+        )
+        await db.commit()
+
+    return RetrievalSourceDetection(
+        suggestion=result.get("suggestion"),
+        candidates=result.get("candidates", {"payload_keys": [], "spans": []}),
+    )
 
 
 @router.post("/{project_id}/transfer-ownership", response_model=ProjectResponse)

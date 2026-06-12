@@ -2306,6 +2306,31 @@ export interface paths {
         patch: operations["update_project_api_projects__project_id__patch"];
         trace?: never;
     };
+    "/api/projects/{project_id}/detect-retrieval-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Detect Retrieval Source Endpoint
+         * @description Use LLM reasoning to pick the project's retrieval-context source.
+         *
+         *     Owner-only. Samples recent traces, asks the analysis LLM which payload key or
+         *     span carries the retrieved RAG context, and returns the suggestion plus the
+         *     candidates considered. Does not persist — the client saves the accepted
+         *     source via PATCH ``settings.retrieval_source``.
+         */
+        post: operations["detect_retrieval_source_endpoint_api_projects__project_id__detect_retrieval_source_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/members": {
         parameters: {
             query?: never;
@@ -6877,6 +6902,33 @@ export interface components {
             label: string;
             /** Url */
             url: string;
+        };
+        /** RetrievalSourceCandidates */
+        RetrievalSourceCandidates: {
+            /** Payload Keys */
+            payload_keys?: {
+                [key: string]: unknown;
+            }[];
+            /** Spans */
+            spans?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** RetrievalSourceDetection */
+        RetrievalSourceDetection: {
+            candidates: components["schemas"]["RetrievalSourceCandidates"];
+            suggestion?: components["schemas"]["RetrievalSourceSuggestion"] | null;
+        };
+        /** RetrievalSourceSuggestion */
+        RetrievalSourceSuggestion: {
+            /** Confidence */
+            confidence: string;
+            /** Kind */
+            kind: string;
+            /** Reasoning */
+            reasoning?: string | null;
+            /** Value */
+            value: string;
         };
         /** RouteAnalysisResponse */
         RouteAnalysisResponse: {
@@ -12878,6 +12930,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detect_retrieval_source_endpoint_api_projects__project_id__detect_retrieval_source_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalSourceDetection"];
                 };
             };
             /** @description Validation Error */

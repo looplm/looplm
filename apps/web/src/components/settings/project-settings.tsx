@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import {
   updateProject,
   deleteProject,
+  detectRetrievalSource,
   setSelectedProjectId,
   type Project,
+  type RetrievalSourceDetection,
 } from "@/lib/api";
 
 interface ProjectSettingsProps {
@@ -27,7 +29,15 @@ export default function ProjectSettings({
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState("");
 
+  const [detecting, setDetecting] = useState(false);
+  const [detection, setDetection] = useState<RetrievalSourceDetection | null>(null);
+  const [savingSource, setSavingSource] = useState(false);
+  const [sourceMessage, setSourceMessage] = useState("");
+
   const currentProject = projects.find((p) => p.id === currentProjectId);
+  const configuredSource = currentProject?.settings?.retrieval_source as
+    | { kind?: string; value?: string; confidence?: string; reasoning?: string }
+    | undefined;
 
   useEffect(() => {
     if (currentProject) {
@@ -35,7 +45,46 @@ export default function ProjectSettings({
       setEditDescription(currentProject.description || "");
     }
     setMessage("");
+    setDetection(null);
+    setSourceMessage("");
   }, [currentProjectId]);
+
+  async function handleDetect() {
+    if (!currentProjectId) return;
+    setDetecting(true);
+    setSourceMessage("");
+    setDetection(null);
+    try {
+      setDetection(await detectRetrievalSource(currentProjectId));
+    } catch (e: any) {
+      setSourceMessage(e.message || "Detection failed");
+    } finally {
+      setDetecting(false);
+    }
+  }
+
+  async function handleSaveSource() {
+    if (!currentProjectId || !detection?.suggestion) return;
+    setSavingSource(true);
+    setSourceMessage("");
+    try {
+      await updateProject(currentProjectId, {
+        settings: {
+          retrieval_source: {
+            ...detection.suggestion,
+            detected_at: new Date().toISOString(),
+          },
+        },
+      });
+      await reloadProjects();
+      setDetection(null);
+      setSourceMessage("Retrieval source saved");
+    } catch (e: any) {
+      setSourceMessage(e.message || "Failed to save");
+    } finally {
+      setSavingSource(false);
+    }
+  }
 
   async function handleSave() {
     if (!currentProjectId || !editName.trim()) return;
@@ -142,6 +191,95 @@ export default function ProjectSettings({
 
         {message && (
           <p className="text-sm text-gray-500 dark:text-slate-400 mt-3">{message}</p>
+        )}
+      </div>
+
+      {/* Retrieval context source */}
+      <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
+        <h2 className="text-lg font-semibold mb-1">Retrieval context source</h2>
+        <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">
+          Which field or span holds your RAG retrieved context. Used for retrieval-vs-generation
+          failure attribution. Let the analysis LLM detect it from recent traces.
+        </p>
+
+        <div className="mb-4 text-sm">
+          <span className="text-gray-500 dark:text-slate-400">Current: </span>
+          {configuredSource?.kind && configuredSource?.value ? (
+            <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200">
+              {configuredSource.kind === "payload_key" ? "payload key" : "span"} ·{" "}
+              {configuredSource.value}
+            </code>
+          ) : (
+            <span className="text-gray-400 dark:text-slate-500">
+              not set — default keys / span name are used
+            </span>
+          )}
+        </div>
+
+        <button
+          onClick={handleDetect}
+          disabled={detecting || !currentProjectId}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-500 disabled:opacity-50"
+        >
+          {detecting ? "Detecting…" : "Auto-detect retrieval field"}
+        </button>
+
+        {detection && (
+          <div className="mt-4 space-y-3">
+            {detection.suggestion ? (
+              <div className="rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50/50 dark:bg-indigo-950/30 p-3">
+                <div className="text-sm text-gray-700 dark:text-slate-200">
+                  Suggested:{" "}
+                  <code className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-800">
+                    {detection.suggestion.kind === "payload_key" ? "payload key" : "span"} ·{" "}
+                    {detection.suggestion.value}
+                  </code>{" "}
+                  <span className="text-xs text-gray-500 dark:text-slate-400">
+                    ({detection.suggestion.confidence} confidence)
+                  </span>
+                </div>
+                {detection.suggestion.reasoning && (
+                  <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
+                    {detection.suggestion.reasoning}
+                  </p>
+                )}
+                <button
+                  onClick={handleSaveSource}
+                  disabled={savingSource}
+                  className="mt-3 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  {savingSource ? "Saving…" : "Save this source"}
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-slate-400">
+                No retrieval context field could be identified in recent traces.
+              </p>
+            )}
+
+            <details className="text-xs text-gray-500 dark:text-slate-400">
+              <summary className="cursor-pointer">
+                Candidates considered ({detection.candidates.payload_keys.length} keys,{" "}
+                {detection.candidates.spans.length} spans)
+              </summary>
+              <div className="mt-2 space-y-1">
+                {detection.candidates.payload_keys.map((c) => (
+                  <div key={`k-${c.key}`}>
+                    <code>{c.key}</code> — {c.sample}
+                  </div>
+                ))}
+                {detection.candidates.spans.map((c) => (
+                  <div key={`s-${c.name}`}>
+                    <code>{c.name}</code> — {c.sample}
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        )}
+
+        {sourceMessage && (
+          <p className="text-sm text-gray-500 dark:text-slate-400 mt-3">{sourceMessage}</p>
         )}
       </div>
     </div>

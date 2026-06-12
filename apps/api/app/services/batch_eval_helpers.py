@@ -121,6 +121,7 @@ async def _evaluate_single_test_case_batch(
     max_turns: int = 1,
     on_progress=None,
     experiment_variables: dict[str, str] | None = None,
+    payload_key: str | None = None,
 ) -> tuple[EvalResultImport, list[tuple[str, list[dict[str, str]]]]]:
     """Evaluate a single test case: call target API + run deterministic evaluators.
 
@@ -238,7 +239,7 @@ async def _evaluate_single_test_case_batch(
             turns_to_pass = turn_num
             break
 
-    metadata = _build_result_metadata(final_raw_response or "")
+    metadata = _build_result_metadata(final_raw_response or "", payload_key=payload_key)
     if is_multi_turn:
         metadata["conversation_history"] = conversation_history
     metadata["filter_mode"] = filter_mode

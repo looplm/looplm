@@ -13,6 +13,7 @@ import httpx
 from app.models.models import Evaluator, EvaluatorType, TestCase
 from app.schemas.evaluations import EvalResultImport, GraderResult
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
+from app.services.retrieval_config import extract_retrieval_context_from_payload
 from app.services.eval_runners import (
     _call_target_api,
     _run_deterministic,
@@ -31,21 +32,21 @@ def _with_elapsed_ms(evaluator: Evaluator, elapsed_ms: int) -> Evaluator:
     return ev
 
 
-def _build_result_metadata(raw_response: str) -> dict:
-    """Build eval result metadata, extracting retrieval_context if present."""
+def _build_result_metadata(raw_response: str, *, payload_key: str | None = None) -> dict:
+    """Build eval result metadata, extracting retrieval_context if present.
+
+    ``payload_key`` is the project's configured retrieval payload key (from
+    ``retrieval_source``); when None, common default keys are tried.
+    """
     meta: dict = {"raw_response": raw_response}
     try:
         parsed = json.loads(raw_response)
     except (json.JSONDecodeError, TypeError):
         return meta
 
-    # Look for retrieval context in common response formats
-    ctx = parsed.get("retrieval_context") or parsed.get("retrievalContext") or parsed.get("context")
+    ctx = extract_retrieval_context_from_payload(parsed, payload_key=payload_key)
     if ctx:
-        if isinstance(ctx, str):
-            meta["retrieval_context"] = ctx[:10000]
-        elif isinstance(ctx, (dict, list)):
-            meta["retrieval_context"] = json.dumps(ctx, ensure_ascii=False, default=str)[:10000]
+        meta["retrieval_context"] = ctx
     return meta
 
 
@@ -144,6 +145,7 @@ async def _evaluate_single_test_case(
     max_turns: int = 1,
     on_progress: Callable[[str], Awaitable[None]] | None = None,
     experiment_variables: dict[str, str] | None = None,
+    payload_key: str | None = None,
 ) -> tuple[EvalResultImport, list[LlmUsageInfo]]:
     """Run a single test case with optional multi-turn follow-ups.
 
@@ -269,7 +271,7 @@ async def _evaluate_single_test_case(
             break
 
     # Build result metadata
-    metadata = _build_result_metadata(final_raw_response or "")
+    metadata = _build_result_metadata(final_raw_response or "", payload_key=payload_key)
     metadata["dataset_id"] = str(test_case.dataset_id)
     if is_multi_turn:
         metadata["conversation_history"] = conversation_history

@@ -33,6 +33,7 @@ from app.models.models import (
 from app.routers.eval_helpers import _compute_summaries
 from app.schemas.evaluations import EvalResultImport
 from app.services.batch_eval_helpers import _evaluate_single_test_case_batch
+from app.services.retrieval_config import get_retrieval_payload_key_from_settings
 from app.services.batch_llm_service import BatchLlmService
 from app.services.batch_result_processor import process_batch_results  # re-export for batch_poller
 
@@ -62,6 +63,7 @@ async def run_eval_batch(
 ) -> None:
     """Execute a batch eval: Phase 1 runs immediately, Phase 2 submits Azure batch."""
     ps = project_settings or {}
+    retrieval_payload_key = get_retrieval_payload_key_from_settings(ps)
 
     result = await db.execute(select(EvalJob).where(EvalJob.id == job_id))
     job = result.scalar_one()
@@ -237,6 +239,7 @@ async def run_eval_batch(
                     max_turns=max_turns,
                     on_progress=_on_progress,
                     experiment_variables=experiment_variables,
+                    payload_key=retrieval_payload_key,
                 )
                 if filter_mode == "both":
                     suffix = " [filtered]" if fm == "as_configured" else " [unfiltered]"

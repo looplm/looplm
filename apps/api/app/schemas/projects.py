@@ -38,3 +38,20 @@ class ProjectListResponse(BaseModel):
 
 class TransferOwnership(BaseModel):
     new_owner_id: UUID
+
+
+class RetrievalSourceSuggestion(BaseModel):
+    kind: str  # "span" | "payload_key"
+    value: str
+    confidence: str  # "high" | "medium" | "low"
+    reasoning: str | None = None
+
+
+class RetrievalSourceCandidates(BaseModel):
+    payload_keys: list[dict] = Field(default_factory=list)
+    spans: list[dict] = Field(default_factory=list)
+
+
+class RetrievalSourceDetection(BaseModel):
+    suggestion: RetrievalSourceSuggestion | None = None
+    candidates: RetrievalSourceCandidates

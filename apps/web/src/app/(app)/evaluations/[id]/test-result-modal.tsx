@@ -357,6 +357,15 @@ export function TestResultModal({
                       {rc.evidence && (
                         <p className="text-sm text-gray-700 dark:text-slate-300">{rc.evidence}</p>
                       )}
+                      {rc.category === "indeterminate" &&
+                        rc.evidence?.includes("No retrieval context captured") && (
+                          <a
+                            href="/settings?tab=project"
+                            className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+                          >
+                            Detect retrieval field in Settings →
+                          </a>
+                        )}
                       {rc.missing_facts && rc.missing_facts.length > 0 && (
                         <div>
                           <p className="text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-slate-500 mb-1">

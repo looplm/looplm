@@ -8,6 +8,7 @@ and writes EvalRun + EvalResult records.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -31,6 +32,10 @@ from app.routers.eval_helpers import _compute_summaries
 from app.schemas.evaluations import EvalResultImport
 from app.services.analysis_llm import AnalysisLlmService
 from app.services.eval_executor_helpers import _evaluate_single_test_case
+from app.services.retrieval_config import (
+    extract_retrieval_context_from_payload,
+    get_retrieval_payload_key_from_settings,
+)
 from app.services.failure_pattern import (
     aggregate_root_causes,
     aggregate_run_patterns,
@@ -57,6 +62,7 @@ async def run_eval(
 ) -> None:
     """Execute a native eval run: load test cases, call API, run evaluators, save results."""
     ps = project_settings or {}
+    retrieval_payload_key = get_retrieval_payload_key_from_settings(ps)
 
     # Mark job as running
     result = await db.execute(select(EvalJob).where(EvalJob.id == job_id))
@@ -237,6 +243,7 @@ async def run_eval(
                     max_turns=max_turns,
                     on_progress=_on_progress,
                     experiment_variables=experiment_variables,
+                    payload_key=retrieval_payload_key,
                 )
                 # In "both" mode, tag results so they can be distinguished
                 if filter_mode == "both":
@@ -262,6 +269,17 @@ async def run_eval(
                         llm_usages.append(("eval_pattern_classifier", classifier_usage))
 
                     # Attribute the failure to the retrieval or generation stage
+                    retrieval_context = r.metadata.get("retrieval_context")
+                    if not retrieval_context:
+                        raw = r.metadata.get("raw_response")
+                        if raw:
+                            try:
+                                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                            except (json.JSONDecodeError, TypeError):
+                                parsed = None
+                            retrieval_context = extract_retrieval_context_from_payload(
+                                parsed, payload_key=retrieval_payload_key
+                            )
                     root_cause_patch, root_cause_usage = await compute_root_cause(
                         pass_=r.pass_,
                         grader_pattern=pattern_patch.get("grader_pattern", []),
@@ -269,7 +287,7 @@ async def run_eval(
                         question=r.input,
                         output=r.output,
                         expected=r.expected_output,
-                        retrieval_context=r.metadata.get("retrieval_context"),
+                        retrieval_context=retrieval_context,
                         llm=llm,
                     )
                     if root_cause_patch:

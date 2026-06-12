@@ -242,6 +242,28 @@ export const updateProject = (id: string, body: { name?: string; description?: s
 export const deleteProject = (id: string) =>
   request<void>(`/api/projects/${id}`, { method: "DELETE" });
 
+export interface RetrievalSourceSuggestion {
+  kind: "span" | "payload_key";
+  value: string;
+  confidence: "high" | "medium" | "low";
+  reasoning?: string | null;
+}
+
+export interface RetrievalSourceDetection {
+  suggestion: RetrievalSourceSuggestion | null;
+  candidates: {
+    payload_keys: { key: string; sample: string }[];
+    spans: { name: string; sample: string }[];
+  };
+}
+
+/** Ask the analysis LLM to pick the project's retrieval-context source. Owner-only. */
+export const detectRetrievalSource = (projectId: string) =>
+  request<RetrievalSourceDetection>(
+    `/api/projects/${projectId}/detect-retrieval-source`,
+    { method: "POST" },
+  );
+
 // --- User Settings ---
 
 export interface UserSettings {
