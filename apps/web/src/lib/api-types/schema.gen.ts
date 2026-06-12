@@ -2954,6 +2954,111 @@ export interface paths {
         patch: operations["update_settings_api_settings_patch"];
         trace?: never;
     };
+    "/api/source-registry/expectations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Expectations */
+        get: operations["list_expectations_api_source_registry_expectations_get"];
+        put?: never;
+        /** Create Expectation */
+        post: operations["create_expectation_api_source_registry_expectations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/source-registry/expectations/{expectation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Expectation */
+        delete: operations["delete_expectation_api_source_registry_expectations__expectation_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Expectation */
+        patch: operations["update_expectation_api_source_registry_expectations__expectation_id__patch"];
+        trace?: never;
+    };
+    "/api/source-registry/gap-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Gap Runs */
+        get: operations["list_gap_runs_api_source_registry_gap_runs_get"];
+        put?: never;
+        /** Create Gap Run */
+        post: operations["create_gap_run_api_source_registry_gap_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/source-registry/gap-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Gap Run */
+        get: operations["get_gap_run_api_source_registry_gap_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/source-registry/gap-runs/{run_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Gap Run Report */
+        get: operations["get_gap_run_report_api_source_registry_gap_runs__run_id__report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/source-registry/import-csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Csv */
+        post: operations["import_csv_api_source_registry_import_csv_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/traces": {
         parameters: {
             query?: never;
@@ -4016,6 +4121,36 @@ export interface components {
         CoverageRunSummaryListResponse: {
             /** Data */
             data: components["schemas"]["CoverageRunSummary"][];
+        };
+        /** CsvImportRequest */
+        CsvImportRequest: {
+            /** Csv Text */
+            csv_text: string;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /**
+             * Replace
+             * @default false
+             */
+            replace: boolean;
+        };
+        /** CsvImportResponse */
+        CsvImportResponse: {
+            /** Created */
+            created: number;
+            /** Deleted */
+            deleted: number;
+            /** Skipped Rows */
+            skipped_rows: number;
+            /** Total */
+            total: number;
+            /** Updated */
+            updated: number;
+            /** Warnings */
+            warnings?: string[];
         };
         /** DashboardPeriod */
         DashboardPeriod: {
@@ -5147,6 +5282,111 @@ export interface components {
             pending: number;
             /** Suggested */
             suggested: number;
+        };
+        /** GapRunCreateResponse */
+        GapRunCreateResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Status */
+            status: string;
+        };
+        /** GapRunRequest */
+        GapRunRequest: {
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+        };
+        /** GapRunResponse */
+        GapRunResponse: {
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Processed */
+            processed: number;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /** Results */
+            results?: {
+                [key: string]: unknown;
+            } | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /** Total */
+            total: number;
+        };
+        /** GapRunSummary */
+        GapRunSummary: {
+            /**
+             * Acked
+             * @default 0
+             */
+            acked: number;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Covered
+             * @default 0
+             */
+            covered: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Missing
+             * @default 0
+             */
+            missing: number;
+            /** Processed */
+            processed: number;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /**
+             * Review
+             * @default 0
+             */
+            review: number;
+            /** Status */
+            status: string;
+            /** Total */
+            total: number;
+        };
+        /** GapRunSummaryListResponse */
+        GapRunSummaryListResponse: {
+            /** Data */
+            data: components["schemas"]["GapRunSummary"][];
         };
         /**
          * GraderResultSummary
@@ -6769,6 +7009,115 @@ export interface components {
             provider: string;
             /** Request Count */
             request_count: number;
+        };
+        /** SourceExpectationCreate */
+        SourceExpectationCreate: {
+            /** Adapter Tag */
+            adapter_tag?: string | null;
+            /** Comment */
+            comment?: string | null;
+            /** Hierarchie */
+            hierarchie?: string | null;
+            /** Html Url */
+            html_url?: string | null;
+            /** Name */
+            name: string;
+            /** Pdf Url */
+            pdf_url?: string | null;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /** Publisher */
+            publisher?: string | null;
+            /** Sparte */
+            sparte?: string | null;
+            /** Thema */
+            thema?: string | null;
+            /** Typ */
+            typ?: string | null;
+            /** Update Frequency */
+            update_frequency?: string | null;
+        };
+        /** SourceExpectationListResponse */
+        SourceExpectationListResponse: {
+            /** Data */
+            data: components["schemas"]["SourceExpectationResponse"][];
+        };
+        /** SourceExpectationResponse */
+        SourceExpectationResponse: {
+            /** Ack Note */
+            ack_note?: string | null;
+            /** Adapter Tag */
+            adapter_tag?: string | null;
+            /** Comment */
+            comment?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Hierarchie */
+            hierarchie?: string | null;
+            /** Html Url */
+            html_url?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Pdf Url */
+            pdf_url?: string | null;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /** Publisher */
+            publisher?: string | null;
+            /** Sparte */
+            sparte?: string | null;
+            /** Thema */
+            thema?: string | null;
+            /** Typ */
+            typ?: string | null;
+            /** Update Frequency */
+            update_frequency?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** SourceExpectationUpdate */
+        SourceExpectationUpdate: {
+            /** Ack Note */
+            ack_note?: string | null;
+            /** Adapter Tag */
+            adapter_tag?: string | null;
+            /** Comment */
+            comment?: string | null;
+            /** Hierarchie */
+            hierarchie?: string | null;
+            /** Html Url */
+            html_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Pdf Url */
+            pdf_url?: string | null;
+            /** Publisher */
+            publisher?: string | null;
+            /** Sparte */
+            sparte?: string | null;
+            /** Thema */
+            thema?: string | null;
+            /** Typ */
+            typ?: string | null;
+            /** Update Frequency */
+            update_frequency?: string | null;
         };
         /**
          * SpanNameCount
@@ -13920,6 +14269,311 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserSettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_expectations_api_source_registry_expectations_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceExpectationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_expectation_api_source_registry_expectations_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceExpectationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceExpectationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_expectation_api_source_registry_expectations__expectation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                expectation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_expectation_api_source_registry_expectations__expectation_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                expectation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceExpectationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceExpectationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_gap_runs_api_source_registry_gap_runs_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapRunSummaryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_gap_run_api_source_registry_gap_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GapRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapRunCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_gap_run_api_source_registry_gap_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_gap_run_report_api_source_registry_gap_runs__run_id__report_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_csv_api_source_registry_import_csv_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CsvImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CsvImportResponse"];
                 };
             };
             /** @description Validation Error */
