@@ -5482,6 +5482,7 @@ export interface components {
             pass_rate: number;
             /** Passed */
             passed: number;
+            recall_summary?: components["schemas"]["RecallSummary"] | null;
             /** Skipped */
             skipped: number;
             /** Total */
@@ -6623,6 +6624,15 @@ export interface components {
              * @default 0
              */
             synced: number;
+        };
+        /** RecallSummary */
+        RecallSummary: {
+            /** Count */
+            count: number;
+            /** Recall At K */
+            recall_at_k: {
+                [key: string]: number;
+            };
         };
         /** RefreshRequest */
         RefreshRequest: {

@@ -17,6 +17,7 @@ import httpx
 from app.models.models import Evaluator, TestCase
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
 from app.services.retrieval_config import extract_retrieved_urls
+from app.services.retrieval_metrics import compute_recall_at_k
 
 
 def _resolve_dot_path(data: Any, path: str) -> Any:
@@ -221,15 +222,19 @@ def _run_deterministic(
         passed = len(missing) == 0
         reason = "All expected URLs found" if passed else f"Missing URLs: {', '.join(missing)}"
         retrieved = extract_retrieved_urls(context or output_text, payload_key=payload_key)
+        details = {
+            "found_urls": found_urls,
+            "missing_urls": missing,
+            "retrieved_urls": retrieved,
+        }
+        recall = compute_recall_at_k(expected_urls, retrieved)
+        if recall is not None:
+            details["recall_at_k"] = recall
         return {
             "pass": passed,
             "reason": reason,
             "skipped": False,
-            "details": {
-                "found_urls": found_urls,
-                "missing_urls": missing,
-                "retrieved_urls": retrieved,
-            },
+            "details": details,
         }
 
     if check_type == "contains_sources":

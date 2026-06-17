@@ -41,6 +41,8 @@ def _compute_summaries(
     """Compute grader_summary and score_summary from result list."""
     grader_counts: dict[str, dict] = {}
     score_accum: dict[str, list[float]] = {}
+    # grader name -> k -> per-result recall@k values, for the macro-average rollup
+    recall_accum: dict[str, dict[str, list[float]]] = {}
 
     for r in results:
         graders = r.graders if hasattr(r, "graders") else r.get("graders", {})
@@ -59,6 +61,16 @@ def _compute_summaries(
             else:
                 grader_counts[name]["failed"] += 1
 
+            details = g.details if hasattr(g, "details") else g.get("details")
+            recall = details.get("recall_at_k") if isinstance(details, dict) else None
+            if isinstance(recall, dict):
+                per_k = recall_accum.setdefault(name, {})
+                for k, v in recall.items():
+                    try:
+                        per_k.setdefault(k, []).append(float(v))
+                    except (TypeError, ValueError):
+                        continue
+
         for name, val in scores.items():
             if name not in score_accum:
                 score_accum[name] = []
@@ -74,6 +86,12 @@ def _compute_summaries(
             "skipped": c["skipped"],
             "pass_rate": c["passed"] / evaluated if evaluated > 0 else 0.0,
         }
+        per_k = recall_accum.get(name)
+        if per_k:
+            grader_summary[name]["recall_summary"] = {
+                "count": max(len(vals) for vals in per_k.values()),
+                "recall_at_k": {k: sum(vals) / len(vals) for k, vals in per_k.items()},
+            }
 
     score_summary = {}
     for name, vals in score_accum.items():

@@ -46,12 +46,18 @@ class EvalImportRequest(BaseModel):
 
 # --- Response schemas ---
 
+class RecallSummary(BaseModel):
+    count: int
+    recall_at_k: dict[str, float]
+
+
 class GraderSummaryItem(BaseModel):
     total: int
     passed: int
     failed: int
     skipped: int
     pass_rate: float
+    recall_summary: RecallSummary | None = None
 
 
 class ScoreSummaryItem(BaseModel):

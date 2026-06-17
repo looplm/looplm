@@ -125,6 +125,15 @@ def test_contains_urls_includes_retrieved_urls_in_details():
         "https://a.example/p1",
         "https://c.example/other",
     ]
+    # One of two expected URLs retrieved → recall 0.5 at every k.
+    assert result["details"]["recall_at_k"] == {"5": 0.5, "10": 0.5}
+
+
+def test_contains_urls_skips_recall_when_no_expected():
+    tc = TestCase(expected_page_urls=[])
+    result = _run_deterministic(_contains_urls_evaluator(), "x", tc, context="{}")
+    assert result["skipped"] is True
+    assert "details" not in result
 
 
 @pytest.mark.asyncio
