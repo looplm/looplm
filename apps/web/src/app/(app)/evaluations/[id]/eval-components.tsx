@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { addExpectedUrls } from "@/lib/api";
 import { splitSegments, sentenceFoundIn } from "./eval-utils";
 
 /** Copy text to clipboard and show a toast */
@@ -127,11 +128,64 @@ export function UrlDetails({
   found,
   missing,
   retrieved = [],
+  datasetId,
+  testId,
+  canEdit = false,
 }: {
   found: string[];
   missing: string[];
   retrieved?: string[];
+  datasetId?: string;
+  testId?: string;
+  canEdit?: boolean;
 }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [added, setAdded] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  // Selecting retrieved URLs to promote into the test case's expected URLs is
+  // only possible when we know the dataset + test case and the user can write.
+  const canSelect = canEdit && !!datasetId && !!testId;
+  const expectedSet = new Set([...found, ...missing, ...added]);
+  const selectableUrls = canSelect ? retrieved.filter((u) => !expectedSet.has(u)) : [];
+  const allSelected = selectableUrls.length > 0 && selectableUrls.every((u) => selected.has(u));
+
+  function toggle(url: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(url)) next.delete(url);
+      else next.add(url);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected((prev) => {
+      if (allSelected) {
+        const next = new Set(prev);
+        selectableUrls.forEach((u) => next.delete(u));
+        return next;
+      }
+      return new Set([...prev, ...selectableUrls]);
+    });
+  }
+
+  async function addSelected() {
+    if (!datasetId || !testId || selected.size === 0) return;
+    const urls = [...selected];
+    setSaving(true);
+    try {
+      await addExpectedUrls(datasetId, testId, urls);
+      setAdded((prev) => [...prev, ...urls]);
+      setSelected(new Set());
+      toast.success(`Added ${urls.length} URL${urls.length === 1 ? "" : "s"} to expected URLs`);
+    } catch {
+      toast.error("Failed to add URLs to expected URLs");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="text-sm space-y-1.5 mt-1">
       {found.length > 0 && (
@@ -141,9 +195,7 @@ export function UrlDetails({
           </span>
           <ul className="mt-0.5 space-y-0.5">
             {found.map((url) => (
-              <li key={url} className="text-gray-500 dark:text-slate-400 truncate" title={url}>
-                {url}
-              </li>
+              <UrlListItem key={url} url={url} />
             ))}
           </ul>
         </div>
@@ -155,28 +207,121 @@ export function UrlDetails({
           </span>
           <ul className="mt-0.5 space-y-0.5">
             {missing.map((url) => (
-              <li key={url} className="text-gray-500 dark:text-slate-400 truncate" title={url}>
-                {url}
-              </li>
+              <UrlListItem key={url} url={url} />
             ))}
           </ul>
         </div>
       )}
       {retrieved.length > 0 && (
         <div>
-          <span className="text-gray-600 dark:text-slate-300 font-medium">
-            Retrieved ({retrieved.length})
-          </span>
-          <ul className="mt-0.5 space-y-0.5">
-            {retrieved.map((url) => (
-              <li key={url} className="text-gray-500 dark:text-slate-400 truncate" title={url}>
-                {url}
-              </li>
-            ))}
-          </ul>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-gray-600 dark:text-slate-300 font-medium">
+              Retrieved ({retrieved.length})
+            </span>
+            {canSelect && selectableUrls.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  className="shrink-0 text-xs text-indigo-500 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
+                >
+                  {allSelected ? "Unselect all" : `Select all (${selectableUrls.length})`}
+                </button>
+                {selected.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={addSelected}
+                    disabled={saving}
+                    className="shrink-0 text-xs px-2 py-0.5 rounded bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white font-medium"
+                  >
+                    {saving ? "Adding…" : `Add ${selected.size} to expected`}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-gray-400 dark:text-slate-500">
+            In retrieval order (1 = top-ranked)
+            {canSelect ? " · select to add to expected URLs" : ""}
+          </p>
+          <ol className="mt-0.5 space-y-0.5">
+            {retrieved.map((url, i) => {
+              const isExpected = expectedSet.has(url);
+              return (
+                <UrlListItem
+                  key={url}
+                  url={url}
+                  rank={i + 1}
+                  showCheckbox={canSelect}
+                  selectable={canSelect && !isExpected}
+                  selected={selected.has(url)}
+                  onToggle={() => toggle(url)}
+                  expected={isExpected}
+                />
+              );
+            })}
+          </ol>
         </div>
       )}
     </div>
+  );
+}
+
+/** A single URL rendered as a link that opens in a new tab, with an optional rank, checkbox, and "expected" badge. */
+function UrlListItem({
+  url,
+  rank,
+  showCheckbox = false,
+  selectable = false,
+  selected = false,
+  onToggle,
+  expected = false,
+}: {
+  url: string;
+  rank?: number;
+  showCheckbox?: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggle?: () => void;
+  expected?: boolean;
+}) {
+  return (
+    <li className="flex items-baseline gap-2 min-w-0">
+      {showCheckbox &&
+        (selectable ? (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggle}
+            className="shrink-0 self-center accent-indigo-500 cursor-pointer"
+            title="Add to expected URLs"
+          />
+        ) : (
+          <span className="shrink-0 w-[13px]" aria-hidden />
+        ))}
+      {rank !== undefined && (
+        <span className="shrink-0 text-xs tabular-nums text-gray-400 dark:text-slate-500 w-5 text-right">
+          {rank}.
+        </span>
+      )}
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={url}
+        className="text-blue-600 dark:text-blue-400 hover:underline truncate"
+      >
+        {url}
+      </a>
+      {expected && (
+        <span
+          className="shrink-0 text-xs text-green-600 dark:text-green-400"
+          title="Already in expected URLs"
+        >
+          ✓ expected
+        </span>
+      )}
+    </li>
   );
 }
 

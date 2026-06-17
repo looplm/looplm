@@ -40,11 +40,17 @@ export function GraderResultCard({
   grader: g,
   evaluatorMap,
   disabledGraders,
+  datasetId,
+  testId,
+  canEdit,
 }: {
   name: string;
   grader: EvalGraderResult;
   evaluatorMap: Record<string, EvaluatorItem>;
   disabledGraders: Set<string>;
+  datasetId?: string;
+  testId?: string;
+  canEdit?: boolean;
 }) {
   const meta = evaluatorMap[name];
   const isCriticalFail = !g.pass && !g.skipped && meta?.affects_pass;
@@ -92,6 +98,9 @@ export function GraderResultCard({
           found={(g.details.found_urls ?? []) as string[]}
           missing={(g.details.missing_urls ?? []) as string[]}
           retrieved={(g.details.retrieved_urls ?? []) as string[]}
+          datasetId={datasetId}
+          testId={testId}
+          canEdit={canEdit}
         />
       ) : (
         g.reason ? <ClampedText text={g.reason} /> : null

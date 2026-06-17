@@ -57,6 +57,13 @@ export const updateTestCase = (datasetId: string, caseId: string, body: TestCase
 export const deleteTestCase = (datasetId: string, caseId: string) =>
   request<void>(`/api/datasets/${datasetId}/cases/${caseId}`, { method: "DELETE" });
 
+/** Append URLs to a test case's expected_page_urls (deduped server-side), keyed by test_id. */
+export const addExpectedUrls = (datasetId: string, testId: string, urls: string[]) =>
+  request<TestCaseItem>(`/api/datasets/${datasetId}/cases/expected-urls`, {
+    method: "POST",
+    body: JSON.stringify({ test_id: testId, urls }),
+  });
+
 export const exportDataset = (id: string) =>
   request<TestDatasetExport>(`/api/datasets/${id}/export`);
 

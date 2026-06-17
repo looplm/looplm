@@ -12,7 +12,13 @@ from app.auth import get_current_project, require_write
 from app.db import get_db
 from app.models.models import TestCase, TestDataset
 from app.models.project import Project
-from app.schemas.datasets import TestCaseCreate, TestCaseItem, TestCaseUpdate
+from app.schemas.datasets import (
+    ExpectedUrlsAdd,
+    TestCaseCreate,
+    TestCaseItem,
+    TestCaseUpdate,
+)
+from app.services.failure_pattern import normalize_result_test_id
 
 from .dataset_helpers import _tc_to_item
 
@@ -113,6 +119,50 @@ async def update_test_case(
             tc.test_case_metadata = value
         else:
             setattr(tc, field, value)
+
+    await db.flush()
+    await db.refresh(tc)
+    return _tc_to_item(tc)
+
+
+@router.post(
+    "/{dataset_id}/cases/expected-urls",
+    response_model=TestCaseItem,
+    dependencies=[require_write("evaluate", "datasets")],
+)
+async def add_expected_urls(
+    dataset_id: UUID,
+    body: ExpectedUrlsAdd,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Append URLs to a test case's ``expected_page_urls`` (deduped, order-preserving).
+
+    Looked up by ``test_id`` (variant suffix stripped) so the eval results view can
+    promote retrieved source URLs without knowing the test case's UUID.
+    """
+    ds_result = await db.execute(
+        select(TestDataset).where(TestDataset.id == dataset_id, TestDataset.project_id == project.id)
+    )
+    if not ds_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found"}})
+
+    test_id = normalize_result_test_id(body.test_id)
+    result = await db.execute(
+        select(TestCase).where(TestCase.dataset_id == dataset_id, TestCase.test_id == test_id)
+    )
+    tc = result.scalars().first()
+    if not tc:
+        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Test case not found"}})
+
+    merged = list(tc.expected_page_urls or [])
+    seen = set(merged)
+    for url in body.urls:
+        url = url.strip()
+        if url and url not in seen:
+            merged.append(url)
+            seen.add(url)
+    tc.expected_page_urls = merged
 
     await db.flush()
     await db.refresh(tc)

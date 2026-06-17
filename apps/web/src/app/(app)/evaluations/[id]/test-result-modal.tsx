@@ -5,6 +5,7 @@ import type { EvalResultItem, EvaluatorItem, ConversationTurn, RootCauseDetail, 
 import { sortGraderEntries, sortGraderDetails, formatScoreValue, formatScoreLabel, rootCauseStyle } from "./eval-utils";
 import { ExpectedOutputDiff, Section, ExpandableBox, CopyButton } from "./eval-components";
 import { GraderResultCard } from "./grader-result-card";
+import { usePermissions } from "@/components/permissions-context";
 
 interface TestResultModalProps {
   result: EvalResultItem;
@@ -33,7 +34,18 @@ export function TestResultModal({
 }: TestResultModalProps) {
   const [expanded, setExpanded] = useState(true);
   const [showPassed, setShowPassed] = useState(false);
+  const { canWrite } = usePermissions();
   const conversationHistory: ConversationTurn[] = (result.metadata?.conversation_history as ConversationTurn[]) || [];
+
+  // Dataset the result's test case belongs to — needed to promote retrieved URLs
+  // into the test case's expected URLs. Per-result (new triggered runs), falling
+  // back to the run-level dataset_ids.
+  const datasetId = typeof result.metadata?.dataset_id === "string"
+    ? (result.metadata.dataset_id as string)
+    : Array.isArray(runMetadata?.dataset_ids) && (runMetadata!.dataset_ids as string[]).length > 0
+      ? (runMetadata!.dataset_ids as string[])[0]
+      : undefined;
+  const canEditExpectedUrls = canWrite("datasets");
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -94,12 +106,6 @@ export function TestResultModal({
               {/* Navigation links */}
               {(() => {
                 const hasTrace = typeof result.metadata?.trace_id === "string";
-                // dataset_id per-result (new triggered runs), or fall back to run-level dataset_ids
-                const datasetId = typeof result.metadata?.dataset_id === "string"
-                  ? result.metadata.dataset_id as string
-                  : Array.isArray(runMetadata?.dataset_ids) && (runMetadata!.dataset_ids as string[]).length > 0
-                    ? (runMetadata!.dataset_ids as string[])[0]
-                    : null;
                 if (!hasTrace && !datasetId) return null;
                 return (
                   <div className="flex items-center gap-3 ml-2">
@@ -400,6 +406,9 @@ export function TestResultModal({
                               grader={g}
                               evaluatorMap={evaluatorMap}
                               disabledGraders={disabledGraders}
+                              datasetId={datasetId}
+                              testId={result.test_id}
+                              canEdit={canEditExpectedUrls}
                             />
                           ))}
                         </div>
@@ -420,6 +429,9 @@ export function TestResultModal({
                               grader={g}
                               evaluatorMap={evaluatorMap}
                               disabledGraders={disabledGraders}
+                              datasetId={datasetId}
+                              testId={result.test_id}
+                              canEdit={canEditExpectedUrls}
                             />
                           ))}
                         </div>

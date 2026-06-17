@@ -89,6 +89,18 @@ class TestCaseUpdate(BaseModel):
     status_note: Optional[str] = None
 
 
+class ExpectedUrlsAdd(BaseModel):
+    """Append URLs to a test case's expected_page_urls, keyed by its test_id.
+
+    Used by the eval results view to promote retrieved source URLs into the
+    expected set. ``test_id`` may carry the executor's ``[filtered]``/
+    ``[unfiltered]`` variant suffix; the router strips it before lookup.
+    """
+
+    test_id: str = Field(min_length=1, max_length=300)
+    urls: list[str] = Field(min_length=1)
+
+
 class TestCaseItem(BaseModel):
     id: UUID
     dataset_id: UUID
