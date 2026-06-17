@@ -551,6 +551,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/datasets/{dataset_id}/cases/expected-urls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Expected Urls
+         * @description Return a test case's current ``expected_page_urls``, looked up by ``test_id``.
+         *
+         *     Lets the eval results view mark retrieved URLs that have since been promoted
+         *     into the expected set (the run's own snapshot only reflects what was expected
+         *     when it ran). ``test_id`` may carry the executor's variant suffix.
+         */
+        get: operations["get_expected_urls_api_datasets__dataset_id__cases_expected_urls_get"];
+        put?: never;
+        /**
+         * Add Expected Urls
+         * @description Append URLs to a test case's ``expected_page_urls`` (deduped, order-preserving).
+         *
+         *     Looked up by ``test_id`` (variant suffix stripped) so the eval results view can
+         *     promote retrieved source URLs without knowing the test case's UUID.
+         */
+        post: operations["add_expected_urls_api_datasets__dataset_id__cases_expected_urls_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/datasets/{dataset_id}/cases/from-suggestion": {
         parameters: {
             query?: never;
@@ -4788,6 +4819,30 @@ export interface components {
              */
             total: number;
         };
+        /**
+         * ExpectedUrlsAdd
+         * @description Append URLs to a test case's expected_page_urls, keyed by its test_id.
+         *
+         *     Used by the eval results view to promote retrieved source URLs into the
+         *     expected set. ``test_id`` may carry the executor's ``[filtered]``/
+         *     ``[unfiltered]`` variant suffix; the router strips it before lookup.
+         */
+        ExpectedUrlsAdd: {
+            /** Test Id */
+            test_id: string;
+            /** Urls */
+            urls: string[];
+        };
+        /**
+         * ExpectedUrlsResponse
+         * @description A test case's current expected_page_urls, looked up by test_id.
+         */
+        ExpectedUrlsResponse: {
+            /** Expected Page Urls */
+            expected_page_urls: string[];
+            /** Test Id */
+            test_id: string;
+        };
         /** ExperimentCreate */
         ExperimentCreate: {
             /** Description */
@@ -5478,10 +5533,12 @@ export interface components {
         GraderSummaryItem: {
             /** Failed */
             failed: number;
+            hit_rate_summary?: components["schemas"]["HitRateSummary"] | null;
             /** Pass Rate */
             pass_rate: number;
             /** Passed */
             passed: number;
+            precision_summary?: components["schemas"]["PrecisionSummary"] | null;
             recall_summary?: components["schemas"]["RecallSummary"] | null;
             /** Skipped */
             skipped: number;
@@ -5517,6 +5574,15 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HitRateSummary */
+        HitRateSummary: {
+            /** Count */
+            count: number;
+            /** Hit Rate At K */
+            hit_rate_at_k: {
+                [key: string]: number;
+            };
         };
         /**
          * ImpactLevel
@@ -6388,6 +6454,15 @@ export interface components {
             note?: string | null;
             /** Role */
             role?: string | null;
+        };
+        /** PrecisionSummary */
+        PrecisionSummary: {
+            /** Count */
+            count: number;
+            /** Precision At K */
+            precision_at_k: {
+                [key: string]: number;
+            };
         };
         /** ProjectCreate */
         ProjectCreate: {
@@ -9438,6 +9513,78 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestCaseItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_expected_urls_api_datasets__dataset_id__cases_expected_urls_get: {
+        parameters: {
+            query: {
+                test_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpectedUrlsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_expected_urls_api_datasets__dataset_id__cases_expected_urls_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedUrlsAdd"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

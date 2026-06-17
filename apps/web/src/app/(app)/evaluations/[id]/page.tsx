@@ -17,7 +17,7 @@ import {
   type EvaluatorItem,
 } from "@/lib/api";
 import { StatCard } from "@/components/eval-shared";
-import { recomputePass, passRateTextColor, graderDisplayName, formatScoreValue, formatScoreLabel, rootCauseStyle } from "./eval-utils";
+import { recomputePass, passRateTextColor, graderDisplayName, formatScoreValue, formatScoreLabel, rootCauseStyle, retrievalMetricBadges } from "./eval-utils";
 import { EvalResultsTable } from "./eval-results-table";
 import { TestResultModal } from "./test-result-modal";
 import { CodeSuggestionsTab } from "./code-suggestions-tab";
@@ -406,17 +406,15 @@ export default function EvalRunDetailPage() {
                       {meta.source === "ragas" ? "RAGAS" : meta.source === "langfuse" ? "Langfuse" : "Custom"}
                     </span>
                   )}
-                  {enabled && summary.recall_summary && (
+                  {enabled && retrievalMetricBadges(summary).map(({ label, text, title }) => (
                     <span
+                      key={label}
                       className="text-sm font-medium text-indigo-600 dark:text-indigo-400"
-                      title={`Mean recall@k across ${summary.recall_summary.count} test case${summary.recall_summary.count === 1 ? "" : "s"}`}
+                      title={title}
                     >
-                      {Object.entries(summary.recall_summary.recall_at_k)
-                        .sort(([a], [b]) => Number(a) - Number(b))
-                        .map(([k, v]) => `R@${k} ${(v * 100).toFixed(0)}%`)
-                        .join(" · ")}
+                      {text}
                     </span>
-                  )}
+                  ))}
                 </button>
               );
             };

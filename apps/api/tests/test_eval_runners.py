@@ -127,6 +127,9 @@ def test_contains_urls_includes_retrieved_urls_in_details():
     ]
     # One of two expected URLs retrieved → recall 0.5 at every k.
     assert result["details"]["recall_at_k"] == {"5": 0.5, "10": 0.5}
+    # One relevant URL inside the top-k slice (cutoff k), one relevant hit present.
+    assert result["details"]["precision_at_k"] == {"5": 0.2, "10": 0.1}
+    assert result["details"]["hit_rate_at_k"] == {"5": 1.0, "10": 1.0}
 
 
 def test_contains_urls_skips_recall_when_no_expected():

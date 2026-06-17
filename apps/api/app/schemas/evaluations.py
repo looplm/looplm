@@ -51,13 +51,27 @@ class RecallSummary(BaseModel):
     recall_at_k: dict[str, float]
 
 
+class PrecisionSummary(BaseModel):
+    count: int
+    precision_at_k: dict[str, float]
+
+
+class HitRateSummary(BaseModel):
+    count: int
+    hit_rate_at_k: dict[str, float]
+
+
 class GraderSummaryItem(BaseModel):
     total: int
     passed: int
     failed: int
     skipped: int
     pass_rate: float
+    # Macro-averaged retrieval metrics across the run's test cases (deterministic,
+    # no LLM). Present only for source-retrieval graders with expected URLs.
     recall_summary: RecallSummary | None = None
+    precision_summary: PrecisionSummary | None = None
+    hit_rate_summary: HitRateSummary | None = None
 
 
 class ScoreSummaryItem(BaseModel):

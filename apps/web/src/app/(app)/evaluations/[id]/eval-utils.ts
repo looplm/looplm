@@ -1,4 +1,29 @@
-import type { EvalGraderResult, EvaluatorItem, GraderResultSummary } from "@/lib/api";
+import type { EvalGraderResult, EvaluatorItem, GraderResultSummary, GraderSummaryItem } from "@/lib/api";
+
+/**
+ * Compact run-level retrieval-metric badges (recall/precision/hit-rate @k) for a
+ * grader summary. Each metric is a deterministic macro-average across the run's
+ * test cases; only metrics actually present on the summary are returned.
+ */
+export function retrievalMetricBadges(
+  summary: GraderSummaryItem,
+): { label: string; text: string; title: string }[] {
+  const specs = [
+    { label: "R", name: "recall", at_k: summary.recall_summary?.recall_at_k, count: summary.recall_summary?.count },
+    { label: "P", name: "precision", at_k: summary.precision_summary?.precision_at_k, count: summary.precision_summary?.count },
+    { label: "Hit", name: "hit-rate", at_k: summary.hit_rate_summary?.hit_rate_at_k, count: summary.hit_rate_summary?.count },
+  ];
+  return specs
+    .filter((s): s is typeof s & { at_k: Record<string, number>; count: number } => !!s.at_k)
+    .map((s) => ({
+      label: s.label,
+      text: Object.entries(s.at_k)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([k, v]) => `${s.label}@${k} ${(v * 100).toFixed(0)}%`)
+        .join(" · "),
+      title: `Mean ${s.name}@k across ${s.count} test case${s.count === 1 ? "" : "s"}`,
+    }));
+}
 
 type ResultLike = {
   pass: boolean;

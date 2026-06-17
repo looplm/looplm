@@ -1,8 +1,12 @@
-"""Tests for retrieval-quality metrics (recall@k)."""
+"""Tests for retrieval-quality metrics (recall@k, precision@k, hit-rate@k)."""
 
 from __future__ import annotations
 
-from app.services.retrieval_metrics import compute_recall_at_k
+from app.services.retrieval_metrics import (
+    compute_hit_rate_at_k,
+    compute_precision_at_k,
+    compute_recall_at_k,
+)
 
 
 def test_recall_full_hit():
@@ -51,3 +55,52 @@ def test_recall_custom_ks():
     expected = ["https://a.example/p1"]
     retrieved = ["https://a.example/p1"]
     assert compute_recall_at_k(expected, retrieved, ks=(1, 3)) == {"1": 1.0, "3": 1.0}
+
+
+# --- precision@k ---
+
+def test_precision_divides_by_cutoff_not_retrieved_count():
+    expected = ["https://a.example/p1", "https://b.example/p2"]
+    retrieved = ["https://a.example/p1", "https://b.example/p2"]
+    # Both retrieved URLs are relevant, but precision@5 divides by the cutoff (5),
+    # so two hits in five slots is 0.4 — returning fewer than k still dilutes it.
+    assert compute_precision_at_k(expected, retrieved) == {"5": 0.4, "10": 0.2}
+
+
+def test_precision_counts_only_relevant_in_top_k():
+    expected = ["https://a.example/p1"]
+    retrieved = ["https://a.example/p1"] + [f"https://x.example/{i}" for i in range(4)]
+    # 1 relevant in top-5 -> 0.2; same single hit over top-10 -> 0.1.
+    assert compute_precision_at_k(expected, retrieved, ks=(5, 10)) == {"5": 0.2, "10": 0.1}
+
+
+def test_precision_empty_expected_returns_none():
+    assert compute_precision_at_k([], ["https://a.example/p1"]) is None
+
+
+def test_precision_empty_retrieved_is_zero():
+    assert compute_precision_at_k(["https://a.example/p1"], []) == {"5": 0.0, "10": 0.0}
+
+
+# --- hit-rate@k ---
+
+def test_hit_rate_is_binary_per_k():
+    expected = ["https://hit.example/p"]
+    # Only relevant URL sits at rank 6: miss within top-5, hit within top-10.
+    retrieved = [f"https://miss.example/{i}" for i in range(5)] + ["https://hit.example/p"]
+    assert compute_hit_rate_at_k(expected, retrieved) == {"5": 0.0, "10": 1.0}
+
+
+def test_hit_rate_one_when_any_relevant_present():
+    expected = ["https://a.example/p1", "https://b.example/p2"]
+    retrieved = ["https://a.example/p1"]
+    # A single relevant hit is enough for hit-rate, even though recall would be 0.5.
+    assert compute_hit_rate_at_k(expected, retrieved) == {"5": 1.0, "10": 1.0}
+
+
+def test_hit_rate_empty_expected_returns_none():
+    assert compute_hit_rate_at_k([], ["https://a.example/p1"]) is None
+
+
+def test_hit_rate_empty_retrieved_is_zero():
+    assert compute_hit_rate_at_k(["https://a.example/p1"], []) == {"5": 0.0, "10": 0.0}

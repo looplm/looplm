@@ -25,6 +25,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Retrieval metrics rolled up from per-result grader details into run-level
+# summaries. Each entry is (metric name, the key it's stored under in
+# ``grader.details``); the summary field is ``f"{metric}_summary"`` and reuses the
+# same details key for its at-k map (see ``_compute_summaries``).
+_RETRIEVAL_METRICS: tuple[tuple[str, str], ...] = (
+    ("recall", "recall_at_k"),
+    ("precision", "precision_at_k"),
+    ("hit_rate", "hit_rate_at_k"),
+)
+
 
 def _get_eval_endpoint(project: Project) -> str | None:
     """Return target API endpoint from project settings, falling back to env var."""
@@ -41,8 +51,9 @@ def _compute_summaries(
     """Compute grader_summary and score_summary from result list."""
     grader_counts: dict[str, dict] = {}
     score_accum: dict[str, list[float]] = {}
-    # grader name -> k -> per-result recall@k values, for the macro-average rollup
-    recall_accum: dict[str, dict[str, list[float]]] = {}
+    # grader name -> metric ("recall"/"precision"/"hit_rate") -> k -> per-result
+    # values, for the macro-average rollup of each retrieval metric.
+    metric_accum: dict[str, dict[str, dict[str, list[float]]]] = {}
 
     for r in results:
         graders = r.graders if hasattr(r, "graders") else r.get("graders", {})
@@ -62,14 +73,17 @@ def _compute_summaries(
                 grader_counts[name]["failed"] += 1
 
             details = g.details if hasattr(g, "details") else g.get("details")
-            recall = details.get("recall_at_k") if isinstance(details, dict) else None
-            if isinstance(recall, dict):
-                per_k = recall_accum.setdefault(name, {})
-                for k, v in recall.items():
-                    try:
-                        per_k.setdefault(k, []).append(float(v))
-                    except (TypeError, ValueError):
+            if isinstance(details, dict):
+                for metric, details_key in _RETRIEVAL_METRICS:
+                    at_k = details.get(details_key)
+                    if not isinstance(at_k, dict):
                         continue
+                    per_k = metric_accum.setdefault(name, {}).setdefault(metric, {})
+                    for k, v in at_k.items():
+                        try:
+                            per_k.setdefault(k, []).append(float(v))
+                        except (TypeError, ValueError):
+                            continue
 
         for name, val in scores.items():
             if name not in score_accum:
@@ -86,12 +100,13 @@ def _compute_summaries(
             "skipped": c["skipped"],
             "pass_rate": c["passed"] / evaluated if evaluated > 0 else 0.0,
         }
-        per_k = recall_accum.get(name)
-        if per_k:
-            grader_summary[name]["recall_summary"] = {
-                "count": max(len(vals) for vals in per_k.values()),
-                "recall_at_k": {k: sum(vals) / len(vals) for k, vals in per_k.items()},
-            }
+        for metric, details_key in _RETRIEVAL_METRICS:
+            per_k = metric_accum.get(name, {}).get(metric)
+            if per_k:
+                grader_summary[name][f"{metric}_summary"] = {
+                    "count": max(len(vals) for vals in per_k.values()),
+                    details_key: {k: sum(vals) / len(vals) for k, vals in per_k.items()},
+                }
 
     score_summary = {}
     for name, vals in score_accum.items():
