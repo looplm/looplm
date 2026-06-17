@@ -216,16 +216,15 @@ export default function DashboardPage() {
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6">
           <h2 className="text-lg font-semibold mb-4">
             Conversations
-            <Tooltip content="Signals derived from grouping traces into threads: multi-turn share, length, and whether users retried after a failure.">
+            <Tooltip content="Signals derived from grouping traces into threads: multi-turn share and length.">
               <InfoIcon />
             </Tooltip>
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             {[
               { label: "Multi-turn", value: `${(threads.multi_turn_rate * 100).toFixed(0)}%`, bar: threads.multi_turn_rate, barColor: "bg-indigo-500", tooltip: "Share of threads with more than one trace" },
               { label: "Avg length", value: threads.avg_thread_length.toFixed(1), tooltip: "Average traces per thread" },
               { label: "p95 length", value: String(threads.p95_thread_length), tooltip: "95% of threads are this many traces long or shorter; only the longest 5% have more." },
-              { label: "Retry rate", value: `${(threads.retry_rate * 100).toFixed(0)}%`, color: "text-amber-500", bar: threads.retry_rate, barColor: "bg-amber-500", tooltip: "Of threads that hit a failure, the share where the user continued (a retry)" },
             ].map((s) => (
               <div key={s.label}>
                 <p className="text-xs text-gray-500 dark:text-slate-400">
