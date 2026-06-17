@@ -14,6 +14,7 @@ from app.models.models import TestCase, TestDataset
 from app.models.project import Project
 from app.schemas.datasets import (
     ExpectedUrlsAdd,
+    ExpectedUrlsResponse,
     TestCaseCreate,
     TestCaseItem,
     TestCaseUpdate,
@@ -123,6 +124,39 @@ async def update_test_case(
     await db.flush()
     await db.refresh(tc)
     return _tc_to_item(tc)
+
+
+@router.get(
+    "/{dataset_id}/cases/expected-urls",
+    response_model=ExpectedUrlsResponse,
+)
+async def get_expected_urls(
+    dataset_id: UUID,
+    test_id: str,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Return a test case's current ``expected_page_urls``, looked up by ``test_id``.
+
+    Lets the eval results view mark retrieved URLs that have since been promoted
+    into the expected set (the run's own snapshot only reflects what was expected
+    when it ran). ``test_id`` may carry the executor's variant suffix.
+    """
+    ds_result = await db.execute(
+        select(TestDataset).where(TestDataset.id == dataset_id, TestDataset.project_id == project.id)
+    )
+    if not ds_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found"}})
+
+    normalized = normalize_result_test_id(test_id)
+    result = await db.execute(
+        select(TestCase).where(TestCase.dataset_id == dataset_id, TestCase.test_id == normalized)
+    )
+    tc = result.scalars().first()
+    if not tc:
+        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Test case not found"}})
+
+    return ExpectedUrlsResponse(test_id=tc.test_id, expected_page_urls=tc.expected_page_urls or [])
 
 
 @router.post(

@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { addExpectedUrls } from "@/lib/api";
+import { addExpectedUrls, getExpectedUrls } from "@/lib/api";
 import { splitSegments, sentenceFoundIn } from "./eval-utils";
 
 /** Copy text to clipboard and show a toast */
@@ -142,12 +142,40 @@ export function UrlDetails({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [added, setAdded] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // The test case's *current* expected URLs (may differ from this run's snapshot
+  // if URLs were promoted after the run). Null until fetched / when unavailable.
+  const [currentExpected, setCurrentExpected] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    if (!datasetId || !testId || retrieved.length === 0) return;
+    let cancelled = false;
+    getExpectedUrls(datasetId, testId)
+      .then((r) => {
+        if (!cancelled) setCurrentExpected(r.expected_page_urls);
+      })
+      .catch(() => {
+        /* non-critical: fall back to this run's expected snapshot */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [datasetId, testId, retrieved.length]);
 
   // Selecting retrieved URLs to promote into the test case's expected URLs is
   // only possible when we know the dataset + test case and the user can write.
   const canSelect = canEdit && !!datasetId && !!testId;
-  const expectedSet = new Set([...found, ...missing, ...added]);
-  const selectableUrls = canSelect ? retrieved.filter((u) => !expectedSet.has(u)) : [];
+  // Expected at run time (this run's grader snapshot) vs. expected now (current
+  // test case, plus anything added this session). A retrieved URL is "run" if it
+  // was already expected when the run executed, "added" if it joined the expected
+  // set afterwards, otherwise it's a candidate to promote.
+  const runExpectedSet = new Set([...found, ...missing]);
+  const currentExpectedSet = new Set([...(currentExpected ?? []), ...added]);
+  function expectedKindFor(url: string): "run" | "added" | undefined {
+    if (runExpectedSet.has(url)) return "run";
+    if (currentExpectedSet.has(url)) return "added";
+    return undefined;
+  }
+  const selectableUrls = canSelect ? retrieved.filter((u) => !expectedKindFor(u)) : [];
   const allSelected = selectableUrls.length > 0 && selectableUrls.every((u) => selected.has(u));
 
   function toggle(url: string) {
@@ -246,17 +274,17 @@ export function UrlDetails({
           </p>
           <ol className="mt-0.5 space-y-0.5">
             {retrieved.map((url, i) => {
-              const isExpected = expectedSet.has(url);
+              const kind = expectedKindFor(url);
               return (
                 <UrlListItem
                   key={url}
                   url={url}
                   rank={i + 1}
                   showCheckbox={canSelect}
-                  selectable={canSelect && !isExpected}
+                  selectable={canSelect && !kind}
                   selected={selected.has(url)}
                   onToggle={() => toggle(url)}
-                  expected={isExpected}
+                  expectedKind={kind}
                 />
               );
             })}
@@ -275,7 +303,7 @@ function UrlListItem({
   selectable = false,
   selected = false,
   onToggle,
-  expected = false,
+  expectedKind,
 }: {
   url: string;
   rank?: number;
@@ -283,7 +311,8 @@ function UrlListItem({
   selectable?: boolean;
   selected?: boolean;
   onToggle?: () => void;
-  expected?: boolean;
+  // "run": expected when this run executed; "added": promoted into expected since the run.
+  expectedKind?: "run" | "added";
 }) {
   return (
     <li className="flex items-baseline gap-2 min-w-0">
@@ -313,12 +342,20 @@ function UrlListItem({
       >
         {url}
       </a>
-      {expected && (
+      {expectedKind === "run" && (
         <span
           className="shrink-0 text-xs text-green-600 dark:text-green-400"
-          title="Already in expected URLs"
+          title="Was in expected URLs when this run executed"
         >
           ✓ expected
+        </span>
+      )}
+      {expectedKind === "added" && (
+        <span
+          className="shrink-0 text-xs text-indigo-600 dark:text-indigo-400"
+          title="Added to expected URLs since this run — re-run to regrade"
+        >
+          + added to expected
         </span>
       )}
     </li>

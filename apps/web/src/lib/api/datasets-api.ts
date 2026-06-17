@@ -57,6 +57,18 @@ export const updateTestCase = (datasetId: string, caseId: string, body: TestCase
 export const deleteTestCase = (datasetId: string, caseId: string) =>
   request<void>(`/api/datasets/${datasetId}/cases/${caseId}`, { method: "DELETE" });
 
+/** A test case's current expected_page_urls, looked up by test_id. */
+export interface ExpectedUrlsResponse {
+  test_id: string;
+  expected_page_urls: string[];
+}
+
+/** Fetch a test case's current expected_page_urls, keyed by test_id (variant suffix tolerated). */
+export const getExpectedUrls = (datasetId: string, testId: string) =>
+  request<ExpectedUrlsResponse>(
+    `/api/datasets/${datasetId}/cases/expected-urls?test_id=${encodeURIComponent(testId)}`,
+  );
+
 /** Append URLs to a test case's expected_page_urls (deduped server-side), keyed by test_id. */
 export const addExpectedUrls = (datasetId: string, testId: string, urls: string[]) =>
   request<TestCaseItem>(`/api/datasets/${datasetId}/cases/expected-urls`, {

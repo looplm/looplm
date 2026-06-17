@@ -63,6 +63,46 @@ async def test_add_expected_urls_strips_variant_suffix(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_get_expected_urls_reflects_current_state(client, auth_headers):
+    dataset_id, _ = await _create_dataset_with_case(
+        client, auth_headers, expected_page_urls=["https://a.example/1"]
+    )
+
+    # Initial state
+    resp = await client.get(
+        f"/api/datasets/{dataset_id}/cases/expected-urls",
+        headers=auth_headers,
+        params={"test_id": "case-1 [unfiltered]"},  # variant suffix tolerated
+    )
+    assert resp.status_code == 200
+    assert resp.json()["expected_page_urls"] == ["https://a.example/1"]
+
+    # After a promote, GET reflects the merged set
+    await client.post(
+        f"/api/datasets/{dataset_id}/cases/expected-urls",
+        headers=auth_headers,
+        json={"test_id": "case-1", "urls": ["https://b.example/2"]},
+    )
+    resp = await client.get(
+        f"/api/datasets/{dataset_id}/cases/expected-urls",
+        headers=auth_headers,
+        params={"test_id": "case-1"},
+    )
+    assert resp.json()["expected_page_urls"] == ["https://a.example/1", "https://b.example/2"]
+
+
+@pytest.mark.asyncio
+async def test_get_expected_urls_unknown_test_id_404(client, auth_headers):
+    dataset_id, _ = await _create_dataset_with_case(client, auth_headers)
+    resp = await client.get(
+        f"/api/datasets/{dataset_id}/cases/expected-urls",
+        headers=auth_headers,
+        params={"test_id": "nope"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_add_expected_urls_unknown_test_id_404(client, auth_headers):
     dataset_id, _ = await _create_dataset_with_case(client, auth_headers)
 

@@ -101,6 +101,13 @@ class ExpectedUrlsAdd(BaseModel):
     urls: list[str] = Field(min_length=1)
 
 
+class ExpectedUrlsResponse(BaseModel):
+    """A test case's current expected_page_urls, looked up by test_id."""
+
+    test_id: str
+    expected_page_urls: list[str]
+
+
 class TestCaseItem(BaseModel):
     id: UUID
     dataset_id: UUID
