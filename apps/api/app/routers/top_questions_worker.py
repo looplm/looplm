@@ -295,6 +295,7 @@ async def run_top_questions_analysis(
                                 all_qs.append({
                                     "question": q["question"],
                                     "feedback_value": fv,
+                                    "trace_id": q.get("trace_id"),
                                 })
                                 if fv == 1:
                                     positive += 1
