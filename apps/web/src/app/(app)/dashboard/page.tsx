@@ -231,7 +231,7 @@ export default function DashboardPage() {
                   {s.label}
                   {s.tooltip && <Tooltip content={s.tooltip}><InfoIcon /></Tooltip>}
                 </p>
-                <p className={`text-2xl font-bold ${s.color || ""}`}>{s.value}</p>
+                <p className="text-2xl font-bold">{s.value}</p>
                 {s.bar !== undefined && (
                   <div className="mt-2 h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
                     <div className={`h-full rounded-full ${s.barColor}`} style={{ width: `${Math.min(s.bar, 1) * 100}%` }} />
