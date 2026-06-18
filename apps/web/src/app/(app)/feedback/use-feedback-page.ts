@@ -41,6 +41,7 @@ export function useFeedbackPage() {
   const [page, setPage] = useState(1);
   const [filterValue, setFilterValue] = useState<string>("all");
   const [filterVerdict, setFilterVerdict] = useState<string>("all");
+  const [selectedFeedbackIds, setSelectedFeedbackIds] = useState<Set<string>>(new Set());
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const globalFilters = useGlobalFilters();
@@ -346,21 +347,26 @@ export function useFeedbackPage() {
     }
   }, [page, filterValue, filterVerdict, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames, tab, evalCompleted]);
 
-  const loadSuggestions = useCallback(async () => {
+  const loadSuggestions = useCallback(async (idsOverride?: string[]) => {
     setSugLoading(true);
     try {
-      const params: Record<string, string> = {
-        feedback_type: sugFilter,
-        limit: "100",
-      };
-      if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
-      if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
-      if (globalFilters.environment && globalFilters.environment !== "all") {
-        params.environment = globalFilters.environment;
-      }
-      if (globalFilters.filteredUsers.length > 0) {
-        const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-        params[key] = globalFilters.filteredUsers.join(",");
+      const params: Record<string, string> = {};
+      if (idsOverride && idsOverride.length > 0) {
+        // Hand-picked feedback: the selection IS the filter, so the
+        // type/date/environment/user params are intentionally omitted.
+        params.selected_feedback_ids = idsOverride.join(",");
+      } else {
+        params.feedback_type = sugFilter;
+        params.limit = "100";
+        if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
+        if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
+        if (globalFilters.environment && globalFilters.environment !== "all") {
+          params.environment = globalFilters.environment;
+        }
+        if (globalFilters.filteredUsers.length > 0) {
+          const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
+          params[key] = globalFilters.filteredUsers.join(",");
+        }
       }
       const [run, dsData] = await Promise.all([
         generateSuggestions(params),
@@ -486,6 +492,35 @@ export function useFeedbackPage() {
     }
   }
 
+  const toggleFeedbackId = useCallback((id: string, checked: boolean) => {
+    setSelectedFeedbackIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const setPageSelection = useCallback((ids: string[], checked: boolean) => {
+    setSelectedFeedbackIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearSelectedFeedback = useCallback(() => setSelectedFeedbackIds(new Set()), []);
+
+  const handleGenerateFromSelected = useCallback(() => {
+    if (selectedFeedbackIds.size === 0) return;
+    const ids = Array.from(selectedFeedbackIds);
+    setTab("suggestions");
+    loadSuggestions(ids);
+  }, [selectedFeedbackIds, loadSuggestions]);
+
   useEffect(() => {
     if (tab === "suggestions") {
       loadLatestSuggestions();
@@ -572,6 +607,7 @@ export function useFeedbackPage() {
     page, setPage,
     filterValue, setFilterValue,
     filterVerdict, setFilterVerdict,
+    selectedFeedbackIds,
     hoveredBar, setHoveredBar,
     fileInputRef,
     suggestions,
@@ -613,5 +649,9 @@ export function useFeedbackPage() {
     handleStopFeedbackThemes,
     handleGenerateSuggestions: loadSuggestions,
     handleStopSuggestionRun,
+    toggleFeedbackId,
+    setPageSelection,
+    clearSelectedFeedback,
+    handleGenerateFromSelected,
   };
 }

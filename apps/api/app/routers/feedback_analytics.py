@@ -265,6 +265,7 @@ async def generate_suggestions(
     environment: str | None = None,
     include_user_ids: str | None = None,
     exclude_user_ids: str | None = None,
+    selected_feedback_ids: str | None = None,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
     _user: User = Depends(get_current_user),
@@ -274,6 +275,10 @@ async def generate_suggestions(
     Returns a run record the frontend can poll. Only feedback rows linked to a
     trace are considered. Honors the project's Observe trace-name filter and
     optional date/environment/user filters.
+
+    When ``selected_feedback_ids`` is given, only those feedback rows are used
+    and the date/environment/user/type filters and recency limit are skipped —
+    an explicit hand-pick takes precedence over the auto "most recent" path.
     """
     from app.db import async_session
     from app.models.feedback_eval import FeedbackSuggestionRun
@@ -294,6 +299,19 @@ async def generate_suggestions(
 
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
 
+    selected_ids: list[UUID] = []
+    if selected_feedback_ids:
+        raw_ids = [v.strip() for v in selected_feedback_ids.split(",") if v.strip()]
+        if len(raw_ids) > 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Too many selected feedback items (max 200).",
+            )
+        try:
+            selected_ids = [UUID(v) for v in raw_ids]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid feedback id in selection.")
+
     query = (
         select(FeedbackScore, Trace)
         .join(Trace, FeedbackScore.trace_id == Trace.id)
@@ -303,30 +321,37 @@ async def generate_suggestions(
         )
     )
 
-    if feedback_type == "positive":
-        query = query.where(FeedbackScore.value == 1)
-    elif feedback_type == "negative":
-        query = query.where(FeedbackScore.value == 0)
-
-    if from_date:
-        query = query.where(FeedbackScore.scored_at >= from_date)
-    if to_date:
-        query = query.where(FeedbackScore.scored_at <= to_date)
-    if environment:
-        query = query.where(Trace.trace_metadata["environment"].astext == environment)
-
-    inc_uids = [v.strip() for v in (include_user_ids or "").split(",") if v.strip()]
-    exc_uids = [v.strip() for v in (exclude_user_ids or "").split(",") if v.strip()]
-    if inc_uids:
-        query = query.where(Trace.user_id.in_(inc_uids))
-    if exc_uids:
-        query = query.where(~Trace.user_id.in_(exc_uids))
-
     observe_names = get_observe_trace_names(project)
     if observe_names:
         query = query.where(Trace.name.in_(observe_names))
 
-    query = query.order_by(FeedbackScore.scored_at.desc()).limit(limit)
+    inc_uids = [v.strip() for v in (include_user_ids or "").split(",") if v.strip()]
+    exc_uids = [v.strip() for v in (exclude_user_ids or "").split(",") if v.strip()]
+
+    if selected_ids:
+        # Explicit hand-pick: the selection IS the filter. Skip the
+        # type/date/environment/user filters and the recency cap.
+        query = query.where(FeedbackScore.id.in_(selected_ids))
+        query = query.order_by(FeedbackScore.scored_at.desc())
+    else:
+        if feedback_type == "positive":
+            query = query.where(FeedbackScore.value == 1)
+        elif feedback_type == "negative":
+            query = query.where(FeedbackScore.value == 0)
+
+        if from_date:
+            query = query.where(FeedbackScore.scored_at >= from_date)
+        if to_date:
+            query = query.where(FeedbackScore.scored_at <= to_date)
+        if environment:
+            query = query.where(Trace.trace_metadata["environment"].astext == environment)
+
+        if inc_uids:
+            query = query.where(Trace.user_id.in_(inc_uids))
+        if exc_uids:
+            query = query.where(~Trace.user_id.in_(exc_uids))
+
+        query = query.order_by(FeedbackScore.scored_at.desc()).limit(limit)
     result = await db.execute(query)
     rows = result.all()
 
@@ -366,6 +391,7 @@ async def generate_suggestions(
         filter_environment=environment,
         filter_include_user_ids=inc_uids or None,
         filter_exclude_user_ids=exc_uids or None,
+        filter_selected_feedback_ids=[str(i) for i in selected_ids] or None,
         filter_limit=limit,
         total=total_steps,
         processed=0,

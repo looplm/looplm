@@ -170,6 +170,7 @@ class FeedbackSuggestionRun(Base):
     filter_environment = Column(String(255), nullable=True)
     filter_include_user_ids = Column(JSONB, nullable=True)
     filter_exclude_user_ids = Column(JSONB, nullable=True)
+    filter_selected_feedback_ids = Column(JSONB, nullable=True)
     filter_limit = Column(Integer, nullable=False, server_default=text("20"))
     total = Column(Integer, nullable=False, server_default=text("0"))
     processed = Column(Integer, nullable=False, server_default=text("0"))

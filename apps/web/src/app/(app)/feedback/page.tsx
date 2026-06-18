@@ -26,6 +26,7 @@ export default function FeedbackPage() {
     page, setPage,
     filterValue, setFilterValue,
     filterVerdict, setFilterVerdict,
+    selectedFeedbackIds,
     hoveredBar, setHoveredBar,
     fileInputRef,
     suggestions,
@@ -65,6 +66,10 @@ export default function FeedbackPage() {
     handleStopFeedbackThemes,
     handleGenerateSuggestions,
     handleStopSuggestionRun,
+    toggleFeedbackId,
+    setPageSelection,
+    clearSelectedFeedback,
+    handleGenerateFromSelected,
   } = useFeedbackPage();
 
   return (
@@ -81,7 +86,7 @@ export default function FeedbackPage() {
           />
           {tab === "suggestions" && (
             <button
-              onClick={handleGenerateSuggestions}
+              onClick={() => handleGenerateSuggestions()}
               disabled={sugLoading || !canEdit}
               title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
               className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -233,7 +238,7 @@ export default function FeedbackPage() {
           setSelectedSuggestion={setSelectedSuggestion}
           saving={saving}
           onAccept={handleAcceptSuggestion}
-          onGenerate={handleGenerateSuggestions}
+          onGenerate={() => handleGenerateSuggestions()}
           onStop={handleStopSuggestionRun}
           canEdit={canEdit}
         />
@@ -313,6 +318,31 @@ export default function FeedbackPage() {
             </select>
           </div>
 
+          {/* Selection action bar */}
+          {selectedFeedbackIds.size > 0 && (
+            <div className="sticky top-2 z-10 mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
+              <span className="text-sm text-indigo-700 dark:text-indigo-300">
+                {selectedFeedbackIds.size} feedback item{selectedFeedbackIds.size === 1 ? "" : "s"} selected
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={clearSelectedFeedback}
+                  className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={handleGenerateFromSelected}
+                  disabled={!canEdit}
+                  title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Generate suggestions ({selectedFeedbackIds.size})
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Table */}
           {loading ? (
             <p className="text-gray-500 dark:text-slate-400">Loading...</p>
@@ -326,6 +356,15 @@ export default function FeedbackPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 dark:border-slate-800 text-left text-gray-500 dark:text-slate-400">
+                      <th className="px-4 py-3 w-10">
+                        <input
+                          type="checkbox"
+                          aria-label="Select all on this page"
+                          className="w-4 h-4 rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          checked={feedbackResp.data.length > 0 && feedbackResp.data.every((i) => selectedFeedbackIds.has(String(i.id)))}
+                          onChange={(e) => setPageSelection(feedbackResp.data.map((i) => String(i.id)), e.target.checked)}
+                        />
+                      </th>
                       <th className="px-4 py-3 font-medium">Time</th>
                       <th className="px-4 py-3 font-medium">User Question</th>
                       <th className="px-4 py-3 font-medium w-20 text-center">Value</th>
@@ -342,6 +381,8 @@ export default function FeedbackPage() {
                         item={item}
                         configuredVerdicts={configuredVerdicts}
                         onSelect={setSelectedFeedback}
+                        isSelected={selectedFeedbackIds.has(String(item.id))}
+                        onCheckboxChange={toggleFeedbackId}
                       />
                     ))}
                   </tbody>

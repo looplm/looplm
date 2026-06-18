@@ -21,14 +21,25 @@ interface FeedbackTableRowProps {
   item: FeedbackScoreItem;
   configuredVerdicts: string[];
   onSelect: (item: FeedbackScoreItem) => void;
+  isSelected: boolean;
+  onCheckboxChange: (id: string, checked: boolean) => void;
 }
 
-export function FeedbackTableRow({ item, configuredVerdicts, onSelect }: FeedbackTableRowProps) {
+export function FeedbackTableRow({ item, configuredVerdicts, onSelect, isSelected, onCheckboxChange }: FeedbackTableRowProps) {
   return (
     <tr
       onClick={() => onSelect(item)}
       className="border-b border-gray-100/50 dark:border-slate-800/50 hover:bg-gray-100/50 dark:hover:bg-slate-800/30 cursor-pointer"
     >
+      <td className="px-4 py-3 w-10" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={(e) => onCheckboxChange(String(item.id), e.target.checked)}
+          className="w-4 h-4 rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+          aria-label="Select feedback for suggestions"
+        />
+      </td>
       <td className="px-4 py-3 text-gray-500 dark:text-slate-400 whitespace-nowrap text-xs">
         {item.scored_at
           ? new Date(item.scored_at).toLocaleString("de-DE", {
