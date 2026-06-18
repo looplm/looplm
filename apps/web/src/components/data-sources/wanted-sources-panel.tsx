@@ -104,6 +104,20 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
+/** Compact a URL to `host/…/last-segment` for side-by-side comparison. */
+function shortUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    const segments = u.pathname.split("/").filter(Boolean);
+    const last = segments[segments.length - 1];
+    if (!last) return host;
+    return segments.length > 1 ? `${host}/…/${last}` : `${host}/${last}`;
+  } catch {
+    return url;
+  }
+}
+
 /** Decode an uploaded CSV: try UTF-8 first, fall back to cp1252 exports. */
 async function readCsvFile(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
@@ -370,71 +384,81 @@ export function WantedSourcesPanel({
     return out;
   })();
   const shownCount = groups.reduce((n, g) => n + g.items.length, 0);
-  const colCount = canEdit ? 6 : 5;
+  const colCount = canEdit ? 4 : 3;
 
   const renderRow = (e: SourceExpectation) => {
     const verdict = verdicts[e.id];
     const status = e.ack_note ? "acked" : verdict?.status;
     const chip = status ? STATUS_CHIP[status] : null;
+    const detail = e.ack_note ? `Acknowledged: ${e.ack_note}` : verdict?.detail;
     return (
       <tr
         key={e.id}
         className="border-b border-gray-50 dark:border-slate-800/50 align-top"
       >
-        <td className="py-2 pr-3 max-w-[28rem]">
+        <td className="py-2 pr-3 max-w-[24rem]">
           <span className="font-medium">{e.name}</span>
-          <div className="flex gap-2 text-xs">
-            {e.html_url && (
-              <a
-                href={e.html_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-indigo-600 dark:text-indigo-400 hover:underline"
-              >
-                HTML
-              </a>
-            )}
-            {e.pdf_url && (
-              <a
-                href={e.pdf_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-indigo-600 dark:text-indigo-400 hover:underline"
-              >
-                PDF
-              </a>
+          {e.adapter_tag && (
+            <div className="mt-0.5">
+              <code className="text-[11px] bg-gray-100 dark:bg-slate-800 rounded px-1.5 py-0.5">
+                {e.adapter_tag}
+              </code>
+            </div>
+          )}
+          <div className="mt-1 space-y-0.5 text-xs">
+            {([
+              ["HTML", e.html_url],
+              ["PDF", e.pdf_url],
+            ] as const).map(([label, url]) =>
+              url ? (
+                <div key={label} className="flex items-baseline gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-slate-500 w-8 flex-shrink-0">
+                    {label}
+                  </span>
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={url}
+                    className="text-indigo-600 dark:text-indigo-400 hover:underline truncate"
+                  >
+                    ↗ {shortUrl(url)}
+                  </a>
+                </div>
+              ) : null,
             )}
           </div>
         </td>
-        <td className="py-2 pr-3 text-gray-500 dark:text-slate-400">{e.typ ?? "—"}</td>
-        <td className="py-2 pr-3">
-          {e.adapter_tag ? (
-            <code className="text-xs bg-gray-100 dark:bg-slate-800 rounded px-1.5 py-0.5">
-              {e.adapter_tag}
-            </code>
+        <td className="py-2 pr-3 text-xs max-w-[20rem]">
+          {/* Only a real match counts; `missing` rows still carry a sub-threshold
+              near-miss in matched_url/title, which would contradict the status. */}
+          {(status === "covered_url" || status === "covered_title" || status === "review") &&
+          (verdict?.matched_url || verdict?.matched_title) ? (
+            <a
+              href={verdict.matched_url ?? undefined}
+              target="_blank"
+              rel="noreferrer"
+              title={verdict.matched_url ?? undefined}
+              className="block truncate text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              ↗ {verdict.matched_title ?? shortUrl(verdict.matched_url!)}
+            </a>
           ) : (
-            "—"
+            <span className="text-gray-400 dark:text-slate-500">—</span>
           )}
         </td>
-        <td className="py-2 pr-3 whitespace-nowrap">
+        <td className="py-2 pr-3 max-w-[16rem]">
           {chip ? (
-            <span className={`px-2 py-1 rounded-full text-xs ${chip.cls}`}>{chip.label}</span>
+            <span className={`inline-block px-2 py-1 rounded-full text-xs ${chip.cls}`}>
+              {chip.label}
+            </span>
           ) : (
             <span className="text-xs text-gray-400 dark:text-slate-500">not analyzed</span>
           )}
-        </td>
-        <td className="py-2 pr-3 text-xs text-gray-500 dark:text-slate-400 max-w-[24rem]">
-          {e.ack_note ? (
-            <>Acknowledged: {e.ack_note}</>
-          ) : verdict ? (
-            <>
-              {verdict.detail}
-              {verdict.matched_title && (
-                <span className="block truncate">↳ {verdict.matched_title}</span>
-              )}
-            </>
-          ) : (
-            "—"
+          {detail && (
+            <span className="block mt-1 text-xs text-gray-500 dark:text-slate-400">
+              {detail}
+            </span>
           )}
         </td>
         {canEdit && (
@@ -616,11 +640,9 @@ export function WantedSourcesPanel({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-gray-500 dark:text-slate-400 border-b border-gray-100 dark:border-slate-800">
-                    <th className="py-2 pr-3 font-medium">Source</th>
-                    <th className="py-2 pr-3 font-medium">Type</th>
-                    <th className="py-2 pr-3 font-medium">Adapter</th>
+                    <th className="py-2 pr-3 font-medium">Wanted source (CSV)</th>
+                    <th className="py-2 pr-3 font-medium">In index</th>
                     <th className="py-2 pr-3 font-medium">Status</th>
-                    <th className="py-2 pr-3 font-medium">Evidence</th>
                     {canEdit && <th className="py-2 font-medium" />}
                   </tr>
                 </thead>
