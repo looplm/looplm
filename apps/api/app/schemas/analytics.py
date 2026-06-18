@@ -47,6 +47,11 @@ class RequestClustersResponse(BaseModel):
     themes: list[RequestClusterTheme] = []
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    # The filter window this snapshot was computed over, so the UI can flag when
+    # the live filter bar has drifted from the displayed analysis.
+    filter_from_date: Optional[datetime] = None
+    filter_to_date: Optional[datetime] = None
+    filter_environment: Optional[str] = None
 
 
 # --- Data retrieval insights ---

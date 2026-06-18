@@ -93,6 +93,9 @@ def _build_response(analysis) -> RequestClustersResponse:
         themes=themes,
         started_at=analysis.started_at,
         completed_at=analysis.completed_at,
+        filter_from_date=analysis.filter_from_date,
+        filter_to_date=analysis.filter_to_date,
+        filter_environment=analysis.filter_environment,
     )
 
 

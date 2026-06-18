@@ -14,13 +14,19 @@ interface Column {
 }
 
 // Outcome columns (status) + a visual divider before the feedback columns.
+// "degraded" is intentionally omitted: no connector ever emits that status, so
+// the column was always empty (status is a technical execution signal, not a
+// quality one — the feedback columns carry the quality signal).
 const COLUMNS: Column[] = [
   { key: "success", label: "Success", rgb: "34,197,94" },
-  { key: "degraded", label: "Degraded", rgb: "234,179,8" },
   { key: "failure", label: "Failure", rgb: "239,68,68" },
   { key: "fb_positive", label: "👍", rgb: "34,197,94" },
   { key: "fb_negative", label: "👎", rgb: "239,68,68" },
 ];
+
+// Index of the first feedback column — drives the divider border between the
+// status columns and the feedback columns.
+const FEEDBACK_DIVIDER_COL = COLUMNS.findIndex((c) => c.key === "fb_positive");
 
 export function HeatmapMatrix({ themes }: { themes: RequestClusterTheme[] }) {
   const [mode, setMode] = useState<Mode>("count");
@@ -50,8 +56,10 @@ export function HeatmapMatrix({ themes }: { themes: RequestClusterTheme[] }) {
     <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-4 overflow-x-auto">
       <div className="flex items-center justify-between mb-4">
         <p className="text-xs text-gray-500 dark:text-slate-400">
-          Each row is a request type; cells are shaded by{" "}
-          {mode === "count" ? "volume (per outcome)" : "share of that request type"}.
+          Each row is a request type; cells show{" "}
+          {mode === "count"
+            ? "absolute counts, shaded per outcome"
+            : "each outcome as a share of that request type"}.
         </p>
         <div className="flex rounded-lg border border-gray-200 dark:border-slate-700 overflow-hidden text-xs">
           {(["count", "rate"] as Mode[]).map((m) => (
@@ -64,7 +72,7 @@ export function HeatmapMatrix({ themes }: { themes: RequestClusterTheme[] }) {
                   : "text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800"
               }`}
             >
-              {m === "count" ? "Volume" : "Rate"}
+              {m === "count" ? "Absolute" : "Percentage"}
             </button>
           ))}
         </div>
@@ -80,7 +88,7 @@ export function HeatmapMatrix({ themes }: { themes: RequestClusterTheme[] }) {
             <div
               key={c.key}
               className={`text-center text-xs font-medium text-gray-600 dark:text-slate-300 pb-1 ${
-                i === 3 ? "border-l border-gray-200 dark:border-slate-700" : ""
+                i === FEEDBACK_DIVIDER_COL ? "border-l border-gray-200 dark:border-slate-700" : ""
               }`}
             >
               {c.label}
@@ -108,20 +116,22 @@ export function HeatmapMatrix({ themes }: { themes: RequestClusterTheme[] }) {
             </div>
             {COLUMNS.map((c, col) => {
               const value = theme.outcome?.[c.key] ?? 0;
+              const pct = theme.count > 0 ? Math.round((value / theme.count) * 100) : 0;
+              const display = mode === "rate" ? `${pct}%` : `${value}`;
               const alpha = Math.max(value > 0 ? 0.12 : 0, intensity(c, theme));
               const isHover = hover?.row === row && hover?.col === col;
               return (
                 <div
                   key={c.key}
                   className={`relative h-9 rounded flex items-center justify-center text-xs font-medium ${
-                    col === 3 ? "ml-1 border-l border-gray-200 dark:border-slate-700 pl-1" : ""
+                    col === FEEDBACK_DIVIDER_COL ? "ml-1 border-l border-gray-200 dark:border-slate-700 pl-1" : ""
                   }`}
                   style={{ backgroundColor: `rgba(${c.rgb},${alpha.toFixed(3)})` }}
                   onMouseEnter={() => setHover({ row, col })}
                   onMouseLeave={() => setHover(null)}
                 >
                   <span className={value > 0 ? "text-gray-900 dark:text-white" : "text-gray-300 dark:text-slate-600"}>
-                    {value}
+                    {display}
                   </span>
                   {isHover && value > 0 && (
                     <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 z-10 bg-gray-900 dark:bg-slate-700 text-white text-xs rounded-lg px-2 py-1 whitespace-nowrap shadow-lg pointer-events-none">

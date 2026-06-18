@@ -155,6 +155,31 @@ export default function AnalyticsPage() {
 
   const hasClusters = clusters?.status === "completed" && clusters.themes.length > 0;
 
+  // The heatmap is an LLM snapshot, not a live query — re-running it on every
+  // filter change would be slow and costly. Instead, detect when the filter bar
+  // has drifted (at day granularity) from what the snapshot was computed over,
+  // and prompt a re-analyze. Date + environment are stored on the snapshot;
+  // user filters are not, so they're out of scope for the drift check.
+  const day = (v?: string | null) => (v ? v.slice(0, 10) : "");
+  const snapshotStale = useMemo(() => {
+    if (!hasClusters || !clusters) return false;
+    if (day(clusters.filter_from_date) !== day(startDate)) return true;
+    if (day(clusters.filter_to_date) !== day(endDate)) return true;
+    const snapEnv = clusters.filter_environment || "all";
+    if (snapEnv !== (environment || "all")) return true;
+    return false;
+  }, [hasClusters, clusters, startDate, endDate, environment]);
+
+  const snapshotScope = useMemo(() => {
+    if (!clusters) return "";
+    const parts: string[] = [];
+    if (clusters.filter_from_date || clusters.filter_to_date) {
+      parts.push(`${day(clusters.filter_from_date) || "…"} → ${day(clusters.filter_to_date) || "now"}`);
+    }
+    parts.push(clusters.filter_environment ? clusters.filter_environment : "all environments");
+    return parts.join(" · ");
+  }, [clusters]);
+
   return (
     <div>
       <h1 className="text-3xl font-bold mb-2">Analytics</h1>
@@ -216,7 +241,23 @@ export default function AnalyticsPage() {
             {clusters?.completed_at && (
               <p className="text-xs text-gray-400 dark:text-slate-500 mb-3">
                 Last analyzed {new Date(clusters.completed_at).toLocaleString()} ({clusters.total_requests} requests)
+                {snapshotScope && <> · scope: {snapshotScope}</>}
               </p>
+            )}
+            {snapshotStale && !running && (
+              <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/50 text-sm text-amber-800 dark:text-amber-300">
+                <span>
+                  The filter bar has changed since this analysis. The heatmap still reflects its
+                  original scope.
+                </span>
+                <button
+                  onClick={handleAnalyze}
+                  disabled={triggering}
+                  className="font-medium underline underline-offset-2 hover:no-underline disabled:opacity-50"
+                >
+                  Re-analyze with current filters
+                </button>
+              </div>
             )}
             <HeatmapMatrix themes={clusters!.themes} />
           </>

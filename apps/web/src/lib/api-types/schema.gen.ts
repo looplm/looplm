@@ -6930,6 +6930,12 @@ export interface components {
             completed_at?: string | null;
             /** Error */
             error?: string | null;
+            /** Filter Environment */
+            filter_environment?: string | null;
+            /** Filter From Date */
+            filter_from_date?: string | null;
+            /** Filter To Date */
+            filter_to_date?: string | null;
             /**
              * Id
              * Format: uuid
