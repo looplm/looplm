@@ -9,6 +9,7 @@ import {
   generateSuggestions,
   getLatestSuggestions,
   acceptSuggestion,
+  deleteTestCase,
   getDatasets,
   type FeedbackScoreItem,
   type FeedbackStatsResponse,
@@ -580,10 +581,28 @@ export function useFeedbackPage() {
         message_count: selectedSuggestion.message_count ?? undefined,
         has_summary: selectedSuggestion.has_summary,
       };
-      await acceptSuggestion(datasetId, body);
-      toast.success("Test case added to dataset");
-      setSuggestions((prev) => prev.filter((s) => s.feedback_id !== selectedSuggestion.feedback_id));
+      const created = await acceptSuggestion(datasetId, body);
+      const removedSuggestion = selectedSuggestion;
+      setSuggestions((prev) => prev.filter((s) => s.feedback_id !== removedSuggestion.feedback_id));
       setSelectedSuggestion(null);
+      toast.success("Test case added to dataset", {
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            try {
+              await deleteTestCase(datasetId, created.id);
+              setSuggestions((prev) =>
+                prev.some((s) => s.feedback_id === removedSuggestion.feedback_id)
+                  ? prev
+                  : [removedSuggestion, ...prev],
+              );
+              toast.success("Test case removed");
+            } catch (err: any) {
+              toast.error("Failed to undo", { description: err.message });
+            }
+          },
+        },
+      });
     } catch (err: any) {
       toast.error("Failed to add test case", { description: err.message });
     } finally {
