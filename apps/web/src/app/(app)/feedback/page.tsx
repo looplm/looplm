@@ -69,6 +69,9 @@ export default function FeedbackPage() {
     toggleFeedbackId,
     setPageSelection,
     clearSelectedFeedback,
+    selectAllMatching,
+    selectingAll,
+    maxSelectable,
     handleGenerateFromSelected,
   } = useFeedbackPage();
 
@@ -323,6 +326,20 @@ export default function FeedbackPage() {
             <div className="sticky top-2 z-10 mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
               <span className="text-sm text-indigo-700 dark:text-indigo-300">
                 {selectedFeedbackIds.size} feedback item{selectedFeedbackIds.size === 1 ? "" : "s"} selected
+                {feedbackResp && feedbackResp.pagination.total > selectedFeedbackIds.size && (
+                  <>
+                    {" · "}
+                    <button
+                      onClick={selectAllMatching}
+                      disabled={selectingAll}
+                      className="underline underline-offset-2 hover:text-indigo-900 dark:hover:text-indigo-100 disabled:opacity-50"
+                    >
+                      {selectingAll
+                        ? "Selecting…"
+                        : `Select all ${Math.min(feedbackResp.pagination.total, maxSelectable)} matching`}
+                    </button>
+                  </>
+                )}
               </span>
               <div className="flex gap-2">
                 <button

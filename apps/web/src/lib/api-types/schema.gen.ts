@@ -7434,6 +7434,11 @@ export interface components {
              * @default 0
              */
             processed: number;
+            /**
+             * Source Feedback Count
+             * @default 0
+             */
+            source_feedback_count: number;
             /** Started At */
             started_at?: string | null;
             /** Status */

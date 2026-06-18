@@ -28,6 +28,11 @@ import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
 
 type Tab = "feedback" | "suggestions" | "top-questions" | "themes";
 
+// Backend caps a hand-picked selection at 200 ids (see generate_suggestions),
+// and the list endpoint allows per_page up to 200 — so one request covers the
+// whole selectable range.
+const MAX_SELECTABLE = 200;
+
 export function useFeedbackPage() {
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window !== "undefined") {
@@ -45,6 +50,10 @@ export function useFeedbackPage() {
   const [selectedFeedbackIds, setSelectedFeedbackIds] = useState<Set<string>>(new Set());
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // When we programmatically switch to the suggestions tab to start a run from
+  // hand-picked feedback, the tab-change effect must NOT also load the latest
+  // run — that would race with and clobber the selection-based run.
+  const skipLatestLoadRef = useRef(false);
   const globalFilters = useGlobalFilters();
 
   // Suggestions state
@@ -515,15 +524,60 @@ export function useFeedbackPage() {
 
   const clearSelectedFeedback = useCallback(() => setSelectedFeedbackIds(new Set()), []);
 
+  // Select every feedback row matching the current filters across all pages,
+  // not just the page in view. Capped at MAX_SELECTABLE to match the backend.
+  const [selectingAll, setSelectingAll] = useState(false);
+  const selectAllMatching = useCallback(async () => {
+    setSelectingAll(true);
+    try {
+      const params: Record<string, string> = {
+        page: "1",
+        per_page: String(MAX_SELECTABLE),
+        score_name: "user-feedback",
+      };
+      if (filterValue === "positive") params.value = "1";
+      else if (filterValue === "negative") params.value = "0";
+      if (filterVerdict !== "all") params.verdict = filterVerdict;
+      if (globalFilters.environment && globalFilters.environment !== "all") {
+        params.environment = globalFilters.environment;
+      }
+      if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
+      if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
+      if (globalFilters.filteredUsers.length > 0) {
+        const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
+        params[key] = globalFilters.filteredUsers.join(",");
+      }
+      const resp = await getFeedback(params);
+      const ids = resp.data.map((i) => String(i.id));
+      setSelectedFeedbackIds(new Set(ids));
+      if (resp.pagination.total > ids.length) {
+        toast.info(
+          `Selected the first ${ids.length} of ${resp.pagination.total} matching items (max ${MAX_SELECTABLE}).`,
+        );
+      }
+    } catch (err: any) {
+      toast.error("Failed to select all matching", { description: err.message });
+    } finally {
+      setSelectingAll(false);
+    }
+  }, [filterValue, filterVerdict, globalFilters.environment, globalFilters.startDate, globalFilters.endDate, globalFilters.filteredUsers, globalFilters.userFilterMode]);
+
   const handleGenerateFromSelected = useCallback(() => {
     if (selectedFeedbackIds.size === 0) return;
     const ids = Array.from(selectedFeedbackIds);
+    skipLatestLoadRef.current = true;
     setTab("suggestions");
     loadSuggestions(ids);
   }, [selectedFeedbackIds, loadSuggestions]);
 
   useEffect(() => {
     if (tab === "suggestions") {
+      // A selection-based run was just kicked off by handleGenerateFromSelected;
+      // don't overwrite it by loading the previous latest run.
+      if (skipLatestLoadRef.current) {
+        skipLatestLoadRef.current = false;
+        return;
+      }
       loadLatestSuggestions();
       return;
     }
@@ -671,6 +725,9 @@ export function useFeedbackPage() {
     toggleFeedbackId,
     setPageSelection,
     clearSelectedFeedback,
+    selectAllMatching,
+    selectingAll,
+    maxSelectable: MAX_SELECTABLE,
     handleGenerateFromSelected,
   };
 }

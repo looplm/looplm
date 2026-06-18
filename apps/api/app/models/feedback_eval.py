@@ -172,6 +172,10 @@ class FeedbackSuggestionRun(Base):
     filter_exclude_user_ids = Column(JSONB, nullable=True)
     filter_selected_feedback_ids = Column(JSONB, nullable=True)
     filter_limit = Column(Integer, nullable=False, server_default=text("20"))
+    # Number of feedback rows fed into suggestion-building, before identical /
+    # empty questions are deduplicated away. Lets the UI explain why the test
+    # case count can be lower than the number of feedback items selected.
+    source_feedback_count = Column(Integer, nullable=False, server_default=text("0"))
     total = Column(Integer, nullable=False, server_default=text("0"))
     processed = Column(Integer, nullable=False, server_default=text("0"))
     suggestions = Column(JSONB, nullable=False, server_default=text("'[]'"))

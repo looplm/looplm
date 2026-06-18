@@ -147,6 +147,18 @@ export function SuggestionsTab({
         </div>
       ) : (
         <div className="space-y-3">
+          {suggestionRun &&
+            suggestionRun.status === "completed" &&
+            suggestionRun.source_feedback_count > suggestions.length && (
+              <p className="text-xs text-gray-500 dark:text-slate-400 px-1">
+                {suggestions.length} test case{suggestions.length === 1 ? "" : "s"} from{" "}
+                {suggestionRun.source_feedback_count} feedback item
+                {suggestionRun.source_feedback_count === 1 ? "" : "s"} —{" "}
+                {suggestionRun.source_feedback_count - suggestions.length} with a duplicate or empty
+                question {suggestionRun.source_feedback_count - suggestions.length === 1 ? "was" : "were"}{" "}
+                merged into an existing test case.
+              </p>
+            )}
           {filteredSuggestions.map((sug) => (
             <div
               key={sug.feedback_id}

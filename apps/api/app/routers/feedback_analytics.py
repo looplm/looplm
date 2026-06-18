@@ -244,6 +244,7 @@ def _build_suggestion_run_response(run) -> SuggestionRunResponse:
         total=run.total or 0,
         processed=run.processed or 0,
         count=run.count or 0,
+        source_feedback_count=run.source_feedback_count or 0,
         suggestions=run.suggestions or [],
         started_at=run.started_at,
         completed_at=run.completed_at,
@@ -393,6 +394,7 @@ async def generate_suggestions(
         filter_exclude_user_ids=exc_uids or None,
         filter_selected_feedback_ids=[str(i) for i in selected_ids] or None,
         filter_limit=limit,
+        source_feedback_count=len(rows),
         total=total_steps,
         processed=0,
     )
