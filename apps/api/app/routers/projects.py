@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_platform_admin
 from app.db import get_db
 from app.models.project import Project
 from app.models.project_member import ALL_SECTIONS, ProjectMember
@@ -93,8 +93,10 @@ async def list_projects(
 async def create_project(
     body: ProjectCreate,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_platform_admin),
 ):
+    """Create a new project. Restricted to platform admins — regular users join
+    existing projects by invitation only."""
     project = Project(
         owner_id=_user.id,
         name=body.name,

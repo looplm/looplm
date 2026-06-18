@@ -92,8 +92,10 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
         db.add(member)
         await db.delete(inv)
 
-    # Only create a default project if the user has no invitations
-    if not invitations:
+    # Bootstrap a default project only for the platform admin (first user /
+    # instance owner). Regular sign-ups join projects via invitation only;
+    # otherwise they land on the "ask your admin" gate until an admin adds them.
+    if not invitations and (is_first_user or is_instance_owner):
         default_project = Project(owner_id=user.id, name="Default")
         db.add(default_project)
 

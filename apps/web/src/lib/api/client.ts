@@ -297,6 +297,15 @@ export interface ProjectPermissions {
 export const getMyPermissions = () =>
   request<ProjectPermissions>("/api/me/permissions");
 
+export interface Me {
+  id: string;
+  email: string;
+  is_platform_admin: boolean;
+}
+
+/** Current user's identity. Works even when the user belongs to no project. */
+export const getMe = () => request<Me>("/api/me");
+
 // --- Project Members ---
 
 export interface ProjectMember {

@@ -8,10 +8,12 @@ import {
   getSelectedProjectId,
   setSelectedProjectId,
 } from "@/lib/api";
+import NoProjectGate from "@/components/no-project-gate";
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
+  const [hasProjects, setHasProjects] = useState(true);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -22,6 +24,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     // Ensure a project is selected
     getProjects()
       .then(({ data }) => {
+        setHasProjects(data.length > 0);
         if (data.length > 0) {
           const stored = getSelectedProjectId();
           if (!stored || !data.some((p) => p.id === stored)) {
@@ -35,6 +38,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         setChecked(true);
       });
   }, [router]);
+
+  if (checked && !hasProjects) {
+    return <NoProjectGate />;
+  }
 
   if (!checked) {
     return (

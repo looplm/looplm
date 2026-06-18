@@ -29,6 +29,50 @@ async def test_register(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_first_user_gets_default_project(client: AsyncClient):
+    """The very first sign-up is the platform admin and is bootstrapped with a project."""
+    resp = await client.post(
+        "/api/auth/register", json={"email": "first@example.com", "password": "securepass1"}
+    )
+    headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+    projects = await client.get("/api/projects", headers=headers)
+    assert projects.status_code == 200
+    assert len(projects.json()["data"]) == 1
+
+    me = await client.get("/api/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["email"] == "first@example.com"
+    assert me.json()["is_platform_admin"] is True
+
+
+@pytest.mark.asyncio
+async def test_regular_signup_gets_no_project_and_cannot_create(client: AsyncClient):
+    """A non-admin sign-up lands in no project and cannot create one."""
+    # First user becomes the platform admin (bootstrapped with a project).
+    await client.post(
+        "/api/auth/register", json={"email": "admin@example.com", "password": "securepass1"}
+    )
+    # Second user is a regular sign-up.
+    resp = await client.post(
+        "/api/auth/register", json={"email": "regular@example.com", "password": "securepass1"}
+    )
+    headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+    projects = await client.get("/api/projects", headers=headers)
+    assert projects.status_code == 200
+    assert projects.json()["data"] == []
+
+    me = await client.get("/api/me", headers=headers)
+    assert me.json()["is_platform_admin"] is False
+
+    create = await client.post(
+        "/api/projects", headers=headers, json={"name": "Mine"}
+    )
+    assert create.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_login(client: AsyncClient):
     # Register first
     await client.post("/api/auth/register", json={"email": "login@example.com", "password": "securepass1"})

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +25,23 @@ def _is_platform_admin(user: User) -> bool:
         return True
     owner = settings.instance_owner_email
     return bool(owner) and user.email.lower() == owner.lower()
+
+
+class ProfileResponse(BaseModel):
+    id: UUID
+    email: str
+    is_platform_admin: bool = False
+
+
+@router.get("", response_model=ProfileResponse)
+async def get_me(user: User = Depends(get_current_user)):
+    """Return the current user's identity. Unlike /permissions, this does not
+    require an active project, so it works for users who belong to none yet."""
+    return ProfileResponse(
+        id=user.id,
+        email=user.email,
+        is_platform_admin=_is_platform_admin(user),
+    )
 
 
 @router.get("/permissions", response_model=PermissionsResponse)

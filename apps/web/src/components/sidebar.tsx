@@ -50,7 +50,7 @@ const NAV_GROUPS = [
 export default function Sidebar({ onNavigate, collapsed, onToggleCollapse }: { onNavigate?: () => void; collapsed?: boolean; onToggleCollapse?: () => void }) {
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
-  const { allowedSections, canAccessPage } = usePermissions();
+  const { allowedSections, canAccessPage, isPlatformAdmin } = usePermissions();
   const [mounted, setMounted] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -161,6 +161,7 @@ export default function Sidebar({ onNavigate, collapsed, onToggleCollapse }: { o
                   {p.name}
                 </button>
               ))}
+              {isPlatformAdmin && (
               <div className="border-t border-gray-200 dark:border-slate-700">
                 {showNewProject ? (
                   <div className="p-2 flex gap-1">
@@ -190,6 +191,7 @@ export default function Sidebar({ onNavigate, collapsed, onToggleCollapse }: { o
                   </button>
                 )}
               </div>
+              )}
             </div>
           )}
         </div>

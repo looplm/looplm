@@ -2305,6 +2305,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Me
+         * @description Return the current user's identity. Unlike /permissions, this does not
+         *     require an active project, so it works for users who belong to none yet.
+         */
+        get: operations["get_me_api_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/permissions": {
         parameters: {
             query?: never;
@@ -2335,7 +2356,11 @@ export interface paths {
         /** List Projects */
         get: operations["list_projects_api_projects_get"];
         put?: never;
-        /** Create Project */
+        /**
+         * Create Project
+         * @description Create a new project. Restricted to platform admins — regular users join
+         *     existing projects by invitation only.
+         */
         post: operations["create_project_api_projects_post"];
         delete?: never;
         options?: never;
@@ -6467,6 +6492,21 @@ export interface components {
             precision_at_k: {
                 [key: string]: number;
             };
+        };
+        /** ProfileResponse */
+        ProfileResponse: {
+            /** Email */
+            email: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Is Platform Admin
+             * @default false
+             */
+            is_platform_admin: boolean;
         };
         /** ProjectCreate */
         ProjectCreate: {
@@ -13147,6 +13187,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_me_api_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
                 };
             };
         };
