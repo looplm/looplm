@@ -13,6 +13,7 @@ import type {
   TraceListResponse,
   ThreadListResponse,
   TraceDetail,
+  RagPipelineView,
   TraceChildrenResponse,
   TraceAnalysis,
   TraceFeedbackScore,
@@ -127,6 +128,9 @@ export const getTraceAnalysis = (id: string) =>
 
 export const getTraceFeedback = (id: string) =>
   request<TraceFeedbackScore[]>(`/api/traces/${id}/feedback`);
+
+export const getTraceRagPipeline = (id: string) =>
+  request<RagPipelineView>(`/api/traces/${id}/rag-pipeline`);
 
 export const triggerAnalysis = (id: string) =>
   request<{ message: string; analysis_id: string }>(`/api/traces/${id}/analyze`, {

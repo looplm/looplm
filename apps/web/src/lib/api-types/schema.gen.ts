@@ -3413,6 +3413,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/traces/{trace_id}/rag-pipeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trace Rag Pipeline
+         * @description Structured agentic-RAG pipeline derived from the trace's spans.
+         *
+         *     Returns ``available=False`` for non-RAG traces so the UI falls back to the raw span
+         *     tree. Reconstructed on read from already-synced span input/output — no re-sync needed.
+         */
+        get: operations["get_trace_rag_pipeline_api_traces__trace_id__rag_pipeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ingest/traces": {
         parameters: {
             query?: never;
@@ -6745,6 +6768,123 @@ export interface components {
              * @default 0
              */
             synced: number;
+        };
+        /** RagCounts */
+        RagCounts: {
+            /**
+             * Cited
+             * @default 0
+             */
+            cited: number;
+            /**
+             * Found
+             * @default 0
+             */
+            found: number;
+            /**
+             * Used In Context
+             * @default 0
+             */
+            used_in_context: number;
+        };
+        /** RagJudge */
+        RagJudge: {
+            /** Corrections */
+            corrections?: components["schemas"]["RagJudgeCorrection"][];
+            /** Passed */
+            passed?: boolean | null;
+        };
+        /** RagJudgeCorrection */
+        RagJudgeCorrection: {
+            /** Find */
+            find?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Replacement */
+            replacement?: string | null;
+            /** Type */
+            type?: string | null;
+        };
+        /**
+         * RagPipelineView
+         * @description Structured agentic-RAG pipeline derived from a trace's spans.
+         *
+         *     ``available`` is False when no RAG spans were detected (e.g. a non-RAG trace),
+         *     in which case the rest is empty and the UI falls back to the raw span tree.
+         */
+        RagPipelineView: {
+            /** Answer */
+            answer?: string | null;
+            /** Answer Model */
+            answer_model?: string | null;
+            /** Answer Tokens In */
+            answer_tokens_in?: number | null;
+            /** Answer Tokens Out */
+            answer_tokens_out?: number | null;
+            /** Assembled Context */
+            assembled_context?: string | null;
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            counts?: components["schemas"]["RagCounts"];
+            judge?: components["schemas"]["RagJudge"] | null;
+            /** Queries */
+            queries?: string[];
+            /** Query Complexity */
+            query_complexity?: string | null;
+            search?: components["schemas"]["RagSearchFunnel"] | null;
+            /** Sources */
+            sources?: components["schemas"]["RagSource"][];
+        };
+        /** RagSearchFunnel */
+        RagSearchFunnel: {
+            /** Broadened */
+            broadened?: boolean | null;
+            /** Candidates Before Filter */
+            candidates_before_filter?: number | null;
+            /** Chunk Results */
+            chunk_results?: number | null;
+            /** Dropped By Absolute Floor */
+            dropped_by_absolute_floor?: number | null;
+            /** Dropped By Relative Filter */
+            dropped_by_relative_filter?: number | null;
+            /** Has Results */
+            has_results?: boolean | null;
+            /** Kept */
+            kept?: number | null;
+            /** Search Call Count */
+            search_call_count?: number | null;
+            /** Summary Pages */
+            summary_pages?: number | null;
+        };
+        /** RagSource */
+        RagSource: {
+            /** Citation Index */
+            citation_index?: number | null;
+            /** Content Preview */
+            content_preview?: string | null;
+            /** Score */
+            score?: number | null;
+            /** Score Scale */
+            score_scale?: string | null;
+            /**
+             * Selected
+             * @default false
+             */
+            selected: boolean;
+            /**
+             * Selection Exact
+             * @default false
+             */
+            selection_exact: boolean;
+            /** Title */
+            title?: string | null;
+            /** Tool Name */
+            tool_name?: string | null;
+            /** Url */
+            url?: string | null;
         };
         /** RecallSummary */
         RecallSummary: {
@@ -15566,6 +15706,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_trace_rag_pipeline_api_traces__trace_id__rag_pipeline_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RagPipelineView"];
                 };
             };
             /** @description Validation Error */

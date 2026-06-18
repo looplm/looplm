@@ -28,6 +28,75 @@ class SpanResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RagSource(BaseModel):
+    title: Optional[str] = None
+    url: Optional[str] = None
+    score: Optional[float] = None
+    score_scale: Optional[str] = None
+    tool_name: Optional[str] = None
+    content_preview: Optional[str] = None
+    # Whether this found source made it into the final LLM context, and which
+    # ``[N]`` citation marker it maps to. Exact when rde-gpt logs it; otherwise
+    # inferred from the source order the agent passed to the grounding judge.
+    selected: bool = False
+    citation_index: Optional[int] = None
+    # True when ``selected``/``citation_index`` were read from explicit span fields
+    # rather than inferred — lets the UI distinguish certain from reconstructed.
+    selection_exact: bool = False
+
+
+class RagSearchFunnel(BaseModel):
+    search_call_count: Optional[int] = None
+    summary_pages: Optional[int] = None
+    chunk_results: Optional[int] = None
+    broadened: Optional[bool] = None
+    has_results: Optional[bool] = None
+    # Drop counts — only present once rde-gpt logs them on the search span.
+    candidates_before_filter: Optional[int] = None
+    dropped_by_relative_filter: Optional[int] = None
+    dropped_by_absolute_floor: Optional[int] = None
+    kept: Optional[int] = None
+
+
+class RagJudgeCorrection(BaseModel):
+    type: Optional[str] = None
+    find: Optional[str] = None
+    replacement: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class RagJudge(BaseModel):
+    passed: Optional[bool] = None
+    corrections: list[RagJudgeCorrection] = Field(default_factory=list)
+
+
+class RagCounts(BaseModel):
+    found: int = 0
+    used_in_context: int = 0
+    cited: int = 0
+
+
+class RagPipelineView(BaseModel):
+    """Structured agentic-RAG pipeline derived from a trace's spans.
+
+    ``available`` is False when no RAG spans were detected (e.g. a non-RAG trace),
+    in which case the rest is empty and the UI falls back to the raw span tree.
+    """
+
+    available: bool = False
+    queries: list[str] = Field(default_factory=list)
+    query_complexity: Optional[str] = None
+    search: Optional[RagSearchFunnel] = None
+    sources: list[RagSource] = Field(default_factory=list)
+    assembled_context: Optional[str] = None
+    answer: Optional[str] = None
+    answer_tokens_in: Optional[int] = None
+    answer_tokens_out: Optional[int] = None
+    answer_model: Optional[str] = None
+    judge: Optional[RagJudge] = None
+    counts: RagCounts = Field(default_factory=RagCounts)
+
+
 class TraceListItem(BaseModel):
     id: UUID
     integration_id: UUID

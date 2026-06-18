@@ -15,11 +15,14 @@ from app.models.models import Analysis, FeedbackScore, Integration, Trace
 from app.models.project import Project
 from app.schemas.traces import (
     AnalyzeResponse,
+    RagPipelineView,
     TraceAnalysisResponse,
     TraceChildrenResponse,
     TraceDetail,
 )
 from app.services.analysis_service import analyze_trace
+from app.services.rag_pipeline import build_rag_pipeline
+from app.services.retrieval_config import get_rag_span_names
 
 from .trace_helpers import _build_span_tree, _build_trace_tree
 
@@ -79,6 +82,30 @@ async def get_trace(trace_id: UUID, db: AsyncSession = Depends(get_db), project:
         created_at=trace.created_at,
     )
     return detail
+
+
+@router.get("/{trace_id}/rag-pipeline", response_model=RagPipelineView)
+async def get_trace_rag_pipeline(
+    trace_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Structured agentic-RAG pipeline derived from the trace's spans.
+
+    Returns ``available=False`` for non-RAG traces so the UI falls back to the raw span
+    tree. Reconstructed on read from already-synced span input/output — no re-sync needed.
+    """
+    project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
+    result = await db.execute(
+        select(Trace)
+        .where(Trace.id == trace_id, Trace.integration_id.in_(project_integration_ids))
+        .options(selectinload(Trace.spans))
+    )
+    trace = result.scalar_one_or_none()
+    if not trace:
+        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Trace not found"}})
+
+    return build_rag_pipeline(trace, get_rag_span_names(project))
 
 
 @router.get("/{trace_id}/feedback")

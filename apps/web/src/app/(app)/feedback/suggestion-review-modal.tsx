@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import type { TestCaseSuggestion, TestDatasetItem } from "@/lib/api";
-import { createDataset, regenerateSuggestionExpectedAnswer } from "@/lib/api";
+import type { TestCaseSuggestion, TestDatasetItem, RagPipelineView } from "@/lib/api";
+import { createDataset, regenerateSuggestionExpectedAnswer, getTraceRagPipeline } from "@/lib/api";
 import { ConfigEditor } from "@/components/config-editor";
+import RagPipeline from "@/components/rag-pipeline";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
 
 const CREATE_NEW_DATASET = "__create__";
@@ -56,6 +57,7 @@ export function SuggestionReviewModal({
   const [creatingDataset, setCreatingDataset] = useState(false);
   const [configValid, setConfigValid] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
+  const [ragPipeline, setRagPipeline] = useState<RagPipelineView | null>(null);
   const [wide, setWide] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(WIDE_STORAGE_KEY) === "1";
@@ -72,6 +74,14 @@ export function SuggestionReviewModal({
     setSelectedDatasetId(suggestion.suggested_dataset_id ?? CREATE_NEW_DATASET);
     setNewDatasetName("");
   }, [suggestion, datasets]);
+
+  useEffect(() => {
+    setRagPipeline(null);
+    if (!suggestion.trace_id) return;
+    getTraceRagPipeline(String(suggestion.trace_id))
+      .then((p) => setRagPipeline(p.available ? p : null))
+      .catch(() => {});
+  }, [suggestion.trace_id]);
 
   const isCreatingNew = selectedDatasetId === CREATE_NEW_DATASET;
   const canSave =
@@ -203,6 +213,9 @@ export function SuggestionReviewModal({
                 </a>
               )}
             </div>
+
+            {/* RAG pipeline (when the source trace is an agentic-RAG trace) */}
+            {ragPipeline && <RagPipeline view={ragPipeline} compact />}
 
             {/* Dataset selector */}
             <div>

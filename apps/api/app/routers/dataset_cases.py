@@ -7,10 +7,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_project, require_write
 from app.db import get_db
-from app.models.models import TestCase, TestDataset
+from app.models.models import Integration, TestCase, TestDataset, Trace
 from app.models.project import Project
 from app.schemas.datasets import (
     ExpectedUrlsAdd,
@@ -20,6 +21,8 @@ from app.schemas.datasets import (
     TestCaseUpdate,
 )
 from app.services.failure_pattern import normalize_result_test_id
+from app.services.rag_pipeline import build_rag_pipeline, rag_pipeline_summary
+from app.services.retrieval_config import get_rag_span_names
 
 from .dataset_helpers import _tc_to_item
 
@@ -45,12 +48,23 @@ async def create_test_case(
     if not ds:
         raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found"}})
 
+    # When the case is built from a source trace, capture the RAG pipeline funnel for
+    # provenance and prefill expected sources from the ones actually used in context.
+    metadata = dict(body.metadata or {})
+    expected_sources = body.expected_sources
+    if body.source_trace_id:
+        summary = await _trace_rag_summary(db, body.source_trace_id, project)
+        if summary:
+            metadata.setdefault("rag_pipeline", summary)
+            if not expected_sources and summary["used_source_urls"]:
+                expected_sources = summary["used_source_urls"]
+
     tc = TestCase(
         dataset_id=ds.id,
         test_id=body.test_id,
         prompt=body.prompt,
         expected_answer=body.expected_answer,
-        expected_sources=body.expected_sources,
+        expected_sources=expected_sources,
         context_filters=body.context_filters,
         team_filter=body.team_filter,
         tag_filter=body.tag_filter,
@@ -64,12 +78,26 @@ async def create_test_case(
         source_feedback_id=body.source_feedback_id,
         source_trace_id=body.source_trace_id,
         tags=body.tags,
-        test_case_metadata=body.metadata,
+        test_case_metadata=metadata,
     )
     db.add(tc)
     await db.flush()
     await db.refresh(tc)
     return _tc_to_item(tc)
+
+
+async def _trace_rag_summary(db: AsyncSession, trace_id: UUID, project: Project) -> dict | None:
+    """Build a compact RAG-pipeline summary for a project-scoped trace, or None."""
+    project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
+    result = await db.execute(
+        select(Trace)
+        .where(Trace.id == trace_id, Trace.integration_id.in_(project_integration_ids))
+        .options(selectinload(Trace.spans))
+    )
+    trace = result.scalar_one_or_none()
+    if not trace:
+        return None
+    return rag_pipeline_summary(build_rag_pipeline(trace, get_rag_span_names(project)))
 
 
 @router.post(

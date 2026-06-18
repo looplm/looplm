@@ -3,11 +3,12 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { getTrace, getTraceChildren, getTraceFeedback, type TraceDetail, type SpanNode, type TraceTreeNode, type TraceFeedbackScore } from "@/lib/api";
+import { getTrace, getTraceChildren, getTraceFeedback, getTraceRagPipeline, type TraceDetail, type SpanNode, type TraceTreeNode, type TraceFeedbackScore, type RagPipelineView } from "@/lib/api";
 import StatusBadge from "@/components/status-badge";
 import { formatDuration } from "@/lib/format";
 
 import SmartViewer from "@/components/smart-viewer";
+import RagPipeline from "@/components/rag-pipeline";
 import ThreadConversation from "@/components/thread-conversation";
 
 const TraceGraph = lazy(() => import("@/components/trace-graph"));
@@ -119,6 +120,7 @@ export default function TraceDetailPage() {
   const [childNodes, setChildNodes] = useState<TraceTreeNode[] | null>(null);
   const [childViewMode, setChildViewMode] = useState<ChildViewMode>("tree");
   const [feedback, setFeedback] = useState<TraceFeedbackScore[]>([]);
+  const [ragPipeline, setRagPipeline] = useState<RagPipelineView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -129,6 +131,7 @@ export default function TraceDetailPage() {
       }
     }).catch((e) => setError(e.message));
     getTraceFeedback(id).then(setFeedback).catch(() => {});
+    getTraceRagPipeline(id).then(setRagPipeline).catch(() => {});
   }, [id]);
 
   if (error && !trace) {
@@ -228,6 +231,9 @@ export default function TraceDetailPage() {
           )}
         </div>
       )}
+
+      {/* RAG Pipeline (only renders for RAG traces) */}
+      {ragPipeline?.available && <RagPipeline view={ragPipeline} />}
 
       {/* Span Tree */}
       <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6 mb-8">

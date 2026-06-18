@@ -177,6 +177,79 @@ def extract_retrieval_source_urls(span_output: Any) -> list[str]:
     return urls
 
 
+def extract_rag_pipeline_sources(span_output: Any) -> list[dict[str, Any]]:
+    """Pull structured sources out of a retrieval-context span's output.
+
+    Sibling to :func:`extract_retrieval_source_urls` that keeps the full per-source
+    struct (title, score, tool, content preview) instead of collapsing to URLs — used
+    by the RAG-pipeline view. Accepts ``{"sources": [...]}`` or a bare list. The URL is
+    normalized; everything else is passed through. Order is preserved and *not*
+    de-duplicated (the found set legitimately contains the same page from multiple
+    tools, which the funnel surfaces).
+    """
+    if isinstance(span_output, dict):
+        sources = span_output.get("sources")
+    else:
+        sources = span_output
+    if not isinstance(sources, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        raw_url = src.get("url") or src.get("pageUrl")
+        url = normalize_source_url(raw_url.strip()) if isinstance(raw_url, str) and raw_url.strip() else None
+        score = src.get("score")
+        out.append(
+            {
+                "title": src.get("title") or src.get("pageTitle"),
+                "url": url,
+                "score": score if isinstance(score, (int, float)) else None,
+                "score_scale": src.get("scoreScale"),
+                "tool_name": src.get("tool_name") or src.get("toolName"),
+                "content_preview": src.get("contentPreview") or src.get("content"),
+                # Honored when present (rde-gpt Phase 2 logs these explicitly);
+                # otherwise the pipeline service infers them from the source order.
+                "selected": src.get("selected"),
+                "citation_index": src.get("citationIndex"),
+            }
+        )
+    return out
+
+
+# Default span names for the agentic-RAG steps, matching the rde-gpt instrumentation.
+# Per-project overrides live under ``Project.settings["rag_span_names"]``. The
+# ``retrieval_context`` entry intentionally defers to ``get_retrieval_span_name`` so the
+# existing per-project ``retrieval_source`` setting keeps working as the single source of
+# truth for that one step.
+RAG_SPAN_NAME_DEFAULTS: dict[str, str] = {
+    "query_expansion": "query-expansion",
+    "search": "mandatory-search",
+    "retrieval_context": DEFAULT_RETRIEVAL_SPAN_NAME,
+    "generation": "llm-generation",
+    "judge": "response-judge-llm",
+}
+
+
+def get_rag_span_names(project: Project) -> dict[str, str]:
+    """Span names for each agentic-RAG step, with per-project overrides applied.
+
+    Returns a complete map keyed by step (``query_expansion``, ``search``,
+    ``retrieval_context``, ``generation``, ``judge``). ``retrieval_context`` resolves via
+    :func:`get_retrieval_span_name` so it honors the structured ``retrieval_source``
+    setting; the rest read from ``Project.settings["rag_span_names"]`` falling back to
+    :data:`RAG_SPAN_NAME_DEFAULTS`.
+    """
+    names = dict(RAG_SPAN_NAME_DEFAULTS)
+    overrides = (project.settings or {}).get("rag_span_names")
+    if isinstance(overrides, dict):
+        for key, value in overrides.items():
+            if key in names and isinstance(value, str) and value.strip():
+                names[key] = value.strip()
+    names["retrieval_context"] = get_retrieval_span_name(project)
+    return names
+
+
 _URL_RE = re.compile(r"""https?://[^\s"'<>\)\]\\]+""")
 
 
