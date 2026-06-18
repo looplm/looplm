@@ -351,7 +351,7 @@ export function useFeedbackPage() {
     try {
       const params: Record<string, string> = {
         feedback_type: sugFilter,
-        limit: "20",
+        limit: "100",
       };
       if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
       if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
