@@ -1438,6 +1438,10 @@ export interface paths {
          *     Returns a run record the frontend can poll. Only feedback rows linked to a
          *     trace are considered. Honors the project's Observe trace-name filter and
          *     optional date/environment/user filters.
+         *
+         *     When ``selected_feedback_ids`` is given, only those feedback rows are used
+         *     and the date/environment/user/type filters and recency limit are skipped —
+         *     an explicit hand-pick takes precedence over the auto "most recent" path.
          */
         post: operations["generate_suggestions_api_feedback_generate_suggestions_post"];
         delete?: never;
@@ -11344,6 +11348,7 @@ export interface operations {
                 environment?: string | null;
                 include_user_ids?: string | null;
                 exclude_user_ids?: string | null;
+                selected_feedback_ids?: string | null;
             };
             header?: {
                 "x-project-id"?: string | null;
