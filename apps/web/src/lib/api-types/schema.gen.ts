@@ -5325,6 +5325,8 @@ export interface components {
              * @default 200
              */
             limit: number;
+            /** Selected Feedback Ids */
+            selected_feedback_ids?: string[] | null;
             /** To Date */
             to_date?: string | null;
         };
@@ -8036,6 +8038,8 @@ export interface components {
              * @default 200
              */
             limit: number;
+            /** Selected Feedback Ids */
+            selected_feedback_ids?: string[] | null;
             /** To Date */
             to_date?: string | null;
         };

@@ -27,6 +27,8 @@ import { useGlobalFilters } from "@/components/global-filters-context";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
 
 type Tab = "feedback" | "suggestions" | "top-questions" | "themes";
+type DerivedView = "picker" | "results";
+type GenerateOutput = "suggestions" | "top-questions" | "themes";
 
 // Backend caps a hand-picked selection at 200 ids (see generate_suggestions),
 // and the list endpoint allows per_page up to 200 — so one request covers the
@@ -41,6 +43,12 @@ export function useFeedbackPage() {
     }
     return "feedback";
   });
+  // Derived tabs (suggestions/top-questions/themes) are a two-step flow:
+  // "picker" (select source feedback) → "results". The User Feedback tab
+  // ignores this. Reset to "picker" on every tab switch (decision: always
+  // start at the picker), except when a generate action jumps straight to
+  // "results" — those set the view explicitly without going through selectTab.
+  const [derivedView, setDerivedView] = useState<DerivedView>("picker");
   const [stats, setStats] = useState<FeedbackStatsResponse | null>(null);
   const [feedbackResp, setFeedbackResp] = useState<FeedbackListResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,10 +58,11 @@ export function useFeedbackPage() {
   const [selectedFeedbackIds, setSelectedFeedbackIds] = useState<Set<string>>(new Set());
   const [hoveredBar, setHoveredBar] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // When we programmatically switch to the suggestions tab to start a run from
-  // hand-picked feedback, the tab-change effect must NOT also load the latest
-  // run — that would race with and clobber the selection-based run.
-  const skipLatestLoadRef = useRef(false);
+  // When we programmatically switch to a derived tab to start a run from a
+  // selection, the tab-change effect must NOT also load that tab's latest run —
+  // that would race with and clobber the freshly-kicked-off run. Holds the tab
+  // whose latest-load should be skipped exactly once.
+  const skipLatestForTabRef = useRef<Tab | null>(null);
   const globalFilters = useGlobalFilters();
 
   // Suggestions state
@@ -169,14 +178,20 @@ export function useFeedbackPage() {
 
   const topQuestionsRunning = topQuestionsResult ? ["pending", "running"].includes(topQuestionsResult.status) : false;
 
-  async function handleAnalyzeTopQuestions() {
+  async function handleAnalyzeTopQuestions(ids?: string[]) {
     setTopQuestionsTriggering(true);
     try {
       const body: Record<string, unknown> = { limit: 200 };
-      if (globalFilters.startDate) body.from_date = new Date(globalFilters.startDate).toISOString();
-      if (globalFilters.endDate) body.to_date = new Date(globalFilters.endDate).toISOString();
-      if (globalFilters.environment && globalFilters.environment !== "all") {
-        body.environment = globalFilters.environment;
+      if (ids && ids.length > 0) {
+        // Hand-picked feedback: the selection IS the filter, so the
+        // date/environment params are intentionally omitted.
+        body.selected_feedback_ids = ids;
+      } else {
+        if (globalFilters.startDate) body.from_date = new Date(globalFilters.startDate).toISOString();
+        if (globalFilters.endDate) body.to_date = new Date(globalFilters.endDate).toISOString();
+        if (globalFilters.environment && globalFilters.environment !== "all") {
+          body.environment = globalFilters.environment;
+        }
       }
       const { analysis_id } = await analyzeTopQuestions(body as any);
       setTopQuestionsId(analysis_id);
@@ -225,14 +240,20 @@ export function useFeedbackPage() {
 
   const feedbackThemesRunning = feedbackThemesResult ? ["pending", "running"].includes(feedbackThemesResult.status) : false;
 
-  async function handleAnalyzeFeedbackThemes() {
+  async function handleAnalyzeFeedbackThemes(ids?: string[]) {
     setFeedbackThemesTriggering(true);
     try {
       const body: Record<string, unknown> = { limit: 200 };
-      if (globalFilters.startDate) body.from_date = new Date(globalFilters.startDate).toISOString();
-      if (globalFilters.endDate) body.to_date = new Date(globalFilters.endDate).toISOString();
-      if (globalFilters.environment && globalFilters.environment !== "all") {
-        body.environment = globalFilters.environment;
+      if (ids && ids.length > 0) {
+        // Hand-picked feedback: the selection IS the filter, so the
+        // date/environment params are intentionally omitted.
+        body.selected_feedback_ids = ids;
+      } else {
+        if (globalFilters.startDate) body.from_date = new Date(globalFilters.startDate).toISOString();
+        if (globalFilters.endDate) body.to_date = new Date(globalFilters.endDate).toISOString();
+        if (globalFilters.environment && globalFilters.environment !== "all") {
+          body.environment = globalFilters.environment;
+        }
       }
       const { analysis_id } = await analyzeFeedbackThemes(body as any);
       setFeedbackThemesId(analysis_id);
@@ -317,12 +338,12 @@ export function useFeedbackPage() {
         per_page: "30",
       };
 
-      if (tab === "feedback") {
-        params.score_name = "user-feedback";
-        if (filterValue === "positive") params.value = "1";
-        else if (filterValue === "negative") params.value = "0";
-        if (filterVerdict !== "all") params.verdict = filterVerdict;
-      }
+      // The feedback table backs the source picker on every tab, so always
+      // scope to user-feedback and apply the value/verdict filters.
+      params.score_name = "user-feedback";
+      if (filterValue === "positive") params.value = "1";
+      else if (filterValue === "negative") params.value = "0";
+      if (filterVerdict !== "all") params.verdict = filterVerdict;
 
       if (globalFilters.environment && globalFilters.environment !== "all") {
         params.environment = globalFilters.environment;
@@ -407,8 +428,12 @@ export function useFeedbackPage() {
     try {
       const data = await getLatestTopQuestions();
       setTopQuestionsResult(data);
-      // Resume polling if the latest analysis is still in progress.
-      if (["pending", "running"].includes(data.status)) setTopQuestionsId(data.id);
+      // Resume polling if the latest analysis is still in progress, and surface
+      // the live progress by jumping straight to the results view.
+      if (["pending", "running"].includes(data.status)) {
+        setTopQuestionsId(data.id);
+        setDerivedView("results");
+      }
     } catch {
       // No previous analysis found — that's fine
       setTopQuestionsResult(null);
@@ -422,8 +447,12 @@ export function useFeedbackPage() {
     try {
       const data = await getLatestFeedbackThemes();
       setFeedbackThemesResult(data);
-      // Resume polling if the latest analysis is still in progress.
-      if (["pending", "running"].includes(data.status)) setFeedbackThemesId(data.id);
+      // Resume polling if the latest analysis is still in progress, and surface
+      // the live progress by jumping straight to the results view.
+      if (["pending", "running"].includes(data.status)) {
+        setFeedbackThemesId(data.id);
+        setDerivedView("results");
+      }
     } catch {
       // No previous analysis found — that's fine
       setFeedbackThemesResult(null);
@@ -452,8 +481,11 @@ export function useFeedbackPage() {
       } else if (run.status === "failed" || run.status === "cancelled") {
         setSuggestions([]);
         setSugLoading(false);
+      } else {
+        // pending/running: the polling effect picks it up and clears loading.
+        // Surface live progress by jumping straight to the results view.
+        setDerivedView("results");
       }
-      // If pending/running, the polling effect picks it up and clears loading.
     } catch {
       setSugLoading(false);
     }
@@ -562,33 +594,49 @@ export function useFeedbackPage() {
     }
   }, [filterValue, filterVerdict, globalFilters.environment, globalFilters.startDate, globalFilters.endDate, globalFilters.filteredUsers, globalFilters.userFilterMode]);
 
-  const handleGenerateFromSelected = useCallback(() => {
-    if (selectedFeedbackIds.size === 0) return;
-    const ids = Array.from(selectedFeedbackIds);
-    skipLatestLoadRef.current = true;
-    setTab("suggestions");
-    loadSuggestions(ids);
-  }, [selectedFeedbackIds, loadSuggestions]);
+  // Switch tabs from the nav. Always returns derived tabs to their picker step.
+  const selectTab = useCallback((t: Tab) => {
+    setTab(t);
+    setDerivedView("picker");
+  }, []);
 
+  // Generate any of the three outputs from the current feedback selection
+  // (or, when nothing is selected, the current filters). Jumps to the target
+  // tab's results view and kicks off the run. Plain function (not memoized) so
+  // it always closes over the latest filter-aware analyze handlers.
+  function handleGenerateFrom(output: GenerateOutput, idsOverride?: string[]) {
+    const ids = idsOverride ?? (selectedFeedbackIds.size > 0 ? Array.from(selectedFeedbackIds) : undefined);
+    skipLatestForTabRef.current = output;
+    setTab(output);
+    setDerivedView("results");
+    if (output === "suggestions") {
+      loadSuggestions(ids);
+    } else if (output === "top-questions") {
+      handleAnalyzeTopQuestions(ids);
+    } else {
+      handleAnalyzeFeedbackThemes(ids);
+    }
+  }
+
+  // The feedback table backs the source picker on every tab, so load it
+  // regardless of which tab is active.
   useEffect(() => {
-    if (tab === "suggestions") {
-      // A selection-based run was just kicked off by handleGenerateFromSelected;
-      // don't overwrite it by loading the previous latest run.
-      if (skipLatestLoadRef.current) {
-        skipLatestLoadRef.current = false;
-        return;
-      }
-      loadLatestSuggestions();
+    loadFeedback();
+  }, [loadFeedback]);
+
+  // Load the latest saved run for the active derived tab — unless a generate
+  // action just kicked off a fresh run for it (skipLatestForTabRef), which
+  // would otherwise race with and clobber that run.
+  useEffect(() => {
+    if (tab === "feedback") return;
+    if (skipLatestForTabRef.current === tab) {
+      skipLatestForTabRef.current = null;
       return;
     }
-    if (tab === "top-questions") {
-      loadTopQuestions();
-    } else if (tab === "themes") {
-      loadFeedbackThemes();
-    } else {
-      loadFeedback();
-    }
-  }, [tab, loadFeedback, loadTopQuestions, loadFeedbackThemes, loadLatestSuggestions]);
+    if (tab === "suggestions") loadLatestSuggestions();
+    else if (tab === "top-questions") loadTopQuestions();
+    else if (tab === "themes") loadFeedbackThemes();
+  }, [tab, loadTopQuestions, loadFeedbackThemes, loadLatestSuggestions]);
 
   // Saved suggestion runs persist across filter changes — wiping them on every
   // filter tweak would defeat the persistence the user expects, and racing
@@ -673,7 +721,8 @@ export function useFeedbackPage() {
 
   return {
     // State
-    tab, setTab,
+    tab, setTab, selectTab,
+    derivedView, setDerivedView,
     stats,
     feedbackResp, setFeedbackResp,
     loading,
@@ -728,6 +777,6 @@ export function useFeedbackPage() {
     selectAllMatching,
     selectingAll,
     maxSelectable: MAX_SELECTABLE,
-    handleGenerateFromSelected,
+    handleGenerateFrom,
   };
 }

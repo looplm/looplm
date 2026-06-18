@@ -2,12 +2,12 @@
 
 import { FeedbackEvaluatorModal } from "./feedback-evaluator-modal";
 import { FeedbackDetailModal } from "./feedback-detail-modal";
-import { FeedbackTableRow } from "./feedback-table-row";
 import { StatCard } from "@/components/eval-shared";
 import { TrendBarChart } from "./feedback-chart";
 import { SuggestionsTab } from "./suggestions-tab";
 import { TopQuestionsTab } from "./top-questions-tab";
 import { FeedbackThemesTab } from "./feedback-themes-tab";
+import { FeedbackSourcePicker } from "./feedback-source-picker";
 import { useFeedbackPage } from "./use-feedback-page";
 import { downloadTopQuestionsPdf } from "./top-questions-pdf";
 import { toast } from "sonner";
@@ -19,7 +19,8 @@ export default function FeedbackPage() {
   const { canWrite } = usePermissions();
   const canEdit = canWrite("feedback");
   const {
-    tab, setTab,
+    tab, selectTab,
+    derivedView, setDerivedView,
     stats,
     feedbackResp, setFeedbackResp,
     loading,
@@ -46,12 +47,12 @@ export default function FeedbackPage() {
     reevaluate, setReevaluate,
     topQuestionsResult,
     topQuestionsLoading,
-    topQuestionsTriggering,
     topQuestionsRunning,
+    topQuestionsTriggering,
     feedbackThemesResult,
     feedbackThemesLoading,
-    feedbackThemesTriggering,
     feedbackThemesRunning,
+    feedbackThemesTriggering,
     evalRunning,
     configuredVerdicts,
     tabClass,
@@ -60,9 +61,7 @@ export default function FeedbackPage() {
     handleStop,
     handleEvaluate,
     handleAcceptSuggestion,
-    handleAnalyzeTopQuestions,
     handleStopTopQuestions,
-    handleAnalyzeFeedbackThemes,
     handleStopFeedbackThemes,
     handleGenerateSuggestions,
     handleStopSuggestionRun,
@@ -72,8 +71,59 @@ export default function FeedbackPage() {
     selectAllMatching,
     selectingAll,
     maxSelectable,
-    handleGenerateFromSelected,
+    handleGenerateFrom,
   } = useFeedbackPage();
+
+  const isDerivedTab = tab !== "feedback";
+  const inResults = isDerivedTab && derivedView === "results";
+
+  // Source-picker props shared by every tab that renders it.
+  const pickerProps = {
+    feedbackResp,
+    loading,
+    page,
+    setPage,
+    filterValue,
+    setFilterValue,
+    filterVerdict,
+    setFilterVerdict,
+    configuredVerdicts,
+    selectedFeedbackIds,
+    toggleFeedbackId,
+    setPageSelection,
+    clearSelectedFeedback,
+    selectAllMatching,
+    selectingAll,
+    maxSelectable,
+    onSelectFeedback: setSelectedFeedback,
+    onGenerate: handleGenerateFrom,
+    canEdit,
+  };
+
+  // "Last run" banner shown above the picker on derived tabs.
+  const lastRun = (() => {
+    if (tab === "suggestions") {
+      if (suggestionRun && ["pending", "running"].includes(suggestionRun.status)) {
+        return { running: true, label: "Generation in progress" };
+      }
+      if (suggestionRun?.status === "completed" && suggestions.length > 0) {
+        return { running: false, label: `${suggestions.length} suggestion${suggestions.length === 1 ? "" : "s"}` };
+      }
+    } else if (tab === "top-questions") {
+      if (topQuestionsRunning) return { running: true, label: "Analysis in progress" };
+      const themes = topQuestionsResult?.themes ?? [];
+      if (topQuestionsResult?.status === "completed" && themes.length > 0) {
+        return { running: false, label: `${themes.length} question theme${themes.length === 1 ? "" : "s"} from ${topQuestionsResult.total_questions} questions` };
+      }
+    } else if (tab === "themes") {
+      if (feedbackThemesRunning) return { running: true, label: "Analysis in progress" };
+      const themes = feedbackThemesResult?.themes ?? [];
+      if (feedbackThemesResult?.status === "completed" && themes.length > 0) {
+        return { running: false, label: `${themes.length} theme${themes.length === 1 ? "" : "s"} from ${feedbackThemesResult.total_comments} comments` };
+      }
+    }
+    return null;
+  })();
 
   return (
     <div>
@@ -87,17 +137,8 @@ export default function FeedbackPage() {
             className="hidden"
             onChange={handleImport}
           />
-          {tab === "suggestions" && (
-            <button
-              onClick={() => handleGenerateSuggestions()}
-              disabled={sugLoading || !canEdit}
-              title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
-              className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {sugLoading ? "Generating..." : sugGenerated ? "Regenerate" : "Generate Test Cases"}
-            </button>
-          )}
-          {tab === "top-questions" && topQuestionsRunning && (
+          {/* Top Questions — results view controls */}
+          {tab === "top-questions" && inResults && topQuestionsRunning && (
             <button
               onClick={handleStopTopQuestions}
               disabled={!canEdit}
@@ -107,30 +148,20 @@ export default function FeedbackPage() {
               Stop ({topQuestionsResult?.processed_questions ?? 0}/{topQuestionsResult?.total_questions ?? 0})
             </button>
           )}
-          {tab === "top-questions" && !topQuestionsRunning && (
-            <>
+          {tab === "top-questions" && inResults && !topQuestionsRunning &&
+            topQuestionsResult?.status === "completed" && topQuestionsResult.themes.length > 0 && (
               <button
-                onClick={handleAnalyzeTopQuestions}
-                disabled={topQuestionsTriggering || !canEdit}
-                title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
-                className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                onClick={() => {
+                  downloadTopQuestionsPdf(topQuestionsResult);
+                  toast.success("PDF downloaded");
+                }}
+                className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-800 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
               >
-                {topQuestionsTriggering ? "Starting..." : "Analyze Top Questions"}
+                Export PDF
               </button>
-              {topQuestionsResult?.status === "completed" && topQuestionsResult.themes.length > 0 && (
-                <button
-                  onClick={() => {
-                    downloadTopQuestionsPdf(topQuestionsResult);
-                    toast.success("PDF downloaded");
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-800 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
-                >
-                  Export PDF
-                </button>
-              )}
-            </>
-          )}
-          {tab === "themes" && feedbackThemesRunning && (
+            )}
+          {/* Themes — results view controls */}
+          {tab === "themes" && inResults && feedbackThemesRunning && (
             <button
               onClick={handleStopFeedbackThemes}
               disabled={!canEdit}
@@ -140,16 +171,7 @@ export default function FeedbackPage() {
               Stop ({feedbackThemesResult?.processed_comments ?? 0}/{feedbackThemesResult?.total_comments ?? 0})
             </button>
           )}
-          {tab === "themes" && !feedbackThemesRunning && (
-            <button
-              onClick={handleAnalyzeFeedbackThemes}
-              disabled={feedbackThemesTriggering || !canEdit}
-              title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
-              className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {feedbackThemesTriggering ? "Starting..." : "Analyze Themes"}
-            </button>
-          )}
+          {/* User Feedback — evaluator config + run */}
           {tab === "feedback" && (
             <>
               <button
@@ -197,58 +219,25 @@ export default function FeedbackPage() {
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6">
-        <button onClick={() => setTab("feedback")} className={tabClass("feedback")}>
+        <button onClick={() => selectTab("feedback")} className={tabClass("feedback")}>
           User Feedback
         </button>
-        <button onClick={() => setTab("suggestions")} className={tabClass("suggestions")}>
+        <button onClick={() => selectTab("suggestions")} className={tabClass("suggestions")}>
           Suggestions
         </button>
-        <button onClick={() => setTab("top-questions")} className={tabClass("top-questions")}>
+        <button onClick={() => selectTab("top-questions")} className={tabClass("top-questions")}>
           Top Questions
         </button>
-        <button onClick={() => setTab("themes")} className={tabClass("themes")}>
+        <button onClick={() => selectTab("themes")} className={tabClass("themes")}>
           Themes
         </button>
       </div>
 
-      {/* === Top Questions Tab === */}
-      {tab === "top-questions" ? (
-        <TopQuestionsTab
-          result={topQuestionsResult}
-          loading={topQuestionsLoading}
-          running={topQuestionsRunning}
-          triggering={topQuestionsTriggering}
-          onAnalyze={handleAnalyzeTopQuestions}
-        />
-      ) : tab === "themes" ? (
-        <FeedbackThemesTab
-          result={feedbackThemesResult}
-          loading={feedbackThemesLoading}
-          running={feedbackThemesRunning}
-          triggering={feedbackThemesTriggering}
-          onAnalyze={handleAnalyzeFeedbackThemes}
-        />
-      ) : tab === "suggestions" ? (
-        <SuggestionsTab
-          suggestions={suggestions}
-          sugLoading={sugLoading}
-          sugGenerated={sugGenerated}
-          sugFilter={sugFilter}
-          setSugFilter={setSugFilter}
-          suggestionRun={suggestionRun}
-          datasets={datasets}
-          selectedSuggestion={selectedSuggestion}
-          setSelectedSuggestion={setSelectedSuggestion}
-          saving={saving}
-          onAccept={handleAcceptSuggestion}
-          onGenerate={() => handleGenerateSuggestions()}
-          onStop={handleStopSuggestionRun}
-          canEdit={canEdit}
-        />
-      ) : (
+      {/* === User Feedback tab === */}
+      {tab === "feedback" ? (
         <>
           {/* Feedback Trends Chart */}
-          {stats && tab === "feedback" && stats.trends.length > 0 && (
+          {stats && stats.trends.length > 0 && (
             <TrendBarChart
               title="Feedback Trend"
               data={stats.trends.map((t) => ({ date: t.date, positive: t.positive, negative: t.negative, total: t.total }))}
@@ -261,7 +250,7 @@ export default function FeedbackPage() {
           )}
 
           {/* Stats Cards */}
-          {stats && tab === "feedback" && (
+          {stats && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <StatCard label="Total Feedback" value={stats.total_feedback} />
               <StatCard
@@ -275,7 +264,7 @@ export default function FeedbackPage() {
           )}
 
           {/* Evaluation progress indicator */}
-          {evalRunning && evalResult && tab === "feedback" && (
+          {evalRunning && evalResult && (
             <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-900/50">
               <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
               <span className="text-sm text-indigo-700 dark:text-indigo-300">
@@ -294,143 +283,78 @@ export default function FeedbackPage() {
             </div>
           )}
 
-          {/* Filters */}
-          <div className="flex gap-3 mb-4 items-center">
-            <select
-              value={filterValue}
-              onChange={(e) => setFilterValue(e.target.value)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm text-gray-600 dark:text-slate-300"
-            >
-              <option value="all">All</option>
-              <option value="positive">Positive</option>
-              <option value="negative">Negative</option>
-            </select>
-
-            <select
-              value={filterVerdict}
-              onChange={(e) => setFilterVerdict(e.target.value)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm text-gray-600 dark:text-slate-300"
-            >
-              <option value="all">All Verdicts</option>
-              {configuredVerdicts.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-              <option value="none">Not evaluated</option>
-            </select>
-          </div>
-
-          {/* Selection action bar */}
-          {selectedFeedbackIds.size > 0 && (
-            <div className="sticky top-2 z-10 mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
-              <span className="text-sm text-indigo-700 dark:text-indigo-300">
-                {selectedFeedbackIds.size} feedback item{selectedFeedbackIds.size === 1 ? "" : "s"} selected
-                {feedbackResp && feedbackResp.pagination.total > selectedFeedbackIds.size && (
-                  <>
-                    {" · "}
-                    <button
-                      onClick={selectAllMatching}
-                      disabled={selectingAll}
-                      className="underline underline-offset-2 hover:text-indigo-900 dark:hover:text-indigo-100 disabled:opacity-50"
-                    >
-                      {selectingAll
-                        ? "Selecting…"
-                        : `Select all ${Math.min(feedbackResp.pagination.total, maxSelectable)} matching`}
-                    </button>
-                  </>
-                )}
+          <FeedbackSourcePicker output={null} {...pickerProps} />
+        </>
+      ) : derivedView === "picker" ? (
+        /* === Derived tab — step 1: pick source feedback === */
+        <>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">
+            Select the feedback to generate{" "}
+            {tab === "suggestions" ? "test case suggestions" : tab === "top-questions" ? "top questions" : "themes"} from.
+            Leave everything unselected to use all feedback matching the current filters.
+          </p>
+          {lastRun && (
+            <div className="mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-700">
+              <span className="text-sm text-gray-600 dark:text-slate-300">
+                {lastRun.running ? lastRun.label : `Last run: ${lastRun.label}`}
               </span>
-              <div className="flex gap-2">
-                <button
-                  onClick={clearSelectedFeedback}
-                  className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
-                >
-                  Clear
-                </button>
-                <button
-                  onClick={handleGenerateFromSelected}
-                  disabled={!canEdit}
-                  title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  Generate suggestions ({selectedFeedbackIds.size})
-                </button>
-              </div>
+              <button
+                onClick={() => setDerivedView("results")}
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm text-indigo-600 dark:text-indigo-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                {lastRun.running ? "View progress" : "View results"}
+              </button>
             </div>
           )}
-
-          {/* Table */}
-          {loading ? (
-            <p className="text-gray-500 dark:text-slate-400">Loading...</p>
-          ) : !feedbackResp || feedbackResp.data.length === 0 ? (
-            <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
-              No feedback found yet. Sync your Langfuse integration to pull scores.
-            </div>
-          ) : (
-            <>
-              <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-100 dark:border-slate-800 text-left text-gray-500 dark:text-slate-400">
-                      <th className="px-4 py-3 w-10">
-                        <input
-                          type="checkbox"
-                          aria-label="Select all on this page"
-                          className="w-4 h-4 rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                          checked={feedbackResp.data.length > 0 && feedbackResp.data.every((i) => selectedFeedbackIds.has(String(i.id)))}
-                          onChange={(e) => setPageSelection(feedbackResp.data.map((i) => String(i.id)), e.target.checked)}
-                        />
-                      </th>
-                      <th className="px-4 py-3 font-medium">Time</th>
-                      <th className="px-4 py-3 font-medium">User Question</th>
-                      <th className="px-4 py-3 font-medium w-20 text-center">Value</th>
-                      <th className="px-4 py-3 font-medium">Comment</th>
-                      <th className="px-4 py-3 font-medium">Verdict</th>
-                      <th className="px-4 py-3 font-medium w-20 text-center">Conf.</th>
-                      <th className="px-4 py-3 font-medium w-20">Trace</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {feedbackResp.data.map((item) => (
-                      <FeedbackTableRow
-                        key={item.id}
-                        item={item}
-                        configuredVerdicts={configuredVerdicts}
-                        onSelect={setSelectedFeedback}
-                        isSelected={selectedFeedbackIds.has(String(item.id))}
-                        onCheckboxChange={toggleFeedbackId}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination */}
-              {feedbackResp.pagination.total_pages > 1 && (
-                <div className="flex items-center justify-between mt-4">
-                  <p className="text-sm text-gray-500 dark:text-slate-400">
-                    Page {feedbackResp.pagination.page} of {feedbackResp.pagination.total_pages} ({feedbackResp.pagination.total} total)
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      disabled={page <= 1}
-                      className="px-3 py-1 rounded bg-gray-100 dark:bg-slate-800 text-sm text-gray-600 dark:text-slate-300 disabled:opacity-40"
-                    >
-                      Prev
-                    </button>
-                    <button
-                      onClick={() => setPage((p) => Math.min(feedbackResp!.pagination.total_pages, p + 1))}
-                      disabled={page >= feedbackResp.pagination.total_pages}
-                      className="px-3 py-1 rounded bg-gray-100 dark:bg-slate-800 text-sm text-gray-600 dark:text-slate-300 disabled:opacity-40"
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
+          <FeedbackSourcePicker output={tab} {...pickerProps} />
+        </>
+      ) : (
+        /* === Derived tab — step 2: results === */
+        <>
+          <button
+            onClick={() => setDerivedView("picker")}
+            className="mb-4 inline-flex items-center gap-1 text-sm text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+            </svg>
+            Select feedback
+          </button>
+          {tab === "suggestions" && (
+            <SuggestionsTab
+              suggestions={suggestions}
+              sugLoading={sugLoading}
+              sugGenerated={sugGenerated}
+              sugFilter={sugFilter}
+              setSugFilter={setSugFilter}
+              suggestionRun={suggestionRun}
+              datasets={datasets}
+              selectedSuggestion={selectedSuggestion}
+              setSelectedSuggestion={setSelectedSuggestion}
+              saving={saving}
+              onAccept={handleAcceptSuggestion}
+              onGenerate={() => handleGenerateSuggestions()}
+              onStop={handleStopSuggestionRun}
+              canEdit={canEdit}
+            />
+          )}
+          {tab === "top-questions" && (
+            <TopQuestionsTab
+              result={topQuestionsResult}
+              loading={topQuestionsLoading}
+              running={topQuestionsRunning}
+              triggering={topQuestionsTriggering}
+              onAnalyze={() => setDerivedView("picker")}
+            />
+          )}
+          {tab === "themes" && (
+            <FeedbackThemesTab
+              result={feedbackThemesResult}
+              loading={feedbackThemesLoading}
+              running={feedbackThemesRunning}
+              triggering={feedbackThemesTriggering}
+              onAnalyze={() => setDerivedView("picker")}
+            />
           )}
         </>
       )}

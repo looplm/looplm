@@ -58,6 +58,12 @@ async def analyze_feedback_themes(
 
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
 
+    if body.selected_feedback_ids is not None and len(body.selected_feedback_ids) > 200:
+        raise HTTPException(
+            status_code=400,
+            detail="Too many selected feedback items (max 200).",
+        )
+
     query = (
         select(FeedbackScore, Trace)
         .join(Trace, FeedbackScore.trace_id == Trace.id)
@@ -69,14 +75,22 @@ async def analyze_feedback_themes(
         )
     )
 
-    if body.from_date:
-        query = query.where(FeedbackScore.scored_at >= body.from_date)
-    if body.to_date:
-        query = query.where(FeedbackScore.scored_at <= body.to_date)
-    if body.environment:
-        query = query.where(Trace.trace_metadata["environment"].astext == body.environment)
+    if body.selected_feedback_ids:
+        # Explicit hand-pick: the selection IS the filter. Skip the
+        # date/environment filters and the recency cap. The non-empty-comment
+        # filter above still applies, so a selected item without a comment is
+        # correctly dropped (and the minimum-5 guard below still holds).
+        query = query.where(FeedbackScore.id.in_(body.selected_feedback_ids))
+        query = query.order_by(FeedbackScore.scored_at.desc())
+    else:
+        if body.from_date:
+            query = query.where(FeedbackScore.scored_at >= body.from_date)
+        if body.to_date:
+            query = query.where(FeedbackScore.scored_at <= body.to_date)
+        if body.environment:
+            query = query.where(Trace.trace_metadata["environment"].astext == body.environment)
 
-    query = query.order_by(FeedbackScore.scored_at.desc()).limit(body.limit)
+        query = query.order_by(FeedbackScore.scored_at.desc()).limit(body.limit)
     result = await db.execute(query)
     rows = result.all()
 

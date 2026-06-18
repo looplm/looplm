@@ -174,6 +174,7 @@ export const analyzeTopQuestions = (body: {
   to_date?: string;
   environment?: string;
   limit?: number;
+  selected_feedback_ids?: string[];
 }) =>
   request<{ analysis_id: string; status: string }>("/api/feedback/top-questions", {
     method: "POST",
@@ -199,6 +200,7 @@ export const analyzeFeedbackThemes = (body: {
   to_date?: string;
   environment?: string;
   limit?: number;
+  selected_feedback_ids?: string[];
 }) =>
   request<{ analysis_id: string; status: string }>("/api/feedback/themes", {
     method: "POST",

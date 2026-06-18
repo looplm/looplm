@@ -157,6 +157,10 @@ class TopQuestionsRequest(BaseModel):
     to_date: Optional[datetime] = None
     environment: Optional[str] = None
     limit: int = Field(200, ge=10, le=500)
+    # Hand-picked feedback rows. When given, the selection IS the filter:
+    # date/environment filters and the recency limit are skipped (mirrors the
+    # suggestions hand-pick path in feedback_analytics.generate_suggestions).
+    selected_feedback_ids: Optional[list[UUID]] = None
 
 
 class TopQuestionItem(BaseModel):
@@ -193,6 +197,10 @@ class FeedbackThemeRequest(BaseModel):
     to_date: Optional[datetime] = None
     environment: Optional[str] = None
     limit: int = Field(200, ge=10, le=500)
+    # Hand-picked feedback rows. When given, the selection IS the filter:
+    # date/environment filters and the recency limit are skipped (mirrors the
+    # suggestions hand-pick path in feedback_analytics.generate_suggestions).
+    selected_feedback_ids: Optional[list[UUID]] = None
 
 
 class FeedbackThemeItem(BaseModel):
