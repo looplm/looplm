@@ -3,7 +3,7 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { getTrace, getTraceAnalysis, triggerAnalysis, applyFix, getTraceChildren, getTraceFeedback, type TraceDetail, type TraceAnalysis, type SpanNode, type TraceTreeNode, type TraceFeedbackScore } from "@/lib/api";
+import { getTrace, getTraceChildren, getTraceFeedback, type TraceDetail, type SpanNode, type TraceTreeNode, type TraceFeedbackScore } from "@/lib/api";
 import StatusBadge from "@/components/status-badge";
 import { formatDuration } from "@/lib/format";
 
@@ -116,7 +116,6 @@ export default function TraceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [trace, setTrace] = useState<TraceDetail | null>(null);
-  const [analysis, setAnalysis] = useState<TraceAnalysis | null>(null);
   const [childNodes, setChildNodes] = useState<TraceTreeNode[] | null>(null);
   const [childViewMode, setChildViewMode] = useState<ChildViewMode>("tree");
   const [feedback, setFeedback] = useState<TraceFeedbackScore[]>([]);
@@ -129,28 +128,8 @@ export default function TraceDetailPage() {
         getTraceChildren(id).then((r) => setChildNodes(r.children ?? [])).catch(() => {});
       }
     }).catch((e) => setError(e.message));
-    getTraceAnalysis(id).then(setAnalysis).catch(() => { });
     getTraceFeedback(id).then(setFeedback).catch(() => {});
   }, [id]);
-
-  const handleAnalyze = async () => {
-    try {
-      await triggerAnalysis(id);
-      // Reload analysis after a brief delay
-      setTimeout(() => getTraceAnalysis(id).then(setAnalysis).catch(() => { }), 1000);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  };
-
-  const handleApplyFix = async (fixId: string) => {
-    try {
-      await applyFix(fixId);
-      getTraceAnalysis(id).then(setAnalysis).catch(() => { });
-    } catch (e: any) {
-      setError(e.message);
-    }
-  };
 
   if (error && !trace) {
     return <div className="text-red-400">Error: {error}</div>;
@@ -330,63 +309,6 @@ export default function TraceDetailPage() {
           )}
         </div>
       )}
-
-      {/* Analysis */}
-      <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Analysis & Fix Suggestions</h2>
-          {!analysis && (
-            <button onClick={handleAnalyze} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium text-white">
-              Analyze Trace
-            </button>
-          )}
-        </div>
-
-        {analysis ? (
-          <div>
-            <div className="mb-6 p-4 bg-gray-100/50 dark:bg-slate-800/50 rounded-lg">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-sm font-medium">Failure Type:</span>
-                <StatusBadge status={analysis.analysis.failure_type || "unknown"} />
-                {analysis.analysis.confidence && (
-                  <span className="text-xs text-gray-500 dark:text-slate-400">Confidence: {(analysis.analysis.confidence * 100).toFixed(0)}%</span>
-                )}
-              </div>
-              {analysis.analysis.root_cause && (
-                <p className="text-sm text-gray-600 dark:text-slate-300 mt-2">{analysis.analysis.root_cause}</p>
-              )}
-            </div>
-
-            {analysis.fix_suggestions.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-gray-500 dark:text-slate-400">Fix Suggestions</h3>
-                {analysis.fix_suggestions.map((fix) => (
-                  <div key={fix.id} className="p-4 bg-gray-100/50 dark:bg-slate-800/50 rounded-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs px-1.5 py-0.5 bg-gray-200 dark:bg-slate-700 rounded">{fix.type}</span>
-                        <span className="text-sm font-medium">{fix.title}</span>
-                        <StatusBadge status={fix.status} />
-                      </div>
-                      {fix.status === "pending" && (
-                        <button onClick={() => handleApplyFix(fix.id)} className="px-3 py-1 bg-green-600 hover:bg-green-500 rounded text-xs font-medium">
-                          Apply
-                        </button>
-                      )}
-                    </div>
-                    {fix.description && <p className="text-sm text-gray-500 dark:text-slate-400">{fix.description}</p>}
-                    {fix.diff != null && (
-                      <pre className="mt-2 text-xs bg-gray-50 dark:bg-slate-900 p-2 rounded overflow-auto">{JSON.stringify(fix.diff, null, 2)}</pre>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-gray-500 dark:text-slate-400 text-sm">No analysis available. Click &quot;Analyze Trace&quot; to generate one.</p>
-        )}
-      </div>
     </div>
   );
 }
