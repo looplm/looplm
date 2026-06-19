@@ -134,10 +134,10 @@ export default function GlobalFilterHeader() {
           <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
         </svg>
         <div className="flex items-center rounded-full bg-gray-50 dark:bg-slate-800/50 p-0.5 gap-0.5">
-          <button onClick={() => handleQuickRange(3)} className={pillClass(activeRange === "3d")}>3d</button>
-          <button onClick={() => handleQuickRange(7)} className={pillClass(activeRange === "7d")}>7d</button>
-          <button onClick={() => handleQuickRange(30)} className={pillClass(activeRange === "30d")}>30d</button>
-          <button onClick={() => handleQuickRange(90)} className={pillClass(activeRange === "90d")}>90d</button>
+          <button onClick={() => handleQuickRange(3)} className={pillClass(!showCustom && activeRange === "3d")}>3d</button>
+          <button onClick={() => handleQuickRange(7)} className={pillClass(!showCustom && activeRange === "7d")}>7d</button>
+          <button onClick={() => handleQuickRange(30)} className={pillClass(!showCustom && activeRange === "30d")}>30d</button>
+          <button onClick={() => handleQuickRange(90)} className={pillClass(!showCustom && activeRange === "90d")}>90d</button>
           <button onClick={handleCustomToggle} className={pillClass(activeRange === "custom" || showCustom)}>
             Custom
           </button>

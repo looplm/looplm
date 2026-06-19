@@ -55,14 +55,24 @@ export const DEFAULT_RETRIEVAL_SPAN_NAME = "retrieval-context";
 
 export const DEFAULT_RANGE_DAYS = 7;
 
+// Format a Date as a `YYYY-MM-DDTHH:mm` string in the browser's LOCAL wall-clock.
+// `toISOString()` would emit UTC, which a `datetime-local` input then reads back
+// as local time — shifting the default range by the UTC offset and hiding the
+// most recently synced traces (e.g. the last 2h in CEST). Offsetting by the
+// timezone delta before slicing keeps the string in local time.
+function toLocalInput(d: Date): string {
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 export function daysAgo(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 16);
+  return toLocalInput(d);
 }
 
 export function nowLocal(): string {
-  return new Date().toISOString().slice(0, 16);
+  return toLocalInput(new Date());
 }
 
 const GlobalFiltersContext = createContext<GlobalFiltersContextValue | null>(null);
