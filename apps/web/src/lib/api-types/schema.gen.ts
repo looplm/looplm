@@ -6865,6 +6865,14 @@ export interface components {
             citation_index?: number | null;
             /** Content Preview */
             content_preview?: string | null;
+            /** Original Score */
+            original_score?: number | null;
+            /** Rank After */
+            rank_after?: number | null;
+            /** Rank Before */
+            rank_before?: number | null;
+            /** Reranker Score */
+            reranker_score?: number | null;
             /** Score */
             score?: number | null;
             /** Score Scale */

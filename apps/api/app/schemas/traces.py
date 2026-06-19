@@ -33,6 +33,12 @@ class RagSource(BaseModel):
     url: Optional[str] = None
     score: Optional[float] = None
     score_scale: Optional[str] = None
+    # Raw pre/post-rerank scores + the rank each source held before vs. after reranking
+    # (computed within its tier). All null on traces predating the rde-gpt instrumentation.
+    original_score: Optional[float] = None
+    reranker_score: Optional[float] = None
+    rank_before: Optional[int] = None
+    rank_after: Optional[int] = None
     tool_name: Optional[str] = None
     content_preview: Optional[str] = None
     # Whether this found source made it into the final LLM context, and which

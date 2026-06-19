@@ -156,6 +156,27 @@ def _extract_judge(judge_span) -> RagJudge | None:
     return RagJudge(passed=passed if isinstance(passed, bool) else None, corrections=corrections)
 
 
+def _assign_rerank_ranks(sources: list[RagSource]) -> None:
+    """Set rank_before/rank_after per source, computed within its tier.
+
+    "Before" ranks by the pre-rerank retrieval score (`original_score`), "after" by the
+    semantic `reranker_score`. Scales differ across tiers (summaries vs chunks), so ranking
+    is per tier. Only assigned where both scores exist and the tier has ≥2 such sources —
+    otherwise there's no reranking to diff and ranks stay null (older traces, RRF-only tiers).
+    """
+    by_tier: dict[str, list[RagSource]] = {}
+    for s in sources:
+        by_tier.setdefault(s.tool_name or "", []).append(s)
+    for group in by_tier.values():
+        rankable = [s for s in group if s.original_score is not None and s.reranker_score is not None]
+        if len(rankable) < 2:
+            continue
+        for i, s in enumerate(sorted(rankable, key=lambda x: x.original_score or 0.0, reverse=True)):
+            s.rank_before = i + 1
+        for i, s in enumerate(sorted(rankable, key=lambda x: x.reranker_score or 0.0, reverse=True)):
+            s.rank_after = i + 1
+
+
 def rag_pipeline_summary(view: RagPipelineView) -> dict[str, Any] | None:
     """Compact, persistable snapshot of a pipeline view for test-case provenance.
 
@@ -226,6 +247,8 @@ def build_rag_pipeline(trace: Trace, span_names: dict[str, str]) -> RagPipelineV
                 url=url,
                 score=s.get("score"),
                 score_scale=s.get("score_scale"),
+                original_score=s.get("original_score"),
+                reranker_score=s.get("reranker_score"),
                 tool_name=s.get("tool_name"),
                 content_preview=(s.get("content_preview") or None) and str(s["content_preview"])[:500],
                 selected=selected,
@@ -233,6 +256,10 @@ def build_rag_pipeline(trace: Trace, span_names: dict[str, str]) -> RagPipelineV
                 selection_exact=exact,
             )
         )
+
+    _assign_rerank_ranks(sources)
+    # Group tiers contiguously, ordered by post-rerank rank (then score) within each.
+    sources.sort(key=lambda s: (s.tool_name or "", s.rank_after if s.rank_after is not None else 10_000, -(s.score or 0.0)))
 
     cited = len({s.citation_index for s in sources if s.selected and s.citation_index in cited_indices})
     if not cited and cited_indices:

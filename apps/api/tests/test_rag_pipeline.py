@@ -61,8 +61,16 @@ def _rag_trace() -> Trace:
         output={
             "sources": [
                 {"tool_name": "mandatory-search-summaries", "title": "Summary A", "score": 2.63},
-                {"tool_name": "mandatory-search-chunks", "title": "Chunk B", "url": SELECTED_URL, "score": 5.01},
-                {"tool_name": "mandatory-search-chunks", "title": "Chunk C", "url": DROPPED_URL, "score": 4.5},
+                # Reranking reorders the two chunks: C ranked higher pre-rerank (originalScore),
+                # B wins post-rerank (rerankerScore) → B promoted 2→1, C demoted 1→2.
+                {
+                    "tool_name": "mandatory-search-chunks", "title": "Chunk B", "url": SELECTED_URL,
+                    "score": 5.01, "scoreScale": "reranker", "originalScore": 0.018, "rerankerScore": 5.01,
+                },
+                {
+                    "tool_name": "mandatory-search-chunks", "title": "Chunk C", "url": DROPPED_URL,
+                    "score": 4.5, "scoreScale": "reranker", "originalScore": 0.031, "rerankerScore": 4.5,
+                },
             ],
             "tool_calls_used": ["mandatory-search-summaries", "mandatory-search-chunks"],
         },
@@ -148,6 +156,29 @@ def test_build_rag_pipeline_infers_selected_and_cited_sources():
     assert selected.selection_exact is False  # reconstructed, not explicit
     assert by_title["Chunk C"].selected is False
     assert by_title["Summary A"].selected is False  # no URL → cannot match
+
+
+def test_build_rag_pipeline_computes_rerank_ranks():
+    view = build_rag_pipeline(_rag_trace(), dict(RAG_SPAN_NAME_DEFAULTS))
+    by_title = {s.title: s for s in view.sources}
+
+    # Within the chunk tier, reranking promoted B (2→1) and demoted C (1→2).
+    assert (by_title["Chunk B"].rank_before, by_title["Chunk B"].rank_after) == (2, 1)
+    assert (by_title["Chunk C"].rank_before, by_title["Chunk C"].rank_after) == (1, 2)
+    assert by_title["Chunk C"].rank_after > by_title["Chunk C"].rank_before  # demoted
+    # Summary tier has no pre-rerank scores → no diff.
+    assert by_title["Summary A"].rank_before is None
+    assert by_title["Summary A"].rank_after is None
+
+
+def test_build_rag_pipeline_no_ranks_without_original_score():
+    trace = _rag_trace()
+    retrieval = next(s for s in trace.spans if s.name == "retrieval-context")
+    for src in retrieval.output["sources"]:
+        src.pop("originalScore", None)
+        src.pop("rerankerScore", None)
+    view = build_rag_pipeline(trace, dict(RAG_SPAN_NAME_DEFAULTS))
+    assert all(s.rank_before is None and s.rank_after is None for s in view.sources)
 
 
 def test_build_rag_pipeline_prefers_explicit_selection():

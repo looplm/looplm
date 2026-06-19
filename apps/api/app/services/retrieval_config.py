@@ -199,16 +199,23 @@ def extract_rag_pipeline_sources(span_output: Any) -> list[dict[str, Any]]:
             continue
         raw_url = src.get("url") or src.get("pageUrl")
         url = normalize_source_url(raw_url.strip()) if isinstance(raw_url, str) and raw_url.strip() else None
-        score = src.get("score")
+
+        def _num(value: Any) -> float | None:
+            return value if isinstance(value, (int, float)) else None
+
         out.append(
             {
                 "title": src.get("title") or src.get("pageTitle"),
                 "url": url,
-                "score": score if isinstance(score, (int, float)) else None,
+                "score": _num(src.get("score")),
                 "score_scale": src.get("scoreScale"),
+                # Raw pre/post-rerank scores — present once rde-gpt logs them; enable the
+                # before/after-rerank rank diff in the pipeline view.
+                "original_score": _num(src.get("originalScore")),
+                "reranker_score": _num(src.get("rerankerScore")),
                 "tool_name": src.get("tool_name") or src.get("toolName"),
                 "content_preview": src.get("contentPreview") or src.get("content"),
-                # Honored when present (rde-gpt Phase 2 logs these explicitly);
+                # Honored when present (rde-gpt logs these explicitly);
                 # otherwise the pipeline service infers them from the source order.
                 "selected": src.get("selected"),
                 "citation_index": src.get("citationIndex"),
