@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { RagPipelineView, RagSource } from "@/lib/api-types/traces";
 import SmartViewer from "@/components/smart-viewer";
 import Tooltip from "@/components/tooltip";
@@ -126,20 +126,30 @@ export default function RagPipeline({ view, compact = false }: { view: RagPipeli
   const queries = view.queries ?? [];
   const corrections = view.judge?.corrections ?? [];
   const funnel = view.search;
-  const anyInferred = allSources.some((s) => s.selected && !s.selection_exact);
   const anyRerank = allSources.some((s) => s.rank_before != null && s.rank_after != null);
 
-  const visible = showAll ? allSources : allSources.filter((s) => s.selected);
-  // Group visible sources by tier, preserving the backend's within-tier rank order.
-  const groups = new Map<string, { label: string; order: number; rows: RagSource[]; max: number }>();
-  for (const s of visible) {
+  // In-context sources read best in the order the model saw them (citation order); the
+  // rest ("found, not used" — mostly the summary/discovery tier) are grouped by tier and
+  // ranked, revealed on demand.
+  const inContext = allSources
+    .filter((s) => s.selected)
+    .sort((a, b) => {
+      const ca = a.citation_index ?? Number.MAX_SAFE_INTEGER;
+      const cb = b.citation_index ?? Number.MAX_SAFE_INTEGER;
+      return ca !== cb ? ca - cb : (b.score ?? 0) - (a.score ?? 0);
+    });
+  const inCtxMax = inContext.reduce((m, s) => Math.max(m, s.score ?? 0), 0);
+
+  const foundGroups = new Map<string, { label: string; order: number; rows: RagSource[]; max: number }>();
+  for (const s of allSources.filter((s) => !s.selected)) {
     const info = tierInfo(s.tool_name);
-    const g = groups.get(info.label) ?? { label: info.label, order: info.order, rows: [], max: 0 };
+    const g = foundGroups.get(info.label) ?? { label: info.label, order: info.order, rows: [], max: 0 };
     g.rows.push(s);
     g.max = Math.max(g.max, s.score ?? 0);
-    groups.set(info.label, g);
+    foundGroups.set(info.label, g);
   }
-  const orderedGroups = [...groups.values()].sort((a, b) => a.order - b.order);
+  const orderedFoundGroups = [...foundGroups.values()].sort((a, b) => a.order - b.order);
+  const foundCount = allSources.length - inContext.length;
 
   return (
     <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-6 mb-8">
@@ -201,39 +211,77 @@ export default function RagPipeline({ view, compact = false }: { view: RagPipeli
             <InfoIcon
               content={
                 <span className="block space-y-1">
-                  <span className="block"><span className="font-mono">[N]</span> — used in context (its citation marker in the answer); a dimmed row was found but not used.</span>
-                  {anyRerank && <span className="block"><span className="text-green-600 dark:text-green-400">▲</span>/<span className="text-red-600 dark:text-red-400">▼</span> — rank change from reranking</span>}
-                  {anyInferred && <span className="block">“In context” is inferred from the grounding judge’s source order (not logged upstream).</span>}
+                  <span className="block"><span className="font-mono">[N]</span> — the order this source was placed into the model’s context (its citation marker), shown in that order.</span>
+                  {anyRerank && <span className="block"><span className="text-green-600 dark:text-green-400">▲</span>/<span className="text-red-600 dark:text-red-400">▼</span> — rank change from reranking.</span>}
+                  <span className="block">A <span className="font-mono">···</span> gap is a context slot we couldn’t match to a retrieved row on this trace (matched by URL upstream) — not a source the judge removed. Numbering is exact once the app logs citation indices directly.</span>
                 </span>
               }
             />
           </h3>
-          <div className="space-y-3">
-            {orderedGroups.map((g) => (
-              <div key={g.label}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] font-medium text-gray-500 dark:text-slate-400">{g.label}</span>
-                  <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-slate-500">
-                    Score
-                    <InfoIcon content={SCORE_HELP} />
-                  </span>
-                </div>
-                <div className="divide-y divide-gray-100/60 dark:divide-slate-800/60">
-                  {g.rows.map((s, i) => (
-                    <SourceRow key={i} source={s} maxScore={g.max} />
+
+          {/* In context — ordered by citation number */}
+          {inContext.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-medium text-gray-500 dark:text-slate-400">In context</span>
+                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-slate-500">
+                  Score
+                  <InfoIcon content={SCORE_HELP} />
+                </span>
+              </div>
+              <div className="divide-y divide-gray-100/60 dark:divide-slate-800/60">
+                {inContext.map((s, i) => {
+                  const prevIdx = i === 0 ? 0 : inContext[i - 1]?.citation_index ?? null;
+                  const gap =
+                    s.citation_index != null && prevIdx != null && s.citation_index - prevIdx > 1
+                      ? s.citation_index - prevIdx - 1
+                      : 0;
+                  return (
+                    <Fragment key={i}>
+                      {gap > 0 && (
+                        <div className="flex items-center gap-2 py-1 pl-7 text-[11px] text-gray-400 dark:text-slate-500">
+                          <span className="font-mono tracking-widest">···</span>
+                          <span>{gap} more in context, not matched to a retrieved row</span>
+                        </div>
+                      )}
+                      <SourceRow source={s} maxScore={inCtxMax} />
+                    </Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Found but not used (mostly the discovery/summary tier) */}
+          {foundCount > 0 && (
+            <>
+              <button
+                onClick={() => setShowAll((v) => !v)}
+                className="mt-3 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+              >
+                {showAll ? "Hide sources not used" : `Show ${foundCount} found but not used`}
+              </button>
+              {showAll && (
+                <div className="mt-2 space-y-3">
+                  {orderedFoundGroups.map((g) => (
+                    <div key={g.label}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-medium text-gray-500 dark:text-slate-400">{g.label}</span>
+                        <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-slate-500">
+                          Score
+                          <InfoIcon content={SCORE_HELP} />
+                        </span>
+                      </div>
+                      <div className="divide-y divide-gray-100/60 dark:divide-slate-800/60">
+                        {g.rows.map((s, i) => (
+                          <SourceRow key={i} source={s} maxScore={g.max} />
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
-              </div>
-            ))}
-          </div>
-
-          {hasSelected && allSources.length > (view.counts?.used_in_context ?? 0) && (
-            <button
-              onClick={() => setShowAll((v) => !v)}
-              className="mt-3 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-            >
-              {showAll ? "Show only in-context sources" : `Show all ${allSources.length} found`}
-            </button>
+              )}
+            </>
           )}
         </div>
       )}

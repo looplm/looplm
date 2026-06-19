@@ -156,6 +156,38 @@ def _extract_judge(judge_span) -> RagJudge | None:
     return RagJudge(passed=passed if isinstance(passed, bool) else None, corrections=corrections)
 
 
+def _dedupe_sources(sources: list[RagSource]) -> list[RagSource]:
+    """Collapse rows that are the same page surfaced by multiple tools.
+
+    A page can appear both as a retrieved chunk (with a score) and as a full-page fetch
+    (no score) — same URL, same citation marker. Merge them into one row, preferring the
+    scored chunk and keeping any selection/citation. Sources without a URL (e.g. summaries)
+    have no shared identity to dedupe on, so they pass through untouched.
+    """
+    by_url: dict[str, RagSource] = {}
+    out: list[RagSource] = []
+    for s in sources:
+        if not s.url:
+            out.append(s)
+            continue
+        existing = by_url.get(s.url)
+        if existing is None:
+            by_url[s.url] = s
+            out.append(s)
+            continue
+        if existing.score is None and s.score is not None:
+            existing.score = s.score
+            existing.score_scale = s.score_scale
+            existing.original_score = s.original_score
+            existing.reranker_score = s.reranker_score
+            existing.tool_name = s.tool_name
+        existing.selected = existing.selected or s.selected
+        existing.selection_exact = existing.selection_exact or s.selection_exact
+        if existing.citation_index is None:
+            existing.citation_index = s.citation_index
+    return out
+
+
 def _assign_rerank_ranks(sources: list[RagSource]) -> None:
     """Set rank_before/rank_after per source, computed within its tier.
 
@@ -257,6 +289,8 @@ def build_rag_pipeline(trace: Trace, span_names: dict[str, str]) -> RagPipelineV
             )
         )
 
+    sources = _dedupe_sources(sources)
+    used = sum(1 for s in sources if s.selected)
     _assign_rerank_ranks(sources)
     # Group tiers contiguously, ordered by post-rerank rank (then score) within each.
     sources.sort(key=lambda s: (s.tool_name or "", s.rank_after if s.rank_after is not None else 10_000, -(s.score or 0.0)))

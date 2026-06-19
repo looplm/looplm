@@ -199,6 +199,35 @@ def test_build_rag_pipeline_prefers_explicit_selection():
     assert view.counts.used_in_context == 1
 
 
+def test_build_rag_pipeline_dedupes_same_page_across_tools():
+    """A page retrieved as a chunk AND read as a full page is one row, not two."""
+    url = "https://rde.example/wiki/spaces/s/pages/123"
+    trace = Trace(
+        id=uuid4(), integration_id=uuid4(), external_id="dup", name="chat-completion",
+        start_time=datetime(2026, 6, 19, tzinfo=timezone.utc), status=TraceStatus.success,
+    )
+    retrieval = _span(
+        "retrieval-context", SpanType.chain,
+        output={"sources": [
+            {"tool_name": "mandatory-search-chunks", "title": "Page", "url": url, "score": 4.04},
+            {"tool_name": "confluence-full-page", "title": "Page", "url": url},  # no score
+        ]},
+    )
+    judge = _span(
+        "response-judge-llm", SpanType.llm,
+        input={"prompt": f"SOURCE_ORDER:\n[1] = {url}"}, output={"passed": True, "corrections": []},
+    )
+    trace.spans = [retrieval, judge]
+
+    view = build_rag_pipeline(trace, dict(RAG_SPAN_NAME_DEFAULTS))
+    rows = [s for s in view.sources if s.url == url]
+    assert len(rows) == 1
+    assert rows[0].score == 4.04  # kept the scored chunk
+    assert rows[0].selected is True
+    assert view.counts.found == 1
+    assert view.counts.used_in_context == 1
+
+
 def test_build_rag_pipeline_unavailable_for_non_rag_trace():
     trace = Trace(
         id=uuid4(),
