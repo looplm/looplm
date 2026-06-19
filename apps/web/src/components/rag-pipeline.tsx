@@ -2,9 +2,29 @@
 
 import { useState } from "react";
 import type { RagPipelineView, RagSource } from "@/lib/api-types/traces";
-import StatusBadge from "@/components/status-badge";
 import SmartViewer from "@/components/smart-viewer";
+import Tooltip from "@/components/tooltip";
 import { formatScore } from "@/components/compare-runs-badges";
+
+/** Small circled-"i" that reveals `content` on hover — for column-header explanations. */
+function InfoIcon({ content }: { content: React.ReactNode }) {
+  return (
+    <Tooltip content={content}>
+      <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-current text-[9px] font-medium leading-none text-gray-400 dark:text-slate-500 cursor-help align-middle">
+        i
+      </span>
+    </Tooltip>
+  );
+}
+
+const SCORE_HELP = (
+  <span>
+    How relevant retrieval judged this source — higher is better. The bar shows it relative to the
+    top result in each group. Scores come from the semantic reranker and are then lifted by
+    title/team-match boosts, so strong matches often read above 4. Hybrid results (rrf, bm25) use a
+    different scale, tagged next to the number.
+  </span>
+);
 
 /** Friendly label + display order for each retrieval tier (by source tool_name). */
 const TIERS: { match: (t: string) => boolean; label: string; order: number }[] = [
@@ -175,11 +195,29 @@ export default function RagPipeline({ view, compact = false }: { view: RagPipeli
 
       {/* Sources */}
       {allSources.length > 0 && (
-        <Section title={`Sources (${view.counts?.used_in_context ?? 0} in context / ${allSources.length} found)`}>
+        <div className="mt-5">
+          <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400 mb-2">
+            Sources ({view.counts?.used_in_context ?? 0} in context / {allSources.length} found)
+            <InfoIcon
+              content={
+                <span className="block space-y-1">
+                  <span className="block"><span className="font-mono">[N]</span> — used in context (its citation marker in the answer); a dimmed row was found but not used.</span>
+                  {anyRerank && <span className="block"><span className="text-green-600 dark:text-green-400">▲</span>/<span className="text-red-600 dark:text-red-400">▼</span> — rank change from reranking</span>}
+                  {anyInferred && <span className="block">“In context” is inferred from the grounding judge’s source order (not logged upstream).</span>}
+                </span>
+              }
+            />
+          </h3>
           <div className="space-y-3">
             {orderedGroups.map((g) => (
               <div key={g.label}>
-                <div className="text-[11px] font-medium text-gray-500 dark:text-slate-400 mb-1">{g.label}</div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] font-medium text-gray-500 dark:text-slate-400">{g.label}</span>
+                  <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-slate-500">
+                    Score
+                    <InfoIcon content={SCORE_HELP} />
+                  </span>
+                </div>
                 <div className="divide-y divide-gray-100/60 dark:divide-slate-800/60">
                   {g.rows.map((s, i) => (
                     <SourceRow key={i} source={s} maxScore={g.max} />
@@ -197,24 +235,29 @@ export default function RagPipeline({ view, compact = false }: { view: RagPipeli
               {showAll ? "Show only in-context sources" : `Show all ${allSources.length} found`}
             </button>
           )}
-
-          {/* Legend */}
-          <p className="mt-3 text-[11px] text-gray-400 dark:text-slate-500 leading-relaxed">
-            <span className="font-mono">[N]</span> = used in context (citation marker) · bar/number = relevance score
-            {anyRerank && <> · <span className="text-green-600 dark:text-green-400">▲</span>/<span className="text-red-600 dark:text-red-400">▼</span> = rank change from reranking</>}
-            {anyInferred && <> · “in context” inferred from the grounding judge’s source order (not logged upstream)</>}
-          </p>
-        </Section>
+        </div>
       )}
 
       {/* Judge */}
       {view.judge && (view.judge.passed != null || corrections.length > 0) && (
-        <Section title="Grounding judge" hint="An LLM checked the answer is supported by the sources.">
+        <Section
+          title="Grounding judge"
+          hint="An LLM checks the draft answer against the sources and fixes ungrounded statements or wrong citations before replying — the answer shown is already corrected."
+        >
           <div className="flex items-center gap-2">
-            <StatusBadge status={view.judge.passed ? "success" : "failure"} />
+            <span
+              className={`text-[11px] px-2 py-0.5 rounded font-medium ${
+                view.judge.passed
+                  ? "bg-green-500/15 text-green-700 dark:text-green-400"
+                  : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+              }`}
+            >
+              {view.judge.passed ? "Grounded" : "Corrections applied"}
+            </span>
             <span className="text-sm text-gray-600 dark:text-slate-300">
-              {view.judge.passed ? "passed" : "failed"}
-              {corrections.length > 0 && ` · ${corrections.length} correction(s)`}
+              {view.judge.passed
+                ? "no changes needed"
+                : `${corrections.length} grounding/citation fix${corrections.length === 1 ? "" : "es"}`}
             </span>
           </div>
           {corrections.length > 0 && (
