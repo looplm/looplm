@@ -82,6 +82,7 @@ MANIFESTS=(
   "apps/web/package.json"
   "apps/api/pyproject.toml"
   "connectors/pyproject.toml"
+  "apps/api/app/__init__.py"
 )
 
 for f in "${MANIFESTS[@]}"; do
@@ -91,6 +92,11 @@ for f in "${MANIFESTS[@]}"; do
       ;;
     *.toml)
       sed -i.bak -E "s/^(version[[:space:]]*=[[:space:]]*\")$CURRENT(\")/\1$NEW\2/" "$f"
+      ;;
+    *.py)
+      # The API serves __version__ from app/__init__.py (the package itself is
+      # installed --no-root in the Docker image, so importlib.metadata can't see it).
+      sed -i.bak -E "s/^(__version__[[:space:]]*=[[:space:]]*\")$CURRENT(\")/\1$NEW\2/" "$f"
       ;;
   esac
   rm -f "$f.bak"
