@@ -331,6 +331,14 @@ def extract_retrieved_urls(
     return urls[:limit]
 
 
+# Cap on the stored chunk text in eval-result metadata. Sized comfortably above the
+# largest legitimate chunk: rde-gpt merges up to ~7 surrounding chunks into one source
+# (MAX_CHUNKS_PER_PAGE), which lands well under this. The cap only bounds the convenience
+# copy in eval metadata; the authoritative full text lives in the synced trace span and
+# the live index, both uncapped. Raise if a backend emits genuinely larger chunks.
+_MAX_CHUNK_CONTENT_CHARS = 16000
+
+
 def extract_retrieved_chunks(
     parsed: Any, *, payload_key: str | None = None, limit: int = 50
 ) -> list[dict[str, Any]]:
@@ -369,7 +377,7 @@ def extract_retrieved_chunks(
                 "score": s.get("score"),
                 # Full chunk text (generously capped) so the labeler can read the whole
                 # passage, plus a short preview for the collapsed row.
-                "content": str(content)[:8000] if content else None,
+                "content": str(content)[:_MAX_CHUNK_CONTENT_CHARS] if content else None,
                 "content_preview": str(preview)[:600] if preview else None,
                 "heading_context": s.get("heading_context"),
                 "pdf_page_number": s.get("pdf_page_number"),
