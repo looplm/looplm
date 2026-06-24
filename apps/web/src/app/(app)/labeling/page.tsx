@@ -140,32 +140,61 @@ function ChunkRow({
 function CaseCard({
   c,
   canEdit,
+  collapsed,
+  onToggleCollapse,
   onLabel,
 }: {
   c: LabelingCase;
   canEdit: boolean;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
   onLabel: (testId: string, chunk: ChunkForLabeling, relevant: boolean) => void;
 }) {
+  const done = c.labeled_count >= c.chunks.length && c.chunks.length > 0;
   return (
     <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30">
-        <span className="text-sm font-medium text-gray-800 dark:text-slate-200 truncate" title={c.input ?? c.test_id}>
-          {c.input || c.test_id}
+      <button
+        onClick={onToggleCollapse}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30 text-left hover:bg-gray-100/60 dark:hover:bg-slate-800/50"
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`shrink-0 text-gray-400 dark:text-slate-500 transition-transform ${collapsed ? "" : "rotate-90"}`}
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+          <span className="text-sm font-medium text-gray-800 dark:text-slate-200 truncate" title={c.input ?? c.test_id}>
+            {c.input || c.test_id}
+          </span>
         </span>
-        <span className="shrink-0 text-[11px] text-gray-400 dark:text-slate-500">
-          {c.labeled_count}/{c.chunks.length} labeled · {c.relevant_count} relevant
+        <span className="shrink-0 flex items-center gap-2 text-[11px] text-gray-400 dark:text-slate-500">
+          {done && <span className="text-emerald-500">✓</span>}
+          <span>
+            {c.labeled_count}/{c.chunks.length} labeled · {c.relevant_count} relevant
+          </span>
         </span>
-      </div>
-      <div>
-        {c.chunks.map((chunk) => (
-          <ChunkRow
-            key={`${chunk.chunk_id ?? "x"}-${chunk.rank}`}
-            chunk={chunk}
-            disabled={!canEdit}
-            onLabel={(relevant) => onLabel(c.test_id, chunk, relevant)}
-          />
-        ))}
-      </div>
+      </button>
+      {!collapsed && (
+        <div>
+          {c.chunks.map((chunk) => (
+            <ChunkRow
+              key={`${chunk.chunk_id ?? "x"}-${chunk.rank}`}
+              chunk={chunk}
+              disabled={!canEdit}
+              onLabel={(relevant) => onLabel(c.test_id, chunk, relevant)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -177,6 +206,7 @@ export default function LabelingPage() {
   const [runs, setRuns] = useState<EvalRunListItem[]>([]);
   const [runId, setRunId] = useState<string | null>(null);
   const [view, setView] = useState<LabelingRunResponse | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -192,11 +222,27 @@ export default function LabelingPage() {
     return getLabelingView(id ?? undefined)
       .then((v) => {
         setView(v);
+        setCollapsed(new Set());
         if (!id && v.run_id) setRunId(v.run_id);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  const toggleCase = useCallback((testId: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(testId)) next.delete(testId);
+      else next.add(testId);
+      return next;
+    });
+  }, []);
+
+  const collapseAll = useCallback(() => {
+    setCollapsed(new Set((view?.cases ?? []).map((c) => c.test_id)));
+  }, [view]);
+
+  const expandAll = useCallback(() => setCollapsed(new Set()), []);
 
   useEffect(() => {
     load(runId);
@@ -302,11 +348,26 @@ export default function LabelingPage() {
               />
             </div>
             {!canEdit && <span className="text-amber-600 dark:text-amber-400">read-only access</span>}
+            <div className="ml-auto flex items-center gap-3">
+              <button onClick={collapseAll} className="hover:text-gray-600 dark:hover:text-slate-300">
+                Collapse all
+              </button>
+              <button onClick={expandAll} className="hover:text-gray-600 dark:hover:text-slate-300">
+                Expand all
+              </button>
+            </div>
           </div>
 
           <div className="space-y-4">
             {view.cases.map((c) => (
-              <CaseCard key={c.test_id} c={c} canEdit={canEdit} onLabel={onLabel} />
+              <CaseCard
+                key={c.test_id}
+                c={c}
+                canEdit={canEdit}
+                collapsed={collapsed.has(c.test_id)}
+                onToggleCollapse={() => toggleCase(c.test_id)}
+                onLabel={onLabel}
+              />
             ))}
           </div>
         </>
