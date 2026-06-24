@@ -245,34 +245,54 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         return docs
 
     async def fetch_documents_by_key(self, ids: list[str]) -> dict[str, dict]:
-        """All retrievable fields for each chunk, keyed by the index key value.
+        """All retrievable fields for each chunk, keyed by id.
 
-        Filters on the index key field with ``search.in`` and selects every field
-        (no ``select``), so the labeler sees the complete index metadata. Internal
-        ``@search.*`` / ``@odata.*`` annotations are stripped.
+        Primary path is Azure's direct document-key lookup (``get_document``), which is
+        correct when the chunk id is the index key (the usual case). Any id not found that
+        way falls back to a ``search.in`` filter on the discovered key field. Every field is
+        returned (no ``select``); internal ``@search.*`` / ``@odata.*`` keys are stripped.
         """
+        from azure.core.exceptions import AzureError
+
         clean_ids = [i for i in ids if i]
         if not clean_ids:
             return {}
+
+        def _strip(doc: dict) -> dict:
+            return {k: v for k, v in doc.items() if not k.startswith("@")}
+
+        out: dict[str, dict] = {}
+        remaining: list[str] = []
+        for cid in clean_ids:
+            try:
+                doc = await self._search_client.get_document(key=cid)
+                out[str(cid)] = _strip(dict(doc))
+            except AzureError:
+                # Not found by key (or transient) — try the filter fallback below.
+                remaining.append(cid)
+
+        if not remaining:
+            return out
+
         fields = await self._get_fields()
         key_field = next((f.name for f in fields.values() if f.is_key), None)
         if not key_field:
-            return {}
-
-        out: dict[str, dict] = {}
-        for i in range(0, len(clean_ids), self._LOOKUP_BATCH):
-            batch = clean_ids[i : i + self._LOOKUP_BATCH]
+            return out
+        for i in range(0, len(remaining), self._LOOKUP_BATCH):
+            batch = remaining[i : i + self._LOOKUP_BATCH]
             literal = _odata_escape("|".join(batch))
-            results = await self._search_client.search(
-                search_text="*",
-                filter=f"search.in({key_field}, '{literal}', '|')",
-                top=len(batch),
-            )
-            async for doc in results:
-                key_val = doc.get(key_field)
-                if key_val is None:
-                    continue
-                out[str(key_val)] = {k: v for k, v in doc.items() if not k.startswith("@")}
+            try:
+                results = await self._search_client.search(
+                    search_text="*",
+                    filter=f"search.in({key_field}, '{literal}', '|')",
+                    top=len(batch),
+                )
+                async for doc in results:
+                    key_val = doc.get(key_field)
+                    if key_val is not None:
+                        out[str(key_val)] = _strip(dict(doc))
+            except AzureError:
+                continue
         return out
 
     async def aclose(self) -> None:
