@@ -22,46 +22,93 @@ function ChunkRow({
   disabled: boolean;
   onLabel: (relevant: boolean) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const labelable = !!chunk.chunk_id;
+  const body = chunk.content || chunk.content_preview || "";
+  const isLong = body.length > 240 || body.includes("\n");
+  const docLabel = chunk.title || "source document";
+
   return (
-    <div className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 dark:border-slate-800/50">
+    <div
+      className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 dark:border-slate-800/50 ${
+        chunk.relevant === true
+          ? "bg-emerald-500/5"
+          : chunk.relevant === false
+            ? "bg-red-500/5"
+            : ""
+      }`}
+    >
       <span className="shrink-0 w-6 text-right text-[11px] font-mono text-gray-400 dark:text-slate-500 pt-0.5">
         {chunk.rank}
       </span>
+
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          {chunk.url ? (
+        {/* Locator row: this is a chunk, and where it sits in the document */}
+        <div className="flex items-center gap-2 flex-wrap mb-1.5">
+          <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-300">
+            Chunk
+          </span>
+          {chunk.heading_context && (
+            <span className="text-[11px] text-gray-500 dark:text-slate-400 truncate" title={chunk.heading_context}>
+              {chunk.heading_context}
+            </span>
+          )}
+          {chunk.pdf_page_number != null && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300">
+              PDF p.{chunk.pdf_page_number}
+            </span>
+          )}
+          {chunk.score != null && (
+            <span className="text-[10px] font-mono text-gray-400 dark:text-slate-500">
+              score {chunk.score.toFixed(2)}
+            </span>
+          )}
+        </div>
+
+        {/* The chunk text: the thing being judged */}
+        {body ? (
+          <p
+            className={`text-sm text-gray-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap ${
+              expanded ? "" : "line-clamp-3"
+            }`}
+          >
+            {body}
+          </p>
+        ) : (
+          <p className="text-sm italic text-gray-400 dark:text-slate-500">No chunk text captured.</p>
+        )}
+        {isLong && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+          >
+            {expanded ? "Show less" : "Show full chunk"}
+          </button>
+        )}
+
+        {/* Secondary: link to the whole document, and the chunk id */}
+        <div className="flex items-center gap-3 mt-2 text-[11px] text-gray-400 dark:text-slate-500">
+          {chunk.url && (
             <a
               href={chunk.url}
               target="_blank"
               rel="noreferrer"
-              className="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline truncate"
-              title={chunk.title ?? chunk.url}
+              className="hover:text-gray-600 dark:hover:text-slate-300 hover:underline truncate max-w-[280px]"
+              title={`Open document: ${docLabel}`}
             >
-              {chunk.title || chunk.url}
+              Open document ↗
             </a>
-          ) : (
-            <span className="text-sm font-medium text-gray-700 dark:text-slate-300 truncate">
-              {chunk.title || chunk.chunk_id || "untitled chunk"}
-            </span>
           )}
-          {chunk.score != null && (
-            <span className="shrink-0 text-[10px] font-mono text-gray-400 dark:text-slate-500">
-              {chunk.score.toFixed(2)}
-            </span>
-          )}
+          {chunk.chunk_id && <span className="font-mono truncate">{chunk.chunk_id}</span>}
         </div>
-        {chunk.content_preview && (
-          <p className="text-xs text-gray-500 dark:text-slate-400 mt-1 line-clamp-2">
-            {chunk.content_preview}
-          </p>
-        )}
+
         {!labelable && (
           <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
-            No chunk id on this source, so it cannot be labeled yet (needs the rde-gpt chunk-id change).
+            No chunk id on this source, so it cannot be labeled yet (needs the rde-gpt chunk-id change deployed).
           </p>
         )}
       </div>
+
       <div className="shrink-0 flex items-center gap-1.5">
         <button
           disabled={disabled || !labelable}

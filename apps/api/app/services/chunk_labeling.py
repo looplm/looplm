@@ -44,12 +44,16 @@ def build_labeling_view(
                 labeled += 1
                 if label:
                     relevant += 1
+            pdf_page = c.get("pdf_page_number")
             chunks.append(
                 ChunkForLabeling(
                     chunk_id=chunk_id,
                     title=c.get("title"),
                     url=c.get("url"),
+                    content=c.get("content") or c.get("content_preview"),
                     content_preview=c.get("content_preview"),
+                    heading_context=c.get("heading_context"),
+                    pdf_page_number=pdf_page if isinstance(pdf_page, int) else None,
                     score=c.get("score") if isinstance(c.get("score"), (int, float)) else None,
                     rank=i,
                     relevant=label,

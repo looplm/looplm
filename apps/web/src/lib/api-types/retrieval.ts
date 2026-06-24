@@ -53,7 +53,10 @@ export interface ChunkForLabeling {
   chunk_id?: string | null;
   title?: string | null;
   url?: string | null;
+  content?: string | null;
   content_preview?: string | null;
+  heading_context?: string | null;
+  pdf_page_number?: number | null;
   score?: number | null;
   rank: number;
   relevant?: boolean | null;

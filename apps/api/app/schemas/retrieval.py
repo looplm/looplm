@@ -101,7 +101,12 @@ class ChunkForLabeling(BaseModel):
     chunk_id: str | None = None
     title: str | None = None
     url: str | None = None
+    # Full chunk text (the thing being judged) plus a short preview for the collapsed row.
+    content: str | None = None
     content_preview: str | None = None
+    # Where this passage sits in the source document.
+    heading_context: str | None = None
+    pdf_page_number: int | None = None
     score: float | None = None
     rank: int
     # Current label, or None when this chunk has not been judged yet.

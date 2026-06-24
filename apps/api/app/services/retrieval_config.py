@@ -207,6 +207,14 @@ def extract_rag_pipeline_sources(span_output: Any) -> list[dict[str, Any]]:
         # ``chunkId`` on chunk sources; the eval payload's ``searchSources`` carry it as
         # ``id``. Used to attach human relevance labels at the chunk level.
         chunk_id = src.get("chunkId") or src.get("chunk_id") or src.get("id") or src.get("key")
+        meta = src.get("metadata") if isinstance(src.get("metadata"), dict) else {}
+        pdf_page = (
+            src.get("pdfPageNumber")
+            or src.get("pdf_page_number")
+            or meta.get("pdf_page_number")
+            or meta.get("pageNumber")
+            or meta.get("page")
+        )
         out.append(
             {
                 "chunk_id": str(chunk_id) if chunk_id is not None else None,
@@ -219,7 +227,12 @@ def extract_rag_pipeline_sources(span_output: Any) -> list[dict[str, Any]]:
                 "original_score": _num(src.get("originalScore")),
                 "reranker_score": _num(src.get("rerankerScore")),
                 "tool_name": src.get("tool_name") or src.get("toolName"),
+                # Full chunk text plus a short preview — the labeling UI shows the whole chunk.
+                "content": src.get("content") or src.get("contentPreview"),
                 "content_preview": src.get("contentPreview") or src.get("content"),
+                # Chunk locators: where in the document this passage sits.
+                "heading_context": src.get("headingContext") or src.get("heading_context"),
+                "pdf_page_number": pdf_page if isinstance(pdf_page, int) else None,
                 # Honored when present (rde-gpt logs these explicitly);
                 # otherwise the pipeline service infers them from the source order.
                 "selected": src.get("selected"),
@@ -347,13 +360,19 @@ def extract_retrieved_chunks(
     out: list[dict[str, Any]] = []
     for s in sources[:limit]:
         preview = s.get("content_preview")
+        content = s.get("content")
         out.append(
             {
                 "chunk_id": s.get("chunk_id"),
                 "title": s.get("title"),
                 "url": s.get("url"),
                 "score": s.get("score"),
+                # Full chunk text (generously capped) so the labeler can read the whole
+                # passage, plus a short preview for the collapsed row.
+                "content": str(content)[:8000] if content else None,
                 "content_preview": str(preview)[:600] if preview else None,
+                "heading_context": s.get("heading_context"),
+                "pdf_page_number": s.get("pdf_page_number"),
             }
         )
     return out
