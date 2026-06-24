@@ -6,6 +6,7 @@ import {
   getEvalRuns,
   getLabelingView,
   saveChunkLabels,
+  setLabelingComplete,
   type EvalRunListItem,
   type LabelingRunResponse,
   type LabelingCase,
@@ -100,6 +101,9 @@ function ChunkRow({
             </a>
           )}
           {chunk.chunk_id && <span className="font-mono truncate">{chunk.chunk_id}</span>}
+          {chunk.relevant != null && chunk.labeled_by && (
+            <span className="italic">by {chunk.labeled_by}</span>
+          )}
         </div>
 
         {!labelable && (
@@ -142,22 +146,23 @@ function CaseCard({
   canEdit,
   collapsed,
   onToggleCollapse,
+  onToggleComplete,
   onLabel,
 }: {
   c: LabelingCase;
   canEdit: boolean;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  onToggleComplete: (complete: boolean) => void;
   onLabel: (testId: string, chunk: ChunkForLabeling, relevant: boolean) => void;
 }) {
-  const done = c.labeled_count >= c.chunks.length && c.chunks.length > 0;
   return (
     <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-      <button
-        onClick={onToggleCollapse}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30 text-left hover:bg-gray-100/60 dark:hover:bg-slate-800/50"
-      >
-        <span className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30">
+        <button
+          onClick={onToggleCollapse}
+          className="flex items-center gap-2 min-w-0 text-left"
+        >
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="14"
@@ -175,14 +180,29 @@ function CaseCard({
           <span className="text-sm font-medium text-gray-800 dark:text-slate-200 truncate" title={c.input ?? c.test_id}>
             {c.input || c.test_id}
           </span>
-        </span>
-        <span className="shrink-0 flex items-center gap-2 text-[11px] text-gray-400 dark:text-slate-500">
-          {done && <span className="text-emerald-500">✓</span>}
+        </button>
+        <div className="shrink-0 flex items-center gap-3 text-[11px] text-gray-400 dark:text-slate-500">
+          {c.labelers.length > 0 && (
+            <span className="hidden sm:inline italic truncate max-w-[160px]" title={`Labeled by ${c.labelers.join(", ")}`}>
+              by {c.labelers.join(", ")}
+            </span>
+          )}
           <span>
-            {c.labeled_count}/{c.chunks.length} labeled · {c.relevant_count} relevant
+            {c.labeled_count}/{c.chunks.length} · {c.relevant_count} relevant
           </span>
-        </span>
-      </button>
+          <button
+            disabled={!canEdit}
+            onClick={() => onToggleComplete(!c.complete)}
+            className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-40 ${
+              c.complete
+                ? "bg-emerald-500 border-emerald-500 text-white"
+                : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-emerald-400"
+            }`}
+          >
+            {c.complete ? "✓ Complete" : "Mark complete"}
+          </button>
+        </div>
+      </div>
       {!collapsed && (
         <div>
           {c.chunks.map((chunk) => (
@@ -243,6 +263,25 @@ export default function LabelingPage() {
   }, [view]);
 
   const expandAll = useCallback(() => setCollapsed(new Set()), []);
+
+  const onToggleComplete = useCallback(
+    async (testId: string, complete: boolean) => {
+      setView((prev) =>
+        prev
+          ? { ...prev, cases: prev.cases.map((c) => (c.test_id === testId ? { ...c, complete } : c)) }
+          : prev,
+      );
+      // Collapse a case when it's marked complete to keep focus on remaining work.
+      if (complete) setCollapsed((prev) => new Set(prev).add(testId));
+      try {
+        await setLabelingComplete(testId, complete);
+      } catch {
+        toast.error("Failed to update status");
+        load(runId);
+      }
+    },
+    [runId, load],
+  );
 
   useEffect(() => {
     load(runId);
@@ -358,18 +397,50 @@ export default function LabelingPage() {
             </div>
           </div>
 
-          <div className="space-y-4">
-            {view.cases.map((c) => (
+          {(() => {
+            const inProgress = view.cases.filter((c) => !c.complete);
+            const complete = view.cases.filter((c) => c.complete);
+            const renderCase = (c: LabelingCase) => (
               <CaseCard
                 key={c.test_id}
                 c={c}
                 canEdit={canEdit}
                 collapsed={collapsed.has(c.test_id)}
                 onToggleCollapse={() => toggleCase(c.test_id)}
+                onToggleComplete={(v) => onToggleComplete(c.test_id, v)}
                 onLabel={onLabel}
               />
-            ))}
-          </div>
+            );
+            return (
+              <>
+                <div className="flex items-center gap-2 mb-3">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
+                    In progress
+                  </h2>
+                  <span className="text-xs text-gray-400 dark:text-slate-500">{inProgress.length}</span>
+                </div>
+                {inProgress.length > 0 ? (
+                  <div className="space-y-4">{inProgress.map(renderCase)}</div>
+                ) : (
+                  <p className="text-sm text-gray-400 dark:text-slate-500 mb-4">
+                    All cases marked complete.
+                  </p>
+                )}
+
+                {complete.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-2 mt-8 mb-3">
+                      <h2 className="text-sm font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                        Complete
+                      </h2>
+                      <span className="text-xs text-gray-400 dark:text-slate-500">{complete.length}</span>
+                    </div>
+                    <div className="space-y-4">{complete.map(renderCase)}</div>
+                  </>
+                )}
+              </>
+            );
+          })()}
         </>
       )}
     </div>

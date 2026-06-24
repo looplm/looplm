@@ -60,6 +60,7 @@ export interface ChunkForLabeling {
   score?: number | null;
   rank: number;
   relevant?: boolean | null;
+  labeled_by?: string | null;
 }
 
 export interface LabelingCase {
@@ -68,6 +69,8 @@ export interface LabelingCase {
   chunks: ChunkForLabeling[];
   labeled_count: number;
   relevant_count: number;
+  complete: boolean;
+  labelers: string[];
 }
 
 export interface LabelingRunResponse {

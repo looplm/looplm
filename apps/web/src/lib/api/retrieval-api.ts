@@ -43,6 +43,12 @@ export const saveChunkLabels = (labels: ChunkLabelUpsert[]) =>
     body: JSON.stringify({ labels }),
   });
 
+export const setLabelingComplete = (testId: string, complete: boolean) =>
+  request<{ test_id: string; complete: boolean }>(`/api/pipeline/labeling/status`, {
+    method: "PUT",
+    body: JSON.stringify({ test_id: testId, complete }),
+  });
+
 export const getRetrievalTargets = () =>
   request<RetrievalTargets>(`/api/pipeline/targets`);
 

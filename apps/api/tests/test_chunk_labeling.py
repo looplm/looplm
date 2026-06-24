@@ -119,9 +119,25 @@ async def test_labeling_endpoints_roundtrip(client: AsyncClient, auth_headers, d
     c1 = next(c for c in resp2.json()["cases"][0]["chunks"] if c["chunk_id"] == "c1")
     assert c1["relevant"] is True
 
+    # The labeler's display name is surfaced (local part of their email).
+    assert c1["labeled_by"] == "test"
+    case = resp2.json()["cases"][0]
+    assert "test" in case["labelers"]
+    assert case["complete"] is False
+
     metrics = await client.get(
         f"/api/pipeline/retrieval-metrics?run_id={run.id}&source=labels", headers=auth_headers
     )
     assert metrics.status_code == 200
     assert metrics.json()["available"] is True
     assert metrics.json()["mrr"] == 1.0
+
+    # Mark the case complete; it persists into the labeling view.
+    status = await client.put(
+        "/api/pipeline/labeling/status",
+        headers=auth_headers,
+        json={"test_id": "q1", "complete": True},
+    )
+    assert status.status_code == 200
+    resp3 = await client.get(f"/api/pipeline/labeling?run_id={run.id}", headers=auth_headers)
+    assert resp3.json()["cases"][0]["complete"] is True

@@ -60,3 +60,34 @@ class ChunkRelevanceLabel(Base):
     updated_at = Column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"), onupdate=text("now()")
     )
+
+
+class TestCaseLabelingStatus(Base):
+    """Manual 'labeling complete' flag for a test case's chunk judgments.
+
+    Completeness is an explicit human decision, not derived from whether every chunk has a
+    label, so a reviewer can declare a case done even when some chunks are intentionally
+    left unlabeled. Keyed by (project, test_id), independent of any run.
+    """
+
+    __tablename__ = "test_case_labeling_status"
+    __table_args__ = (
+        UniqueConstraint("project_id", "test_id", name="uq_labeling_status_project_test"),
+        Index("idx_labeling_status_project", "project_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    test_id = Column(String(512), nullable=False)
+    complete = Column(Boolean, nullable=False, server_default=text("false"))
+    marked_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"), onupdate=text("now()")
+    )

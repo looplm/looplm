@@ -111,6 +111,8 @@ class ChunkForLabeling(BaseModel):
     rank: int
     # Current label, or None when this chunk has not been judged yet.
     relevant: bool | None = None
+    # Display name of who made the current label, when known.
+    labeled_by: str | None = None
 
 
 class LabelingCase(BaseModel):
@@ -119,6 +121,10 @@ class LabelingCase(BaseModel):
     chunks: list[ChunkForLabeling] = Field(default_factory=list)
     labeled_count: int = 0
     relevant_count: int = 0
+    # Manual "labeling complete" flag (human decision, not derived from counts).
+    complete: bool = False
+    # Distinct people who have labeled chunks in this case.
+    labelers: list[str] = Field(default_factory=list)
 
 
 class LabelingRunResponse(BaseModel):
@@ -147,6 +153,11 @@ class ChunkLabelUpsert(BaseModel):
 
 class ChunkLabelBatch(BaseModel):
     labels: list[ChunkLabelUpsert] = Field(default_factory=list)
+
+
+class LabelingStatusUpdate(BaseModel):
+    test_id: str
+    complete: bool
 
 
 class RetrievalRunMetrics(BaseModel):

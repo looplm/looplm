@@ -17,7 +17,10 @@ from app.auth import create_access_token, hash_password
 from app.models.models import Base, Integration, IntegrationType, Span, SpanType, Trace, TraceStatus
 from app.models.project import Project
 from app.models.user import User
-from app.models.chunk_labels import ChunkRelevanceLabel  # noqa: F401 — register table for create_all
+from app.models.chunk_labels import (  # noqa: F401 — register tables for create_all
+    ChunkRelevanceLabel,
+    TestCaseLabelingStatus,
+)
 
 # ---------------------------------------------------------------------------
 # Patch PostgreSQL types to work with SQLite before table creation

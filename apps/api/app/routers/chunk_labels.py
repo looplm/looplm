@@ -15,12 +15,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
-from app.models.chunk_labels import ChunkRelevanceLabel
+from app.models.chunk_labels import ChunkRelevanceLabel, TestCaseLabelingStatus
 from app.models.evaluations import EvalResult, EvalRun
 from app.models.project import Project
 from app.models.user import User
-from app.schemas.retrieval import ChunkLabelBatch, LabelingRunResponse
+from app.schemas.retrieval import (
+    ChunkLabelBatch,
+    LabelingRunResponse,
+    LabelingStatusUpdate,
+)
 from app.services.chunk_labeling import build_labeling_view
+
+
+def _display_name(email: str | None) -> str | None:
+    """Compact display name for a labeler — the local part of their email."""
+    if not email:
+        return None
+    return email.split("@", 1)[0]
 
 router = APIRouter(
     prefix="/api/pipeline",
@@ -67,7 +78,69 @@ async def get_labeling_view(
     ).scalars().all()
     labels_by_key = {(lbl.test_id, lbl.chunk_id): lbl.relevant for lbl in labels}
 
-    return build_labeling_view(run, results, labels_by_key)
+    # Resolve labeler ids to display names in one query.
+    labeler_ids = {lbl.labeled_by for lbl in labels if lbl.labeled_by}
+    names: dict = {}
+    if labeler_ids:
+        users = (
+            await db.execute(select(User).where(User.id.in_(labeler_ids)))
+        ).scalars().all()
+        names = {u.id: _display_name(u.email) for u in users}
+    labeler_by_key = {
+        (lbl.test_id, lbl.chunk_id): names.get(lbl.labeled_by)
+        for lbl in labels
+        if lbl.labeled_by and names.get(lbl.labeled_by)
+    }
+
+    statuses = (
+        await db.execute(
+            select(TestCaseLabelingStatus).where(TestCaseLabelingStatus.project_id == project.id)
+        )
+    ).scalars().all()
+    complete_by_test = {s.test_id: s.complete for s in statuses}
+
+    return build_labeling_view(
+        run,
+        results,
+        labels_by_key,
+        labeler_by_key=labeler_by_key,
+        complete_by_test=complete_by_test,
+    )
+
+
+@router.put(
+    "/labeling/status",
+    dependencies=[require_write("evaluate", "labeling")],
+)
+async def set_labeling_status(
+    body: LabelingStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """Manually mark a test case's chunk labeling as complete or not."""
+    status = (
+        await db.execute(
+            select(TestCaseLabelingStatus).where(
+                TestCaseLabelingStatus.project_id == project.id,
+                TestCaseLabelingStatus.test_id == body.test_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if status is None:
+        db.add(
+            TestCaseLabelingStatus(
+                project_id=project.id,
+                test_id=body.test_id,
+                complete=body.complete,
+                marked_by=user.id,
+            )
+        )
+    else:
+        status.complete = body.complete
+        status.marked_by = user.id
+    await db.flush()
+    return {"test_id": body.test_id, "complete": body.complete}
 
 
 @router.post(

@@ -17,12 +17,19 @@ def build_labeling_view(
     run: EvalRun,
     results: Iterable[EvalResult],
     labels_by_key: dict[tuple[str, str], bool],
+    *,
+    labeler_by_key: dict[tuple[str, str], str] | None = None,
+    complete_by_test: dict[str, bool] | None = None,
 ) -> LabelingRunResponse:
     """Assemble per-case retrieved chunks with their current relevance labels.
 
     ``labels_by_key`` maps ``(test_id, chunk_id) -> relevant`` for the project, so a label
-    made in any run shows up here (labels are pooled across runs).
+    made in any run shows up here (labels are pooled across runs). ``labeler_by_key`` maps
+    the same key to the display name of who made it; ``complete_by_test`` maps test_id to
+    the manual "labeling complete" flag.
     """
+    labeler_by_key = labeler_by_key or {}
+    complete_by_test = complete_by_test or {}
     result_list = list(results)
     cases: list[LabelingCase] = []
 
@@ -35,15 +42,20 @@ def build_labeling_view(
         chunks: list[ChunkForLabeling] = []
         labeled = 0
         relevant = 0
+        labelers: list[str] = []
         for i, c in enumerate(raw_chunks, start=1):
             if not isinstance(c, dict):
                 continue
             chunk_id = c.get("chunk_id")
-            label = labels_by_key.get((r.test_id, chunk_id)) if chunk_id else None
+            key = (r.test_id, chunk_id) if chunk_id else None
+            label = labels_by_key.get(key) if key else None
+            labeler = labeler_by_key.get(key) if key else None
             if label is not None:
                 labeled += 1
                 if label:
                     relevant += 1
+                if labeler and labeler not in labelers:
+                    labelers.append(labeler)
             pdf_page = c.get("pdf_page_number")
             chunks.append(
                 ChunkForLabeling(
@@ -57,6 +69,7 @@ def build_labeling_view(
                     score=c.get("score") if isinstance(c.get("score"), (int, float)) else None,
                     rank=i,
                     relevant=label,
+                    labeled_by=labeler,
                 )
             )
         if not chunks:
@@ -68,11 +81,13 @@ def build_labeling_view(
                 chunks=chunks,
                 labeled_count=labeled,
                 relevant_count=relevant,
+                complete=bool(complete_by_test.get(r.test_id)),
+                labelers=labelers,
             )
         )
 
-    # Least-labeled cases first, so a human always lands on unfinished work.
-    cases.sort(key=lambda c: (c.labeled_count, c.test_id))
+    # Incomplete first, then least-labeled, so a human always lands on unfinished work.
+    cases.sort(key=lambda c: (c.complete, c.labeled_count, c.test_id))
 
     return LabelingRunResponse(
         available=bool(cases),

@@ -41,7 +41,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         GithubInstallation,
         ProjectGithubApp,
     )
-    from app.models.chunk_labels import ChunkRelevanceLabel  # noqa: F401 — ensure table is created
+    from app.models.chunk_labels import (  # noqa: F401 — ensure tables are created
+        ChunkRelevanceLabel,
+        TestCaseLabelingStatus,
+    )
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
