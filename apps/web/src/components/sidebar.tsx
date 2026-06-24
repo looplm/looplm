@@ -35,6 +35,7 @@ const NAV_GROUPS = [
       { href: "/datasets", label: "Datasets", icon: "\u{1F4CB}" },
       { href: "/coverage", label: "Coverage", icon: "\u{1F4E1}" },
       { href: "/pipeline", label: "Pipeline", icon: "\u{1F9ED}" },
+      { href: "/labeling", label: "Labeling", icon: "\u{1F3F7}️" },
     ],
   },
   {

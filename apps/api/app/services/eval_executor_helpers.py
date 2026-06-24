@@ -13,7 +13,10 @@ import httpx
 from app.models.models import Evaluator, EvaluatorType, TestCase
 from app.schemas.evaluations import EvalResultImport, GraderResult
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
-from app.services.retrieval_config import extract_retrieval_context_from_payload
+from app.services.retrieval_config import (
+    extract_retrieval_context_from_payload,
+    extract_retrieved_chunks,
+)
 from app.services.eval_runners import (
     _call_target_api,
     _run_deterministic,
@@ -47,6 +50,10 @@ def _build_result_metadata(raw_response: str, *, payload_key: str | None = None)
     ctx = extract_retrieval_context_from_payload(parsed, payload_key=payload_key)
     if ctx:
         meta["retrieval_context"] = ctx
+    # Structured ranked chunks (with Azure chunk ids) for chunk-level relevance labeling.
+    chunks = extract_retrieved_chunks(parsed, payload_key=payload_key)
+    if chunks:
+        meta["retrieved_chunks"] = chunks
     return meta
 
 

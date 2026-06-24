@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
+from app.models.chunk_labels import ChunkRelevanceLabel
 from app.models.evaluations import EvalResult, EvalRun
 from app.models.models import Integration, Trace
 from app.models.project import Project
@@ -27,7 +28,10 @@ from app.schemas.retrieval import (
     RetrievalTargets,
 )
 from app.services.retrieval_config import get_rag_span_names
-from app.services.retrieval_metrics_aggregate import aggregate_run_retrieval_metrics
+from app.services.retrieval_metrics_aggregate import (
+    aggregate_run_retrieval_metrics,
+    aggregate_run_retrieval_metrics_from_labels,
+)
 from app.services.retrieval_pipeline_aggregate import build_retrieval_pipeline_aggregate
 from app.services.retrieval_targets import (
     SETTINGS_KEY as TARGETS_SETTINGS_KEY,
@@ -85,14 +89,16 @@ async def get_retrieval_pipeline(
 @router.get("/retrieval-metrics", response_model=RetrievalRunMetrics)
 async def get_retrieval_metrics(
     run_id: UUID | None = None,
+    source: str = "urls",
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
     """Run-level retrieval-quality metrics (recall@k / precision@k / MRR / nDCG).
 
-    Computed from the ``contains_urls`` evaluator's per-case captures vs each test case's
-    ground-truth URLs. Defaults to the project's most recent eval run when ``run_id`` is
-    omitted; returns ``available=False`` when the run has no cases with ground-truth URLs.
+    ``source=urls`` (default) measures against each test case's ground-truth URLs via the
+    ``contains_urls`` evaluator captures. ``source=labels`` measures against pooled human
+    chunk relevance labels (recall is pooled across runs). Defaults to the project's most
+    recent eval run; returns ``available=False`` when there is nothing to measure against.
     """
     run_filter = [EvalRun.project_id == project.id]
     if run_id is not None:
@@ -112,6 +118,20 @@ async def get_retrieval_metrics(
     results = (
         await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
     ).scalars().all()
+
+    if source == "labels":
+        labels = (
+            await db.execute(
+                select(ChunkRelevanceLabel).where(
+                    ChunkRelevanceLabel.project_id == project.id,
+                    ChunkRelevanceLabel.relevant.is_(True),
+                )
+            )
+        ).scalars().all()
+        relevant_by_test: dict[str, set[str]] = {}
+        for lbl in labels:
+            relevant_by_test.setdefault(lbl.test_id, set()).add(lbl.chunk_id)
+        return aggregate_run_retrieval_metrics_from_labels(run, results, relevant_by_test)
 
     return aggregate_run_retrieval_metrics(run, results)
 

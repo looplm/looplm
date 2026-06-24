@@ -47,6 +47,44 @@ export interface RetrievalTargets {
   precision: number;
 }
 
+// --- Chunk-level human relevance labeling ---
+
+export interface ChunkForLabeling {
+  chunk_id?: string | null;
+  title?: string | null;
+  url?: string | null;
+  content_preview?: string | null;
+  score?: number | null;
+  rank: number;
+  relevant?: boolean | null;
+}
+
+export interface LabelingCase {
+  test_id: string;
+  input?: string | null;
+  chunks: ChunkForLabeling[];
+  labeled_count: number;
+  relevant_count: number;
+}
+
+export interface LabelingRunResponse {
+  available: boolean;
+  run_id?: string | null;
+  run_name?: string | null;
+  total_cases: number;
+  labelable_cases: number;
+  cases: LabelingCase[];
+}
+
+export interface ChunkLabelUpsert {
+  test_id: string;
+  chunk_id: string;
+  relevant: boolean;
+  content_preview?: string | null;
+  url?: string | null;
+  title?: string | null;
+}
+
 // --- Quantitative retrieval-quality metrics (eval-run based) ---
 
 export interface RetrievalCaseMetrics {

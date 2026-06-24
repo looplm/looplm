@@ -16,6 +16,7 @@ from typing import Any, Iterable
 
 from app.models.evaluations import EvalResult, EvalRun
 from app.schemas.retrieval import RetrievalCaseMetrics, RetrievalRunMetrics
+from app.services.chunk_labeling import retrieved_chunk_ids
 from app.services.retrieval_metrics import compute_retrieval_metrics
 
 # Richer k grid than the grader default so the run view can draw a recall curve.
@@ -60,11 +61,17 @@ def _macro_avg_dict(dicts: list[dict[str, float]]) -> dict[str, float]:
     return out
 
 
-def aggregate_run_retrieval_metrics(
-    run: EvalRun, results: Iterable[EvalResult], ks: tuple[int, ...] = AGG_KS
+def _aggregate_rows(
+    run: EvalRun,
+    total_cases: int,
+    rows: list[dict[str, Any]],
+    ks: tuple[int, ...],
 ) -> RetrievalRunMetrics:
-    """Build the run-level retrieval-quality summary from its results."""
-    result_list = list(results)
+    """Shared core: turn per-case (expected, retrieved) rows into a run summary.
+
+    Each row: ``{test_id, input, expected: list[str], retrieved: list[str], missing: list[str]}``.
+    Rows with no expected ids are dropped (recall is undefined without ground truth).
+    """
     cases: list[RetrievalCaseMetrics] = []
     recalls: list[dict[str, float]] = []
     precisions: list[dict[str, float]] = []
@@ -73,12 +80,9 @@ def aggregate_run_retrieval_metrics(
     mrrs: list[float] = []
     largest_k = str(max(ks))
 
-    for r in result_list:
-        details = _find_retrieval_details(r.graders)
-        if details is None:
-            continue
-        expected = _expected_from_details(details)
-        retrieved = [u for u in (details.get("retrieved_urls") or []) if isinstance(u, str)]
+    for row in rows:
+        expected = row["expected"]
+        retrieved = row["retrieved"]
         metrics = compute_retrieval_metrics(expected, retrieved, ks)
         if metrics is None:  # no ground truth → not measurable
             continue
@@ -95,8 +99,8 @@ def aggregate_run_retrieval_metrics(
 
         cases.append(
             RetrievalCaseMetrics(
-                test_id=r.test_id,
-                input=(r.input or None) and str(r.input)[:200],
+                test_id=row["test_id"],
+                input=row.get("input"),
                 expected_count=len(expected),
                 retrieved_count=len(retrieved),
                 recall_at_k=recall,
@@ -104,7 +108,7 @@ def aggregate_run_retrieval_metrics(
                 mrr=metrics["mrr"],
                 first_relevant_rank=metrics["first_relevant_rank"],
                 hit=hit_rate.get(largest_k, 0.0) >= 1.0,
-                missing_urls=[u for u in (details.get("missing_urls") or []) if isinstance(u, str)],
+                missing_urls=row.get("missing", []),
             )
         )
 
@@ -113,7 +117,7 @@ def aggregate_run_retrieval_metrics(
             available=False,
             run_id=str(run.id),
             run_name=run.name,
-            total_cases=len(result_list),
+            total_cases=total_cases,
             evaluated_cases=0,
             ks=list(ks),
         )
@@ -125,7 +129,7 @@ def aggregate_run_retrieval_metrics(
         available=True,
         run_id=str(run.id),
         run_name=run.name,
-        total_cases=len(result_list),
+        total_cases=total_cases,
         evaluated_cases=len(cases),
         ks=list(ks),
         recall_at_k=_macro_avg_dict(recalls),
@@ -135,3 +139,55 @@ def aggregate_run_retrieval_metrics(
         mrr=round(sum(mrrs) / len(mrrs), 4) if mrrs else None,
         cases=cases,
     )
+
+
+def aggregate_run_retrieval_metrics(
+    run: EvalRun, results: Iterable[EvalResult], ks: tuple[int, ...] = AGG_KS
+) -> RetrievalRunMetrics:
+    """Run summary from the ``contains_urls`` grader's per-case URL captures."""
+    result_list = list(results)
+    rows: list[dict[str, Any]] = []
+    for r in result_list:
+        details = _find_retrieval_details(r.graders)
+        if details is None:
+            continue
+        rows.append(
+            {
+                "test_id": r.test_id,
+                "input": (r.input or None) and str(r.input)[:200],
+                "expected": _expected_from_details(details),
+                "retrieved": [u for u in (details.get("retrieved_urls") or []) if isinstance(u, str)],
+                "missing": [u for u in (details.get("missing_urls") or []) if isinstance(u, str)],
+            }
+        )
+    return _aggregate_rows(run, len(result_list), rows, ks)
+
+
+def aggregate_run_retrieval_metrics_from_labels(
+    run: EvalRun,
+    results: Iterable[EvalResult],
+    relevant_by_test: dict[str, set[str]],
+    ks: tuple[int, ...] = AGG_KS,
+) -> RetrievalRunMetrics:
+    """Run summary from human chunk labels, with pooled recall.
+
+    ``relevant_by_test`` maps test_id → the set of chunk ids judged relevant for that
+    query (pooled across all runs). Retrieved chunk ids come from each result's captured
+    ``retrieved_chunks`` in rank order.
+    """
+    result_list = list(results)
+    rows: list[dict[str, Any]] = []
+    for r in result_list:
+        relevant = relevant_by_test.get(r.test_id)
+        if not relevant:
+            continue
+        rows.append(
+            {
+                "test_id": r.test_id,
+                "input": (r.input or None) and str(r.input)[:200],
+                "expected": list(relevant),
+                "retrieved": retrieved_chunk_ids(r),
+                "missing": [],
+            }
+        )
+    return _aggregate_rows(run, len(result_list), rows, ks)

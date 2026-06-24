@@ -349,6 +349,7 @@ export default function RetrievalMetricsPanel() {
 
   const [runs, setRuns] = useState<EvalRunListItem[]>([]);
   const [runId, setRunId] = useState<string | null>(null);
+  const [source, setSource] = useState<"urls" | "labels">("urls");
   const [metrics, setMetrics] = useState<RetrievalRunMetrics | null>(null);
   const [targets, setTargets] = useState<RetrievalTargets | null>(null);
   const [editing, setEditing] = useState(false);
@@ -368,7 +369,7 @@ export default function RetrievalMetricsPanel() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getRetrievalMetrics(runId ?? undefined)
+    getRetrievalMetrics(runId ?? undefined, source)
       .then((m) => {
         if (!cancelled) {
           setMetrics(m);
@@ -384,7 +385,7 @@ export default function RetrievalMetricsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, [runId, source]);
 
   const largestK = metrics?.ks.length ? Math.max(...metrics.ks) : 10;
   const lk = String(largestK);
@@ -405,6 +406,21 @@ export default function RetrievalMetricsPanel() {
           <Info text={EXPLAIN.targets} />
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700 text-xs">
+            {(["urls", "labels"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSource(s)}
+                className={`px-2.5 py-1.5 ${
+                  source === s
+                    ? "bg-indigo-600 text-white"
+                    : "bg-white dark:bg-slate-900 text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+                }`}
+              >
+                {s === "urls" ? "Expected URLs" : "Human labels"}
+              </button>
+            ))}
+          </div>
           {metrics?.available && targets && (
             <span
               className={`text-xs font-medium px-2 py-1 rounded-full ${
@@ -470,9 +486,18 @@ export default function RetrievalMetricsPanel() {
         </div>
       ) : !metrics || !metrics.available ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
-          No labeled retrieval data for this run. Add expected source URLs to test cases and
-          run an evaluation with a <span className="font-mono">contains_urls</span> check to
-          measure recall.
+          {source === "labels" ? (
+            <>
+              No chunk relevance labels for this run yet. Judge the retrieved chunks on the
+              Labeling page, then this measures recall against those human labels.
+            </>
+          ) : (
+            <>
+              No labeled retrieval data for this run. Add expected source URLs to test cases
+              and run an evaluation with a <span className="font-mono">contains_urls</span>{" "}
+              check to measure recall.
+            </>
+          )}
         </div>
       ) : (
         <>

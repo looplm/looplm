@@ -1,0 +1,93 @@
+"""Build the chunk-labeling view for an eval run from its captured retrieved chunks.
+
+Each eval result stores the ranked chunks it retrieved (``result_metadata["retrieved_chunks"]``,
+populated by the eval executor). This module pairs those with any existing human labels so
+the UI can show what was retrieved and which chunks have already been judged.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Iterable
+
+from app.models.evaluations import EvalResult, EvalRun
+from app.schemas.retrieval import ChunkForLabeling, LabelingCase, LabelingRunResponse
+
+
+def build_labeling_view(
+    run: EvalRun,
+    results: Iterable[EvalResult],
+    labels_by_key: dict[tuple[str, str], bool],
+) -> LabelingRunResponse:
+    """Assemble per-case retrieved chunks with their current relevance labels.
+
+    ``labels_by_key`` maps ``(test_id, chunk_id) -> relevant`` for the project, so a label
+    made in any run shows up here (labels are pooled across runs).
+    """
+    result_list = list(results)
+    cases: list[LabelingCase] = []
+
+    for r in result_list:
+        meta = r.result_metadata if isinstance(r.result_metadata, dict) else {}
+        raw_chunks = meta.get("retrieved_chunks")
+        if not isinstance(raw_chunks, list) or not raw_chunks:
+            continue
+
+        chunks: list[ChunkForLabeling] = []
+        labeled = 0
+        relevant = 0
+        for i, c in enumerate(raw_chunks, start=1):
+            if not isinstance(c, dict):
+                continue
+            chunk_id = c.get("chunk_id")
+            label = labels_by_key.get((r.test_id, chunk_id)) if chunk_id else None
+            if label is not None:
+                labeled += 1
+                if label:
+                    relevant += 1
+            chunks.append(
+                ChunkForLabeling(
+                    chunk_id=chunk_id,
+                    title=c.get("title"),
+                    url=c.get("url"),
+                    content_preview=c.get("content_preview"),
+                    score=c.get("score") if isinstance(c.get("score"), (int, float)) else None,
+                    rank=i,
+                    relevant=label,
+                )
+            )
+        if not chunks:
+            continue
+        cases.append(
+            LabelingCase(
+                test_id=r.test_id,
+                input=(r.input or None) and str(r.input)[:300],
+                chunks=chunks,
+                labeled_count=labeled,
+                relevant_count=relevant,
+            )
+        )
+
+    # Least-labeled cases first, so a human always lands on unfinished work.
+    cases.sort(key=lambda c: (c.labeled_count, c.test_id))
+
+    return LabelingRunResponse(
+        available=bool(cases),
+        run_id=str(run.id),
+        run_name=run.name,
+        total_cases=len(result_list),
+        labelable_cases=len(cases),
+        cases=cases,
+    )
+
+
+def retrieved_chunk_ids(result: EvalResult) -> list[str]:
+    """Ranked list of chunk ids a result retrieved (order = retrieval rank)."""
+    meta = result.result_metadata if isinstance(result.result_metadata, dict) else {}
+    raw: Any = meta.get("retrieved_chunks")
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for c in raw:
+        if isinstance(c, dict) and isinstance(c.get("chunk_id"), str):
+            out.append(c["chunk_id"])
+    return out

@@ -16,7 +16,7 @@ from app.routers import (
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
     index_explorer, ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent,
     permissions, project_members, projects, prompts, rag_coverage, retrieval, route_analysis, source_registry, trace_detail,
-    traces, user_settings, version,
+    traces, user_settings, version, chunk_labels,
 )
 
 logger = logging.getLogger("looplm")
@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         GithubInstallation,
         ProjectGithubApp,
     )
+    from app.models.chunk_labels import ChunkRelevanceLabel  # noqa: F401 — ensure table is created
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -211,6 +212,7 @@ app.include_router(experiments.router)
 app.include_router(datasets.router)
 app.include_router(rag_coverage.router)
 app.include_router(retrieval.router)
+app.include_router(chunk_labels.router)
 app.include_router(index_explorer.router)
 app.include_router(source_registry.router)
 app.include_router(imports.router)

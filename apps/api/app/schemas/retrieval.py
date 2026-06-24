@@ -92,6 +92,58 @@ class RetrievalCaseMetrics(BaseModel):
     missing_urls: list[str] = Field(default_factory=list)
 
 
+# --- Chunk-level human relevance labeling ----------------------------------------
+
+
+class ChunkForLabeling(BaseModel):
+    """A retrieved chunk presented to a human for a relevant/not judgment."""
+
+    chunk_id: str | None = None
+    title: str | None = None
+    url: str | None = None
+    content_preview: str | None = None
+    score: float | None = None
+    rank: int
+    # Current label, or None when this chunk has not been judged yet.
+    relevant: bool | None = None
+
+
+class LabelingCase(BaseModel):
+    test_id: str
+    input: str | None = None
+    chunks: list[ChunkForLabeling] = Field(default_factory=list)
+    labeled_count: int = 0
+    relevant_count: int = 0
+
+
+class LabelingRunResponse(BaseModel):
+    """Retrieved chunks for an eval run, grouped by case, ready for labeling.
+
+    ``available`` is False when no case in the run captured retrieved chunks (e.g. the
+    target response carried no structured sources).
+    """
+
+    available: bool = False
+    run_id: str | None = None
+    run_name: str | None = None
+    total_cases: int = 0
+    labelable_cases: int = 0
+    cases: list[LabelingCase] = Field(default_factory=list)
+
+
+class ChunkLabelUpsert(BaseModel):
+    test_id: str
+    chunk_id: str
+    relevant: bool
+    content_preview: str | None = None
+    url: str | None = None
+    title: str | None = None
+
+
+class ChunkLabelBatch(BaseModel):
+    labels: list[ChunkLabelUpsert] = Field(default_factory=list)
+
+
 class RetrievalRunMetrics(BaseModel):
     """Retrieval-quality metrics for an eval run, macro-averaged across cases.
 

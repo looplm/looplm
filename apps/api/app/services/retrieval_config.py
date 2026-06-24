@@ -203,8 +203,13 @@ def extract_rag_pipeline_sources(span_output: Any) -> list[dict[str, Any]]:
         def _num(value: Any) -> float | None:
             return value if isinstance(value, (int, float)) else None
 
+        # Stable chunk identity (Azure AI Search document key). rde-gpt logs it as
+        # ``chunkId`` on chunk sources; the eval payload's ``searchSources`` carry it as
+        # ``id``. Used to attach human relevance labels at the chunk level.
+        chunk_id = src.get("chunkId") or src.get("chunk_id") or src.get("id") or src.get("key")
         out.append(
             {
+                "chunk_id": str(chunk_id) if chunk_id is not None else None,
                 "title": src.get("title") or src.get("pageTitle"),
                 "url": url,
                 "score": _num(src.get("score")),
@@ -311,3 +316,44 @@ def extract_retrieved_urls(
                 break
 
     return urls[:limit]
+
+
+def extract_retrieved_chunks(
+    parsed: Any, *, payload_key: str | None = None, limit: int = 50
+) -> list[dict[str, Any]]:
+    """Structured, ranked retrieved chunks from a parsed response payload.
+
+    For the chunk-level labeling path: locates the sources array under the common keys
+    (``searchSources`` first, then the configured ``payload_key``, then the fallbacks,
+    then a top-level ``sources``) and returns order-preserved dicts with
+    ``chunk_id``/``title``/``url``/``score``/``content_preview``. Order is the retrieval
+    rank, which the metrics rely on. Returns ``[]`` when ``parsed`` is not a dict or no
+    sources array is found.
+    """
+    if not isinstance(parsed, dict):
+        return []
+    keys: list[str] = ["searchSources"]
+    if payload_key:
+        keys.append(payload_key)
+    keys.extend(k for k in _FALLBACK_PAYLOAD_KEYS if k not in keys)
+    keys.append("sources")
+
+    sources: list[dict[str, Any]] = []
+    for key in keys:
+        sources = extract_rag_pipeline_sources(parsed.get(key))
+        if sources:
+            break
+
+    out: list[dict[str, Any]] = []
+    for s in sources[:limit]:
+        preview = s.get("content_preview")
+        out.append(
+            {
+                "chunk_id": s.get("chunk_id"),
+                "title": s.get("title"),
+                "url": s.get("url"),
+                "score": s.get("score"),
+                "content_preview": str(preview)[:600] if preview else None,
+            }
+        )
+    return out

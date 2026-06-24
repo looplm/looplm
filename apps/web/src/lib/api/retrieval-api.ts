@@ -8,6 +8,8 @@ import type {
   RetrievalPipelineResponse,
   RetrievalRunMetrics,
   RetrievalTargets,
+  LabelingRunResponse,
+  ChunkLabelUpsert,
 } from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
@@ -24,10 +26,22 @@ function buildQuery(filters: AnalyticsFilters): string {
 export const getRetrievalPipeline = (filters: AnalyticsFilters = {}) =>
   request<RetrievalPipelineResponse>(`/api/pipeline/graph${buildQuery(filters)}`);
 
-export const getRetrievalMetrics = (runId?: string) =>
-  request<RetrievalRunMetrics>(
-    `/api/pipeline/retrieval-metrics${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
+export const getRetrievalMetrics = (runId?: string, source: "urls" | "labels" = "urls") => {
+  const params = new URLSearchParams({ source });
+  if (runId) params.set("run_id", runId);
+  return request<RetrievalRunMetrics>(`/api/pipeline/retrieval-metrics?${params.toString()}`);
+};
+
+export const getLabelingView = (runId?: string) =>
+  request<LabelingRunResponse>(
+    `/api/pipeline/labeling${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
   );
+
+export const saveChunkLabels = (labels: ChunkLabelUpsert[]) =>
+  request<{ saved: number }>(`/api/pipeline/labels`, {
+    method: "POST",
+    body: JSON.stringify({ labels }),
+  });
 
 export const getRetrievalTargets = () =>
   request<RetrievalTargets>(`/api/pipeline/targets`);
