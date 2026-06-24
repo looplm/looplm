@@ -16,56 +16,16 @@ import {
 } from "@/lib/api";
 import { usePermissions } from "@/components/permissions-context";
 
-function ChunkMetadata({ chunkId }: { chunkId: string }) {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [fields, setFields] = useState<Record<string, unknown> | null>(null);
-  const [loaded, setLoaded] = useState(false);
+// Index fields that hold the chunk's full text, in priority order.
+const INDEX_TEXT_FIELDS = ["chunk_text", "content", "text", "chunkText"];
 
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (next && !loaded) {
-      setLoading(true);
-      getChunkMetadata(chunkId)
-        .then((r) => setFields(r.fields ?? null))
-        .catch(() => setFields(null))
-        .finally(() => {
-          setLoading(false);
-          setLoaded(true);
-        });
-    }
-  };
-
-  return (
-    <div className="mt-2">
-      <button onClick={toggle} className="text-[11px] font-medium text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200">
-        {open ? "Hide index fields" : "Index fields"}
-      </button>
-      {open && (
-        <div className="mt-1.5 rounded-lg border border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30 p-2.5">
-          {loading ? (
-            <p className="text-[11px] text-gray-400 dark:text-slate-500">Loading from index...</p>
-          ) : !fields || Object.keys(fields).length === 0 ? (
-            <p className="text-[11px] text-gray-400 dark:text-slate-500">
-              This chunk was not found in the connected index.
-            </p>
-          ) : (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
-              {Object.entries(fields).map(([k, v]) => (
-                <div key={k} className="contents">
-                  <dt className="font-mono text-gray-500 dark:text-slate-400 truncate">{k}</dt>
-                  <dd className="text-gray-700 dark:text-slate-300 break-words">
-                    {typeof v === "object" ? JSON.stringify(v) : String(v)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </div>
-      )}
-    </div>
-  );
+function pickIndexText(fields: Record<string, unknown> | null): string | null {
+  if (!fields) return null;
+  for (const k of INDEX_TEXT_FIELDS) {
+    const v = fields[k];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return null;
 }
 
 function ChunkRow({
@@ -80,10 +40,28 @@ function ChunkRow({
   onLabel: (relevant: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [showMeta, setShowMeta] = useState(false);
+  const [doc, setDoc] = useState<Record<string, unknown> | null>(null);
+  const [docState, setDocState] = useState<"idle" | "loading" | "loaded">("idle");
+
   const labelable = !!chunk.chunk_id;
-  const body = chunk.content || chunk.content_preview || "";
-  const isLong = body.length > 240 || body.includes("\n");
   const docLabel = chunk.title || "source document";
+  const traceText = chunk.content || chunk.content_preview || "";
+  const indexText = pickIndexText(doc);
+  // The index holds the authoritative, untruncated chunk; the trace copy can be cut off.
+  const fullText = indexText ?? traceText;
+  const collapsedText = traceText || indexText || "";
+  const canFetchIndex = indexConnected && !!chunk.chunk_id;
+  const isLong = traceText.length > 240 || traceText.includes("\n") || canFetchIndex;
+
+  const loadDoc = () => {
+    if (docState !== "idle" || !canFetchIndex || !chunk.chunk_id) return;
+    setDocState("loading");
+    getChunkMetadata(chunk.chunk_id)
+      .then((r) => setDoc(r.fields ?? null))
+      .catch(() => setDoc(null))
+      .finally(() => setDocState("loaded"));
+  };
 
   return (
     <div
@@ -122,26 +100,42 @@ function ChunkRow({
           )}
         </div>
 
-        {/* The chunk text: the thing being judged */}
-        {body ? (
-          <p
-            className={`text-sm text-gray-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap ${
-              expanded ? "" : "line-clamp-3"
-            }`}
-          >
-            {body}
+        {/* The chunk text: the thing being judged. Expanded view prefers the index copy. */}
+        {expanded ? (
+          docState === "loading" ? (
+            <p className="text-sm italic text-gray-400 dark:text-slate-500">Loading full chunk from index...</p>
+          ) : fullText ? (
+            <p className="text-sm text-gray-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">
+              {fullText}
+            </p>
+          ) : (
+            <p className="text-sm italic text-gray-400 dark:text-slate-500">No chunk text available.</p>
+          )
+        ) : collapsedText ? (
+          <p className="text-sm text-gray-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap line-clamp-3">
+            {collapsedText}
           </p>
         ) : (
           <p className="text-sm italic text-gray-400 dark:text-slate-500">No chunk text captured.</p>
         )}
-        {isLong && (
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            className="mt-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
-          >
-            {expanded ? "Show less" : "Show full chunk"}
-          </button>
-        )}
+
+        <div className="flex items-center gap-3 mt-1">
+          {isLong && (
+            <button
+              onClick={() => {
+                const next = !expanded;
+                setExpanded(next);
+                if (next) loadDoc();
+              }}
+              className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              {expanded ? "Show less" : "Show full chunk"}
+            </button>
+          )}
+          {expanded && indexText && (
+            <span className="text-[10px] text-gray-400 dark:text-slate-500">full text from index</span>
+          )}
+        </div>
 
         {/* Secondary: link to the whole document, and the chunk id */}
         <div className="flex items-center gap-3 mt-2 text-[11px] text-gray-400 dark:text-slate-500">
@@ -162,7 +156,41 @@ function ChunkRow({
           )}
         </div>
 
-        {indexConnected && chunk.chunk_id && <ChunkMetadata chunkId={chunk.chunk_id} />}
+        {canFetchIndex && (
+          <div className="mt-2">
+            <button
+              onClick={() => {
+                setShowMeta((v) => !v);
+                loadDoc();
+              }}
+              className="text-[11px] font-medium text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+            >
+              {showMeta ? "Hide index fields" : "Index fields"}
+            </button>
+            {showMeta && (
+              <div className="mt-1.5 rounded-lg border border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30 p-2.5">
+                {docState === "loading" ? (
+                  <p className="text-[11px] text-gray-400 dark:text-slate-500">Loading from index...</p>
+                ) : !doc || Object.keys(doc).length === 0 ? (
+                  <p className="text-[11px] text-gray-400 dark:text-slate-500">
+                    This chunk was not found in the connected index.
+                  </p>
+                ) : (
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
+                    {Object.entries(doc).map(([k, v]) => (
+                      <div key={k} className="contents">
+                        <dt className="font-mono text-gray-500 dark:text-slate-400 truncate">{k}</dt>
+                        <dd className="text-gray-700 dark:text-slate-300 break-words">
+                          {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {!labelable && (
           <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
