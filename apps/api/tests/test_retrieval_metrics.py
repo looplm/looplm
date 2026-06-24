@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from app.services.retrieval_metrics import (
+    compute_first_relevant_rank,
     compute_hit_rate_at_k,
+    compute_mrr,
+    compute_ndcg_at_k,
     compute_precision_at_k,
     compute_recall_at_k,
+    compute_retrieval_metrics,
 )
 
 
@@ -104,3 +108,70 @@ def test_hit_rate_empty_expected_returns_none():
 
 def test_hit_rate_empty_retrieved_is_zero():
     assert compute_hit_rate_at_k(["https://a.example/p1"], []) == {"5": 0.0, "10": 0.0}
+
+
+# --- MRR + first relevant rank ---
+
+def test_mrr_first_position():
+    expected = ["https://a.example/p1"]
+    retrieved = ["https://a.example/p1", "https://b.example/p2"]
+    assert compute_mrr(expected, retrieved) == 1.0
+
+
+def test_mrr_third_position():
+    expected = ["https://hit.example/p"]
+    retrieved = ["https://m.example/1", "https://m.example/2", "https://hit.example/p"]
+    assert compute_mrr(expected, retrieved) == 1.0 / 3
+
+
+def test_mrr_zero_when_none_relevant():
+    assert compute_mrr(["https://a.example/p1"], ["https://b.example/p2"]) == 0.0
+
+
+def test_mrr_none_when_no_expected():
+    assert compute_mrr([], ["https://a.example/p1"]) is None
+
+
+def test_first_relevant_rank():
+    expected = ["https://hit.example/p"]
+    retrieved = ["https://m.example/1", "https://hit.example/p"]
+    assert compute_first_relevant_rank(expected, retrieved) == 2
+    assert compute_first_relevant_rank(expected, ["https://m.example/1"]) is None
+
+
+# --- nDCG ---
+
+def test_ndcg_perfect_when_relevant_on_top():
+    expected = ["https://a.example/p1", "https://b.example/p2"]
+    retrieved = ["https://a.example/p1", "https://b.example/p2", "https://c.example/x"]
+    assert compute_ndcg_at_k(expected, retrieved) == {"5": 1.0, "10": 1.0}
+
+
+def test_ndcg_penalizes_burying_relevant_docs():
+    expected = ["https://hit.example/p"]
+    # Relevant doc at rank 3 → DCG = 1/log2(4); IDCG = 1/log2(2) = 1.
+    buried = ["https://m.example/1", "https://m.example/2", "https://hit.example/p"]
+    ndcg = compute_ndcg_at_k(expected, buried)
+    import math
+    assert ndcg["5"] == (1.0 / math.log2(4))
+    assert ndcg["5"] < 1.0
+
+
+def test_ndcg_none_when_no_expected():
+    assert compute_ndcg_at_k([], ["https://a.example/p1"]) is None
+
+
+# --- combined helper ---
+
+def test_compute_retrieval_metrics_bundles_all():
+    expected = ["https://a.example/p1"]
+    retrieved = ["https://a.example/p1"]
+    m = compute_retrieval_metrics(expected, retrieved)
+    assert m is not None
+    assert set(m) == {"recall_at_k", "precision_at_k", "hit_rate_at_k", "ndcg_at_k", "mrr", "first_relevant_rank"}
+    assert m["mrr"] == 1.0
+    assert m["first_relevant_rank"] == 1
+
+
+def test_compute_retrieval_metrics_none_without_truth():
+    assert compute_retrieval_metrics([], ["https://a.example/p1"]) is None

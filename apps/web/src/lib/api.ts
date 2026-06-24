@@ -44,6 +44,8 @@ export type {
   RetrievalPipelineNode,
   RetrievalPipelineEdge,
   RetrievalMetric,
+  RetrievalRunMetrics,
+  RetrievalCaseMetrics,
   RouteNode,
   RouteEdge,
   RouteAnalysisResponse,

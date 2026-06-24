@@ -8,6 +8,7 @@ import {
 } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import RetrievalPipelineGraph from "@/components/retrieval-pipeline-graph";
+import RetrievalMetricsPanel from "@/components/retrieval-metrics-panel";
 
 export default function PipelinePage() {
   const { startDate, endDate, environment, userFilterMode, filteredUsers } =
@@ -87,6 +88,8 @@ export default function PipelinePage() {
       ) : (
         <RetrievalPipelineGraph data={data} />
       )}
+
+      <RetrievalMetricsPanel />
     </div>
   );
 }

@@ -38,3 +38,33 @@ export interface RetrievalPipelineResponse {
   edges: RetrievalPipelineEdge[];
   span_names: Record<string, string>;
 }
+
+// --- Quantitative retrieval-quality metrics (eval-run based) ---
+
+export interface RetrievalCaseMetrics {
+  test_id: string;
+  input?: string | null;
+  expected_count: number;
+  retrieved_count: number;
+  recall_at_k: Record<string, number>;
+  ndcg_at_k: Record<string, number>;
+  mrr?: number | null;
+  first_relevant_rank?: number | null;
+  hit: boolean;
+  missing_urls: string[];
+}
+
+export interface RetrievalRunMetrics {
+  available: boolean;
+  run_id?: string | null;
+  run_name?: string | null;
+  total_cases: number;
+  evaluated_cases: number;
+  ks: number[];
+  recall_at_k: Record<string, number>;
+  precision_at_k: Record<string, number>;
+  hit_rate_at_k: Record<string, number>;
+  ndcg_at_k: Record<string, number>;
+  mrr?: number | null;
+  cases: RetrievalCaseMetrics[];
+}

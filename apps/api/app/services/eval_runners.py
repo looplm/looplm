@@ -17,11 +17,7 @@ import httpx
 from app.models.models import Evaluator, TestCase
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
 from app.services.retrieval_config import extract_retrieved_urls
-from app.services.retrieval_metrics import (
-    compute_hit_rate_at_k,
-    compute_precision_at_k,
-    compute_recall_at_k,
-)
+from app.services.retrieval_metrics import compute_retrieval_metrics
 
 
 def _resolve_dot_path(data: Any, path: str) -> Any:
@@ -231,17 +227,11 @@ def _run_deterministic(
             "missing_urls": missing,
             "retrieved_urls": retrieved,
         }
-        # All three are deterministic (no LLM) and order-robust; each returns
-        # None when there are no expected URLs, in which case we omit it.
-        recall = compute_recall_at_k(expected_urls, retrieved)
-        if recall is not None:
-            details["recall_at_k"] = recall
-        precision = compute_precision_at_k(expected_urls, retrieved)
-        if precision is not None:
-            details["precision_at_k"] = precision
-        hit_rate = compute_hit_rate_at_k(expected_urls, retrieved)
-        if hit_rate is not None:
-            details["hit_rate_at_k"] = hit_rate
+        # Deterministic (no LLM) retrieval-quality metrics. Returns None when there
+        # are no expected URLs; here expected_urls is non-empty so we always get a dict.
+        metrics = compute_retrieval_metrics(expected_urls, retrieved)
+        if metrics is not None:
+            details.update(metrics)
         return {
             "pass": passed,
             "reason": reason,

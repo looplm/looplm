@@ -61,3 +61,44 @@ class RetrievalPipelineResponse(BaseModel):
     nodes: list[RetrievalPipelineNode] = Field(default_factory=list)
     edges: list[RetrievalPipelineEdge] = Field(default_factory=list)
     span_names: dict[str, str] = Field(default_factory=dict)
+
+
+# --- Quantitative retrieval-quality metrics (eval-run based) ---------------------
+
+
+class RetrievalCaseMetrics(BaseModel):
+    """Per-test-case retrieval quality, for the drill-down table."""
+
+    test_id: str
+    input: str | None = None
+    expected_count: int = 0
+    retrieved_count: int = 0
+    recall_at_k: dict[str, float] = Field(default_factory=dict)
+    ndcg_at_k: dict[str, float] = Field(default_factory=dict)
+    mrr: float | None = None
+    # 1-indexed rank of the first relevant doc retrieved, or null if it never surfaced.
+    first_relevant_rank: int | None = None
+    hit: bool = False
+    missing_urls: list[str] = Field(default_factory=list)
+
+
+class RetrievalRunMetrics(BaseModel):
+    """Retrieval-quality metrics for an eval run, macro-averaged across cases.
+
+    ``available`` is False when the run has no cases carrying both ground-truth URLs
+    and captured retrieval — measuring recall needs labeled relevance. Macro (not micro)
+    averaging so every query counts equally regardless of how many docs it expects.
+    """
+
+    available: bool = False
+    run_id: str | None = None
+    run_name: str | None = None
+    total_cases: int = 0
+    evaluated_cases: int = 0
+    ks: list[int] = Field(default_factory=list)
+    recall_at_k: dict[str, float] = Field(default_factory=dict)
+    precision_at_k: dict[str, float] = Field(default_factory=dict)
+    hit_rate_at_k: dict[str, float] = Field(default_factory=dict)
+    ndcg_at_k: dict[str, float] = Field(default_factory=dict)
+    mrr: float | None = None
+    cases: list[RetrievalCaseMetrics] = Field(default_factory=list)

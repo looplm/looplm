@@ -4,7 +4,10 @@
 
 import { request } from "./client";
 import type { AnalyticsFilters } from "./analytics-api";
-import type { RetrievalPipelineResponse } from "../api-types/retrieval";
+import type {
+  RetrievalPipelineResponse,
+  RetrievalRunMetrics,
+} from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
   const params = new URLSearchParams();
@@ -19,3 +22,8 @@ function buildQuery(filters: AnalyticsFilters): string {
 
 export const getRetrievalPipeline = (filters: AnalyticsFilters = {}) =>
   request<RetrievalPipelineResponse>(`/api/pipeline/graph${buildQuery(filters)}`);
+
+export const getRetrievalMetrics = (runId?: string) =>
+  request<RetrievalRunMetrics>(
+    `/api/pipeline/retrieval-metrics${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
+  );
