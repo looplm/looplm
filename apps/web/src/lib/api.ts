@@ -46,6 +46,7 @@ export type {
   RetrievalMetric,
   RetrievalRunMetrics,
   RetrievalCaseMetrics,
+  RetrievalTargets,
   RouteNode,
   RouteEdge,
   RouteAnalysisResponse,

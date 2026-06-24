@@ -16,15 +16,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_project, require_section
+from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
 from app.models.evaluations import EvalResult, EvalRun
 from app.models.models import Integration, Trace
 from app.models.project import Project
-from app.schemas.retrieval import RetrievalPipelineResponse, RetrievalRunMetrics
+from app.schemas.retrieval import (
+    RetrievalPipelineResponse,
+    RetrievalRunMetrics,
+    RetrievalTargets,
+)
 from app.services.retrieval_config import get_rag_span_names
 from app.services.retrieval_metrics_aggregate import aggregate_run_retrieval_metrics
 from app.services.retrieval_pipeline_aggregate import build_retrieval_pipeline_aggregate
+from app.services.retrieval_targets import (
+    SETTINGS_KEY as TARGETS_SETTINGS_KEY,
+    get_retrieval_targets,
+    sanitize_targets,
+)
 
 router = APIRouter(
     prefix="/api/pipeline",
@@ -105,3 +114,27 @@ async def get_retrieval_metrics(
     ).scalars().all()
 
     return aggregate_run_retrieval_metrics(run, results)
+
+
+@router.get("/targets", response_model=RetrievalTargets)
+async def get_targets(project: Project = Depends(get_current_project)):
+    """The project's retrieval-metric targets, merged over defaults."""
+    return RetrievalTargets(**get_retrieval_targets(project.settings))
+
+
+@router.put(
+    "/targets",
+    response_model=RetrievalTargets,
+    dependencies=[require_write("evaluate", "pipeline")],
+)
+async def update_targets(
+    body: RetrievalTargets,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Save the project's retrieval-metric targets (clamped to [0, 1])."""
+    clean = sanitize_targets(body.model_dump())
+    # Replace settings with a new dict so SQLAlchemy detects the JSONB change.
+    project.settings = {**(project.settings or {}), TARGETS_SETTINGS_KEY: clean}
+    await db.flush()
+    return RetrievalTargets(**clean)

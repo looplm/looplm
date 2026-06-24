@@ -39,6 +39,14 @@ export interface RetrievalPipelineResponse {
   span_names: Record<string, string>;
 }
 
+export interface RetrievalTargets {
+  recall: number;
+  ndcg: number;
+  mrr: number;
+  hit_rate: number;
+  precision: number;
+}
+
 // --- Quantitative retrieval-quality metrics (eval-run based) ---
 
 export interface RetrievalCaseMetrics {

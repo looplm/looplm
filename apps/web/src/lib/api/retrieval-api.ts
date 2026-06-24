@@ -7,6 +7,7 @@ import type { AnalyticsFilters } from "./analytics-api";
 import type {
   RetrievalPipelineResponse,
   RetrievalRunMetrics,
+  RetrievalTargets,
 } from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
@@ -27,3 +28,12 @@ export const getRetrievalMetrics = (runId?: string) =>
   request<RetrievalRunMetrics>(
     `/api/pipeline/retrieval-metrics${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
   );
+
+export const getRetrievalTargets = () =>
+  request<RetrievalTargets>(`/api/pipeline/targets`);
+
+export const saveRetrievalTargets = (targets: RetrievalTargets) =>
+  request<RetrievalTargets>(`/api/pipeline/targets`, {
+    method: "PUT",
+    body: JSON.stringify(targets),
+  });

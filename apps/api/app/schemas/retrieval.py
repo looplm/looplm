@@ -66,6 +66,16 @@ class RetrievalPipelineResponse(BaseModel):
 # --- Quantitative retrieval-quality metrics (eval-run based) ---------------------
 
 
+class RetrievalTargets(BaseModel):
+    """Per-project pass/fail bars for the retrieval-quality metrics (fractions 0-1)."""
+
+    recall: float = 0.80
+    ndcg: float = 0.70
+    mrr: float = 0.70
+    hit_rate: float = 0.95
+    precision: float = 0.50
+
+
 class RetrievalCaseMetrics(BaseModel):
     """Per-test-case retrieval quality, for the drill-down table."""
 
