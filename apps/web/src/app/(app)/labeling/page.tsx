@@ -226,6 +226,7 @@ export default function LabelingPage() {
   const [runs, setRuns] = useState<EvalRunListItem[]>([]);
   const [runId, setRunId] = useState<string | null>(null);
   const [view, setView] = useState<LabelingRunResponse | null>(null);
+  const [tab, setTab] = useState<"in_progress" | "complete">("in_progress");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -400,43 +401,50 @@ export default function LabelingPage() {
           {(() => {
             const inProgress = view.cases.filter((c) => !c.complete);
             const complete = view.cases.filter((c) => c.complete);
-            const renderCase = (c: LabelingCase) => (
-              <CaseCard
-                key={c.test_id}
-                c={c}
-                canEdit={canEdit}
-                collapsed={collapsed.has(c.test_id)}
-                onToggleCollapse={() => toggleCase(c.test_id)}
-                onToggleComplete={(v) => onToggleComplete(c.test_id, v)}
-                onLabel={onLabel}
-              />
-            );
+            const active = tab === "in_progress" ? inProgress : complete;
+            const tabs = [
+              { key: "in_progress" as const, label: "In progress", count: inProgress.length },
+              { key: "complete" as const, label: "Complete", count: complete.length },
+            ];
             return (
               <>
-                <div className="flex items-center gap-2 mb-3">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
-                    In progress
-                  </h2>
-                  <span className="text-xs text-gray-400 dark:text-slate-500">{inProgress.length}</span>
+                <div className="flex items-center gap-1 mb-4 border-b border-gray-100 dark:border-slate-800">
+                  {tabs.map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => setTab(t.key)}
+                      className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                        tab === t.key
+                          ? "border-indigo-500 text-gray-900 dark:text-white"
+                          : "border-transparent text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+                      }`}
+                    >
+                      {t.label}
+                      <span className="ml-1.5 text-xs text-gray-400 dark:text-slate-500">{t.count}</span>
+                    </button>
+                  ))}
                 </div>
-                {inProgress.length > 0 ? (
-                  <div className="space-y-4">{inProgress.map(renderCase)}</div>
-                ) : (
-                  <p className="text-sm text-gray-400 dark:text-slate-500 mb-4">
-                    All cases marked complete.
-                  </p>
-                )}
 
-                {complete.length > 0 && (
-                  <>
-                    <div className="flex items-center gap-2 mt-8 mb-3">
-                      <h2 className="text-sm font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                        Complete
-                      </h2>
-                      <span className="text-xs text-gray-400 dark:text-slate-500">{complete.length}</span>
-                    </div>
-                    <div className="space-y-4">{complete.map(renderCase)}</div>
-                  </>
+                {active.length > 0 ? (
+                  <div className="space-y-4">
+                    {active.map((c) => (
+                      <CaseCard
+                        key={c.test_id}
+                        c={c}
+                        canEdit={canEdit}
+                        collapsed={collapsed.has(c.test_id)}
+                        onToggleCollapse={() => toggleCase(c.test_id)}
+                        onToggleComplete={(v) => onToggleComplete(c.test_id, v)}
+                        onLabel={onLabel}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 dark:text-slate-500">
+                    {tab === "in_progress"
+                      ? "All cases are marked complete."
+                      : "No cases marked complete yet."}
+                  </p>
                 )}
               </>
             );
