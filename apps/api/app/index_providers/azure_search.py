@@ -244,6 +244,37 @@ class AzureSearchIndexProvider(BaseIndexProvider):
             )
         return docs
 
+    async def fetch_documents_by_key(self, ids: list[str]) -> dict[str, dict]:
+        """All retrievable fields for each chunk, keyed by the index key value.
+
+        Filters on the index key field with ``search.in`` and selects every field
+        (no ``select``), so the labeler sees the complete index metadata. Internal
+        ``@search.*`` / ``@odata.*`` annotations are stripped.
+        """
+        clean_ids = [i for i in ids if i]
+        if not clean_ids:
+            return {}
+        fields = await self._get_fields()
+        key_field = next((f.name for f in fields.values() if f.is_key), None)
+        if not key_field:
+            return {}
+
+        out: dict[str, dict] = {}
+        for i in range(0, len(clean_ids), self._LOOKUP_BATCH):
+            batch = clean_ids[i : i + self._LOOKUP_BATCH]
+            literal = _odata_escape("|".join(batch))
+            results = await self._search_client.search(
+                search_text="*",
+                filter=f"search.in({key_field}, '{literal}', '|')",
+                top=len(batch),
+            )
+            async for doc in results:
+                key_val = doc.get(key_field)
+                if key_val is None:
+                    continue
+                out[str(key_val)] = {k: v for k, v in doc.items() if not k.startswith("@")}
+        return out
+
     async def aclose(self) -> None:
         await self._search_client.close()
         await self._index_client.close()

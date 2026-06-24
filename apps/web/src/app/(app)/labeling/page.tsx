@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import {
   getEvalRuns,
   getLabelingView,
+  getChunkMetadata,
+  getIndexProviders,
   saveChunkLabels,
   setLabelingComplete,
   type EvalRunListItem,
@@ -14,13 +16,67 @@ import {
 } from "@/lib/api";
 import { usePermissions } from "@/components/permissions-context";
 
+function ChunkMetadata({ chunkId }: { chunkId: string }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [fields, setFields] = useState<Record<string, unknown> | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !loaded) {
+      setLoading(true);
+      getChunkMetadata(chunkId)
+        .then((r) => setFields(r.fields ?? null))
+        .catch(() => setFields(null))
+        .finally(() => {
+          setLoading(false);
+          setLoaded(true);
+        });
+    }
+  };
+
+  return (
+    <div className="mt-2">
+      <button onClick={toggle} className="text-[11px] font-medium text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200">
+        {open ? "Hide index fields" : "Index fields"}
+      </button>
+      {open && (
+        <div className="mt-1.5 rounded-lg border border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30 p-2.5">
+          {loading ? (
+            <p className="text-[11px] text-gray-400 dark:text-slate-500">Loading from index...</p>
+          ) : !fields || Object.keys(fields).length === 0 ? (
+            <p className="text-[11px] text-gray-400 dark:text-slate-500">
+              This chunk was not found in the connected index.
+            </p>
+          ) : (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
+              {Object.entries(fields).map(([k, v]) => (
+                <div key={k} className="contents">
+                  <dt className="font-mono text-gray-500 dark:text-slate-400 truncate">{k}</dt>
+                  <dd className="text-gray-700 dark:text-slate-300 break-words">
+                    {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChunkRow({
   chunk,
   disabled,
+  indexConnected,
   onLabel,
 }: {
   chunk: ChunkForLabeling;
   disabled: boolean;
+  indexConnected: boolean;
   onLabel: (relevant: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -106,6 +162,8 @@ function ChunkRow({
           )}
         </div>
 
+        {indexConnected && chunk.chunk_id && <ChunkMetadata chunkId={chunk.chunk_id} />}
+
         {!labelable && (
           <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
             No chunk id on this source, so it cannot be labeled yet (needs the rde-gpt chunk-id change deployed).
@@ -144,6 +202,7 @@ function ChunkRow({
 function CaseCard({
   c,
   canEdit,
+  indexConnected,
   collapsed,
   onToggleCollapse,
   onToggleComplete,
@@ -151,6 +210,7 @@ function CaseCard({
 }: {
   c: LabelingCase;
   canEdit: boolean;
+  indexConnected: boolean;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onToggleComplete: (complete: boolean) => void;
@@ -210,6 +270,7 @@ function CaseCard({
               key={`${chunk.chunk_id ?? "x"}-${chunk.rank}`}
               chunk={chunk}
               disabled={!canEdit}
+              indexConnected={indexConnected}
               onLabel={(relevant) => onLabel(c.test_id, chunk, relevant)}
             />
           ))}
@@ -228,6 +289,7 @@ export default function LabelingPage() {
   const [view, setView] = useState<LabelingRunResponse | null>(null);
   const [tab, setTab] = useState<"in_progress" | "complete">("in_progress");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [indexConnected, setIndexConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -235,6 +297,9 @@ export default function LabelingPage() {
     getEvalRuns({ limit: "50" })
       .then((res) => setRuns(res.data))
       .catch(() => setRuns([]));
+    getIndexProviders()
+      .then((res) => setIndexConnected(res.data.length > 0))
+      .catch(() => setIndexConnected(false));
   }, []);
 
   const load = useCallback((id: string | null) => {
@@ -432,6 +497,7 @@ export default function LabelingPage() {
                         key={c.test_id}
                         c={c}
                         canEdit={canEdit}
+                        indexConnected={indexConnected}
                         collapsed={collapsed.has(c.test_id)}
                         onToggleCollapse={() => toggleCase(c.test_id)}
                         onToggleComplete={(v) => onToggleComplete(c.test_id, v)}

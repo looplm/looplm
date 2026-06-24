@@ -9,6 +9,8 @@ observable in the traces is carried per-node via ``status``.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -158,6 +160,14 @@ class ChunkLabelBatch(BaseModel):
 class LabelingStatusUpdate(BaseModel):
     test_id: str
     complete: bool
+
+
+class ChunkMetadataResponse(BaseModel):
+    """All index fields for a chunk, fetched live from the connected index provider."""
+
+    provider_connected: bool = False
+    available: bool = False
+    fields: dict[str, Any] | None = None
 
 
 class RetrievalRunMetrics(BaseModel):

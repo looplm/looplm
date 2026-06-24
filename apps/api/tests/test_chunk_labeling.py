@@ -141,3 +141,12 @@ async def test_labeling_endpoints_roundtrip(client: AsyncClient, auth_headers, d
     assert status.status_code == 200
     resp3 = await client.get(f"/api/pipeline/labeling?run_id={run.id}", headers=auth_headers)
     assert resp3.json()["cases"][0]["complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_chunk_metadata_without_provider(client: AsyncClient, auth_headers):
+    # No index provider connected → graceful, no error.
+    resp = await client.get("/api/pipeline/chunk-metadata?chunk_id=c1", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["provider_connected"] is False
+    assert resp.json()["available"] is False

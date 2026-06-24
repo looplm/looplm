@@ -120,6 +120,14 @@ class BaseIndexProvider(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not support search_documents")
 
+    async def fetch_documents_by_key(self, ids: list[str]) -> dict[str, dict]:
+        """Full index documents (all fields) for the given key values, keyed by id.
+
+        Used to show a retrieved chunk's complete index metadata during labeling.
+        Optional capability — backends without it keep the empty default.
+        """
+        return {}
+
     async def aclose(self) -> None:
         """Release any underlying clients. Override if needed; safe no-op default."""
         return None

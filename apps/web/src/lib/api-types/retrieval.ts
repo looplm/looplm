@@ -82,6 +82,12 @@ export interface LabelingRunResponse {
   cases: LabelingCase[];
 }
 
+export interface ChunkMetadataResponse {
+  provider_connected: boolean;
+  available: boolean;
+  fields?: Record<string, unknown> | null;
+}
+
 export interface ChunkLabelUpsert {
   test_id: string;
   chunk_id: string;

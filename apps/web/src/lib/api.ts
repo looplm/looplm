@@ -51,6 +51,7 @@ export type {
   LabelingCase,
   ChunkForLabeling,
   ChunkLabelUpsert,
+  ChunkMetadataResponse,
   RouteNode,
   RouteEdge,
   RouteAnalysisResponse,

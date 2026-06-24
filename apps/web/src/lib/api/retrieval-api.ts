@@ -10,6 +10,7 @@ import type {
   RetrievalTargets,
   LabelingRunResponse,
   ChunkLabelUpsert,
+  ChunkMetadataResponse,
 } from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
@@ -48,6 +49,11 @@ export const setLabelingComplete = (testId: string, complete: boolean) =>
     method: "PUT",
     body: JSON.stringify({ test_id: testId, complete }),
   });
+
+export const getChunkMetadata = (chunkId: string) =>
+  request<ChunkMetadataResponse>(
+    `/api/pipeline/chunk-metadata?chunk_id=${encodeURIComponent(chunkId)}`,
+  );
 
 export const getRetrievalTargets = () =>
   request<RetrievalTargets>(`/api/pipeline/targets`);

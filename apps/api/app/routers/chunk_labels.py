@@ -15,12 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
+from app.index_providers.registry import build_index_provider
 from app.models.chunk_labels import ChunkRelevanceLabel, TestCaseLabelingStatus
 from app.models.evaluations import EvalResult, EvalRun
+from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import (
     ChunkLabelBatch,
+    ChunkMetadataResponse,
     LabelingRunResponse,
     LabelingStatusUpdate,
 )
@@ -105,6 +108,41 @@ async def get_labeling_view(
         labels_by_key,
         labeler_by_key=labeler_by_key,
         complete_by_test=complete_by_test,
+    )
+
+
+@router.get("/chunk-metadata", response_model=ChunkMetadataResponse)
+async def get_chunk_metadata(
+    chunk_id: str,
+    provider_id: UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """All index fields for a chunk, fetched live from the project's index provider.
+
+    Returns ``provider_connected=False`` when the project has no index provider, so the UI
+    can hide the feature; ``available=False`` when the chunk is not found in the index.
+    """
+    pf = [IndexProvider.project_id == project.id]
+    if provider_id is not None:
+        pf.append(IndexProvider.id == provider_id)
+    provider_row = (
+        await db.execute(
+            select(IndexProvider).where(*pf).order_by(IndexProvider.created_at.asc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    if provider_row is None:
+        return ChunkMetadataResponse(provider_connected=False, available=False)
+
+    provider = build_index_provider(provider_row)
+    try:
+        docs = await provider.fetch_documents_by_key([chunk_id])
+    finally:
+        await provider.aclose()
+
+    fields = docs.get(chunk_id)
+    return ChunkMetadataResponse(
+        provider_connected=True, available=fields is not None, fields=fields
     )
 
 
