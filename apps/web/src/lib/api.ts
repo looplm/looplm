@@ -40,6 +40,10 @@ export type {
   AggregateGraphNode,
   AggregateGraphEdge,
   AggregateGraphResponse,
+  RetrievalPipelineResponse,
+  RetrievalPipelineNode,
+  RetrievalPipelineEdge,
+  RetrievalMetric,
   RouteNode,
   RouteEdge,
   RouteAnalysisResponse,
@@ -165,6 +169,7 @@ export * from "./api/github-api";
 export * from "./api/costs-api";
 export * from "./api/analytics-api";
 export * from "./api/rag-coverage-api";
+export * from "./api/retrieval-api";
 export * from "./api/index-explorer-api";
 export * from "./api/source-registry-api";
 export * from "./api/issues-api";

@@ -9,5 +9,6 @@ export * from "./api-types/data";
 export * from "./api-types/costs";
 export * from "./api-types/analytics";
 export * from "./api-types/rag-coverage";
+export * from "./api-types/retrieval";
 export * from "./api-types/index-explorer";
 export * from "./api-types/issues";

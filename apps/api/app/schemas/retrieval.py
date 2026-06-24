@@ -1,0 +1,63 @@
+"""Pydantic schemas for the Retrieval section — the aggregate pipeline flow chart.
+
+The pipeline view paints a *fixed* canonical retrieval topology (query → expansion →
+embeddings → hybrid search → rerank → filter → context → generation → judge) and
+annotates each node with stats rolled up across many traces. The topology is fixed so
+the chart stays legible and comparable across projects; whether a given stage is actually
+observable in the traces is carried per-node via ``status``.
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+
+class RetrievalMetric(BaseModel):
+    """A single preformatted stat shown on a pipeline node.
+
+    Formatting is done server-side so the chart component stays a thin renderer; ``tone``
+    drives the colour accent (``good``/``warn``/``bad``/``muted``).
+    """
+
+    label: str
+    value: str
+    hint: str | None = None
+    tone: str | None = None  # good | warn | bad | muted
+
+
+class RetrievalPipelineNode(BaseModel):
+    id: str
+    label: str
+    sublabel: str | None = None
+    # Cluster key for visually grouping co-located stages (e.g. the keyword/vector/RRF
+    # nodes that make up "hybrid search"). Used for tinting, not React Flow nesting.
+    group: str | None = None
+    # Provider the stage runs inside, when known — e.g. "Azure AI Search" for the hybrid
+    # cluster *and* the reranker, which share one server-side call but are distinct stages.
+    provider: str | None = None
+    # active = observed in traces; no_data = canonical stage with no signal logged.
+    status: str = "active"
+    description: str | None = None
+    metrics: list[RetrievalMetric] = Field(default_factory=list)
+
+
+class RetrievalPipelineEdge(BaseModel):
+    source: str
+    target: str
+    label: str | None = None
+    kind: str = "main"  # main | fallback
+
+
+class RetrievalPipelineResponse(BaseModel):
+    """Aggregate retrieval pipeline derived from a window of traces.
+
+    ``available`` is False when no RAG traces were found in the window, so the page can
+    show an empty state instead of a chart of zeros.
+    """
+
+    available: bool = False
+    traces_analyzed: int = 0
+    rag_traces: int = 0
+    nodes: list[RetrievalPipelineNode] = Field(default_factory=list)
+    edges: list[RetrievalPipelineEdge] = Field(default_factory=list)
+    span_names: dict[str, str] = Field(default_factory=dict)
