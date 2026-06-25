@@ -28,17 +28,21 @@ def build_labeling_view(
     labeler_by_key: dict[tuple[str, str], str] | None = None,
     complete_by_test: dict[str, bool] | None = None,
     slice_by_test: dict[str, str] | None = None,
+    labelers_by_test: dict[str, list[str]] | None = None,
 ) -> LabelingRunResponse:
     """Assemble per-case retrieved chunks with their current relevance labels.
 
-    ``labels_by_key`` maps ``(test_id, chunk_id) -> relevant`` for the project, so a label
-    made in any run shows up here (labels are pooled across runs). ``labeler_by_key`` maps
-    the same key to the display name of who made it; ``complete_by_test`` maps test_id to
-    the manual "labeling complete" flag; ``slice_by_test`` maps test_id to its risk slice.
+    ``labels_by_key`` maps ``(test_id, chunk_id) -> relevant`` (scoped to the viewing user, so
+    each annotator sees and edits their own judgments). ``labeler_by_key`` maps the same key to
+    the display name of who made the shown label; ``complete_by_test`` is the manual
+    "labeling complete" flag; ``slice_by_test`` is the risk slice. ``labelers_by_test`` lists
+    *every* annotator who has judged any chunk in a case (across all annotators), shown as the
+    case's labeler set; when omitted it falls back to the labelers of the shown labels.
     """
     labeler_by_key = labeler_by_key or {}
     complete_by_test = complete_by_test or {}
     slice_by_test = slice_by_test or {}
+    labelers_by_test = labelers_by_test or {}
     result_list = list(results)
     cases: list[LabelingCase] = []
 
@@ -92,7 +96,7 @@ def build_labeling_view(
                 relevant_count=relevant,
                 complete=bool(complete_by_test.get(r.test_id)),
                 slice=slice_by_test.get(r.test_id),
-                labelers=labelers,
+                labelers=labelers_by_test.get(r.test_id, labelers),
             )
         )
 

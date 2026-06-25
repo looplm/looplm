@@ -227,6 +227,58 @@ class LabelingSliceUpdate(BaseModel):
     slice: str | None = None
 
 
+# --- Inter-annotator agreement + adjudication ------------------------------------
+
+
+class AnnotatorAgreement(BaseModel):
+    name: str
+    judged_count: int = 0
+
+
+class PairwiseKappa(BaseModel):
+    a: str
+    b: str
+    kappa: float
+    n: int  # chunks both annotators judged
+
+
+class VoteEntry(BaseModel):
+    labeler: str
+    relevant: bool
+
+
+class Disagreement(BaseModel):
+    test_id: str
+    chunk_id: str
+    title: str | None = None
+    votes: list[VoteEntry] = Field(default_factory=list)
+    # Current adjudicated gold verdict, or null if not yet resolved.
+    gold: bool | None = None
+
+
+class AgreementReport(BaseModel):
+    """Inter-annotator agreement over the chunks judged by more than one person.
+
+    ``available`` is False when fewer than two annotators have overlapping judgments — kappa
+    needs a double-judged sample. ``average_kappa`` is the mean of the pairwise scores.
+    """
+
+    available: bool = False
+    annotators: list[AnnotatorAgreement] = Field(default_factory=list)
+    judged_items: int = 0
+    overlap_count: int = 0
+    double_judged_pct: float = 0.0
+    pairwise: list[PairwiseKappa] = Field(default_factory=list)
+    average_kappa: float | None = None
+    disagreements: list[Disagreement] = Field(default_factory=list)
+
+
+class GoldUpdate(BaseModel):
+    test_id: str
+    chunk_id: str
+    relevant: bool
+
+
 class ChunkMetadataResponse(BaseModel):
     """All index fields for a chunk, fetched live from the connected index provider."""
 

@@ -18,6 +18,7 @@ from app.db import get_db
 from app.index_providers.registry import build_index_provider
 from app.models.chunk_labels import (
     SLICE_VALUES,
+    ChunkGoldLabel,
     ChunkRelevanceLabel,
     TestCaseLabelingStatus,
 )
@@ -26,13 +27,16 @@ from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import (
+    AgreementReport,
     ChunkLabelBatch,
     ChunkMetadataResponse,
+    GoldUpdate,
     LabelingPoolResponse,
     LabelingRunResponse,
     LabelingSliceUpdate,
     LabelingStatusUpdate,
 )
+from app.services.chunk_agreement import Vote, build_agreement_report
 from app.services.chunk_labeling import build_labeling_view, build_pool_view
 from app.services.chunk_pool import DEFAULT_POOL_DEPTH, SLICE_POOL_DEPTH, assemble_pool
 
@@ -70,19 +74,20 @@ async def _latest_or_named_run(
 
 
 async def _project_labels(
-    db: AsyncSession, project: Project
-) -> tuple[dict[tuple[str, str], bool], dict[tuple[str, str], str]]:
-    """Load the project's chunk labels as ``(test_id, chunk_id) ->`` relevant / labeler name.
+    db: AsyncSession, project: Project, *, user_id: UUID | None = None
+) -> tuple[dict[tuple[str, str], bool], dict[tuple[str, str], str], dict[str, list[str]]]:
+    """Load chunk labels for the labeling view, scoped to one annotator's own judgments.
 
-    Labels are pooled across runs, so a judgment made in any run shows up wherever that
-    ``(test_id, chunk_id)`` pair appears. Labeler ids are resolved to display names in one query.
+    Returns ``(labels_by_key, labeler_by_key, labelers_by_test)``. The first two are scoped to
+    ``user_id`` (so each annotator sees and edits their *own* relevance verdicts), keyed by
+    ``(test_id, chunk_id)``. ``labelers_by_test`` lists every annotator (across all annotators)
+    who has judged any chunk in a test case, for the per-case "who labeled" display.
     """
     labels = (
         await db.execute(
             select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
         )
     ).scalars().all()
-    labels_by_key = {(lbl.test_id, lbl.chunk_id): lbl.relevant for lbl in labels}
 
     labeler_ids = {lbl.labeled_by for lbl in labels if lbl.labeled_by}
     names: dict = {}
@@ -91,12 +96,21 @@ async def _project_labels(
             await db.execute(select(User).where(User.id.in_(labeler_ids)))
         ).scalars().all()
         names = {u.id: _display_name(u.email) for u in users}
+
+    scoped = [lbl for lbl in labels if user_id is None or lbl.labeled_by == user_id]
+    labels_by_key = {(lbl.test_id, lbl.chunk_id): lbl.relevant for lbl in scoped}
     labeler_by_key = {
         (lbl.test_id, lbl.chunk_id): names.get(lbl.labeled_by)
-        for lbl in labels
+        for lbl in scoped
         if lbl.labeled_by and names.get(lbl.labeled_by)
     }
-    return labels_by_key, labeler_by_key
+
+    labelers_by_test: dict[str, list[str]] = {}
+    for lbl in labels:
+        name = names.get(lbl.labeled_by)
+        if name and name not in labelers_by_test.setdefault(lbl.test_id, []):
+            labelers_by_test[lbl.test_id].append(name)
+    return labels_by_key, labeler_by_key, labelers_by_test
 
 
 @router.get("/labeling", response_model=LabelingRunResponse)
@@ -104,14 +118,17 @@ async def get_labeling_view(
     run_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
 ):
-    """Retrieved chunks for a run, grouped by case, with any existing labels merged in."""
+    """Retrieved chunks for a run, grouped by case, with the viewer's own labels merged in."""
     run = await _latest_or_named_run(db, project, run_id)
     results = (
         await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
     ).scalars().all()
 
-    labels_by_key, labeler_by_key = await _project_labels(db, project)
+    labels_by_key, labeler_by_key, labelers_by_test = await _project_labels(
+        db, project, user_id=user.id
+    )
 
     statuses = (
         await db.execute(
@@ -128,6 +145,7 @@ async def get_labeling_view(
         labeler_by_key=labeler_by_key,
         complete_by_test=complete_by_test,
         slice_by_test=slice_by_test,
+        labelers_by_test=labelers_by_test,
     )
 
 
@@ -143,6 +161,7 @@ async def get_labeling_pool(
     depth: int | None = None,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
 ):
     """Multi-head candidate pool for one test case: trace captures ∪ index search heads.
 
@@ -205,7 +224,7 @@ async def get_labeling_pool(
         if provider is not None:
             await provider.aclose()
 
-    labels_by_key, labeler_by_key = await _project_labels(db, project)
+    labels_by_key, labeler_by_key, _ = await _project_labels(db, project, user_id=user.id)
     return build_pool_view(
         test_id,
         str(result.input or "") or None,
@@ -338,10 +357,18 @@ async def upsert_labels(
     project: Project = Depends(get_current_project),
     user: User = Depends(get_current_user),
 ):
-    """Create or update relevance labels for (test_id, chunk_id) pairs in this project."""
+    """Create or update the current user's relevance labels for (test_id, chunk_id) pairs.
+
+    Labels are per-annotator: each user owns their own row for a chunk, so two annotators can
+    disagree (the rows inter-annotator agreement and gold resolution are built from). Saving
+    only ever touches the calling user's own label.
+    """
     existing = (
         await db.execute(
-            select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
+            select(ChunkRelevanceLabel).where(
+                ChunkRelevanceLabel.project_id == project.id,
+                ChunkRelevanceLabel.labeled_by == user.id,
+            )
         )
     ).scalars().all()
     by_key = {(lbl.test_id, lbl.chunk_id): lbl for lbl in existing}
@@ -364,7 +391,6 @@ async def upsert_labels(
             )
         else:
             current.relevant = item.relevant
-            current.labeled_by = user.id
             if item.content_preview is not None:
                 current.content_preview = item.content_preview
             if item.url is not None:
@@ -375,3 +401,85 @@ async def upsert_labels(
 
     await db.flush()
     return {"saved": saved}
+
+
+@router.get("/labeling/agreement", response_model=AgreementReport)
+async def get_agreement(
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Inter-annotator agreement (Cohen's kappa) over chunks judged by more than one person.
+
+    Documents how consistently the relevance criteria are applied and lists the chunks where
+    annotators disagree, with the current gold verdict, for adjudication. ``available`` is False
+    until at least two annotators have an overlapping judgment.
+    """
+    labels = (
+        await db.execute(
+            select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
+        )
+    ).scalars().all()
+
+    labeler_ids = {lbl.labeled_by for lbl in labels if lbl.labeled_by}
+    names: dict = {}
+    if labeler_ids:
+        users = (await db.execute(select(User).where(User.id.in_(labeler_ids)))).scalars().all()
+        names = {u.id: (_display_name(u.email) or str(u.id)) for u in users}
+
+    votes = [
+        Vote(
+            test_id=lbl.test_id,
+            chunk_id=lbl.chunk_id,
+            relevant=lbl.relevant,
+            annotator_id=lbl.labeled_by,
+            annotator_name=names.get(lbl.labeled_by, "unknown"),
+            title=lbl.title,
+        )
+        for lbl in labels
+    ]
+
+    golds = (
+        await db.execute(
+            select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id)
+        )
+    ).scalars().all()
+    overrides = {(g.test_id, g.chunk_id): g.relevant for g in golds}
+
+    return build_agreement_report(votes, overrides)
+
+
+@router.put(
+    "/labeling/gold",
+    dependencies=[require_write("evaluate", "labeling")],
+)
+async def set_gold(
+    body: GoldUpdate,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """Adjudicate a chunk's gold relevance verdict, overriding the annotator majority vote."""
+    gold = (
+        await db.execute(
+            select(ChunkGoldLabel).where(
+                ChunkGoldLabel.project_id == project.id,
+                ChunkGoldLabel.test_id == body.test_id,
+                ChunkGoldLabel.chunk_id == body.chunk_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if gold is None:
+        db.add(
+            ChunkGoldLabel(
+                project_id=project.id,
+                test_id=body.test_id,
+                chunk_id=body.chunk_id,
+                relevant=body.relevant,
+                decided_by=user.id,
+            )
+        )
+    else:
+        gold.relevant = body.relevant
+        gold.decided_by = user.id
+    await db.flush()
+    return {"test_id": body.test_id, "chunk_id": body.chunk_id, "relevant": body.relevant}

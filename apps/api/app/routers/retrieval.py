@@ -18,7 +18,11 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
-from app.models.chunk_labels import ChunkRelevanceLabel, TestCaseLabelingStatus
+from app.models.chunk_labels import (
+    ChunkGoldLabel,
+    ChunkRelevanceLabel,
+    TestCaseLabelingStatus,
+)
 from app.models.evaluations import EvalResult, EvalRun
 from app.models.models import Integration, Trace
 from app.models.project import Project
@@ -27,6 +31,7 @@ from app.schemas.retrieval import (
     RetrievalRunMetrics,
     RetrievalTargets,
 )
+from app.services.chunk_agreement import resolve_gold
 from app.services.retrieval_config import get_rag_span_names
 from app.services.retrieval_metrics_aggregate import (
     aggregate_run_retrieval_metrics,
@@ -131,9 +136,10 @@ async def get_retrieval_metrics(
     slice_by_test = {test_id: slice_ for test_id, slice_ in statuses}
 
     if source == "labels":
-        # Load all labels (relevant and judged-non-relevant). The non-relevant set powers the
-        # incomplete-judgment-safe metrics (bpref / condensed nDCG); without it they can't
-        # tell a judged-irrelevant chunk from an unjudged one.
+        # Resolve per-annotator labels into a single gold verdict per chunk (majority vote, or
+        # an adjudicated override). The relevant + judged-non-relevant gold sets feed pooled
+        # recall and the incomplete-judgment-safe metrics (bpref / condensed nDCG); ties stay
+        # unjudged so a contested chunk isn't silently scored either way.
         labels = (
             await db.execute(
                 select(ChunkRelevanceLabel).where(
@@ -141,11 +147,16 @@ async def get_retrieval_metrics(
                 )
             )
         ).scalars().all()
-        relevant_by_test: dict[str, set[str]] = {}
-        nonrelevant_by_test: dict[str, set[str]] = {}
-        for lbl in labels:
-            bucket = relevant_by_test if lbl.relevant else nonrelevant_by_test
-            bucket.setdefault(lbl.test_id, set()).add(lbl.chunk_id)
+        golds = (
+            await db.execute(
+                select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id)
+            )
+        ).scalars().all()
+        overrides = {(g.test_id, g.chunk_id): g.relevant for g in golds}
+        relevant_by_test, nonrelevant_by_test = resolve_gold(
+            ((lbl.test_id, lbl.chunk_id, lbl.relevant, lbl.labeled_by) for lbl in labels),
+            overrides,
+        )
         return aggregate_run_retrieval_metrics_from_labels(
             run, results, relevant_by_test, nonrelevant_by_test, slice_by_test
         )

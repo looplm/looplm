@@ -91,6 +91,44 @@ export interface ChunkMetadataResponse {
   fields?: Record<string, unknown> | null;
 }
 
+// --- Inter-annotator agreement + adjudication ---
+
+export interface AnnotatorAgreement {
+  name: string;
+  judged_count: number;
+}
+
+export interface PairwiseKappa {
+  a: string;
+  b: string;
+  kappa: number;
+  n: number;
+}
+
+export interface VoteEntry {
+  labeler: string;
+  relevant: boolean;
+}
+
+export interface Disagreement {
+  test_id: string;
+  chunk_id: string;
+  title?: string | null;
+  votes: VoteEntry[];
+  gold?: boolean | null;
+}
+
+export interface AgreementReport {
+  available: boolean;
+  annotators: AnnotatorAgreement[];
+  judged_items: number;
+  overlap_count: number;
+  double_judged_pct: number;
+  pairwise: PairwiseKappa[];
+  average_kappa?: number | null;
+  disagreements: Disagreement[];
+}
+
 export interface ChunkLabelUpsert {
   test_id: string;
   chunk_id: string;

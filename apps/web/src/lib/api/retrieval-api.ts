@@ -12,6 +12,7 @@ import type {
   LabelingPoolResponse,
   ChunkLabelUpsert,
   ChunkMetadataResponse,
+  AgreementReport,
 } from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
@@ -67,6 +68,15 @@ export const setLabelingSlice = (testId: string, slice: string | null) =>
     method: "PUT",
     body: JSON.stringify({ test_id: testId, slice }),
   });
+
+export const getAgreement = () =>
+  request<AgreementReport>(`/api/pipeline/labeling/agreement`);
+
+export const setGold = (testId: string, chunkId: string, relevant: boolean) =>
+  request<{ test_id: string; chunk_id: string; relevant: boolean }>(
+    `/api/pipeline/labeling/gold`,
+    { method: "PUT", body: JSON.stringify({ test_id: testId, chunk_id: chunkId, relevant }) },
+  );
 
 export const getChunkMetadata = (chunkId: string) =>
   request<ChunkMetadataResponse>(

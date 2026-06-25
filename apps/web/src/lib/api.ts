@@ -56,6 +56,8 @@ export type {
   ChunkForLabeling,
   ChunkLabelUpsert,
   ChunkMetadataResponse,
+  AgreementReport,
+  Disagreement,
   RouteNode,
   RouteEdge,
   RouteAnalysisResponse,

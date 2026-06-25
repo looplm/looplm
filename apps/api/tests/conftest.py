@@ -18,6 +18,7 @@ from app.models.models import Base, Integration, IntegrationType, Span, SpanType
 from app.models.project import Project
 from app.models.user import User
 from app.models.chunk_labels import (  # noqa: F401 — register tables for create_all
+    ChunkGoldLabel,
     ChunkRelevanceLabel,
     TestCaseLabelingStatus,
 )

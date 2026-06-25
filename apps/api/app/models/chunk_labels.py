@@ -35,8 +35,15 @@ class ChunkRelevanceLabel(Base):
 
     __tablename__ = "chunk_relevance_labels"
     __table_args__ = (
+        # One judgment per (chunk, annotator) so multiple annotators can disagree on the same
+        # chunk — the rows needed for inter-annotator agreement (Cohen's kappa) and gold
+        # resolution. (project, test_id, chunk_id) alone is no longer unique.
         UniqueConstraint(
-            "project_id", "test_id", "chunk_id", name="uq_chunk_label_project_test_chunk"
+            "project_id",
+            "test_id",
+            "chunk_id",
+            "labeled_by",
+            name="uq_chunk_label_project_test_chunk_user",
         ),
         Index("idx_chunk_labels_project_test", "project_id", "test_id"),
     )
@@ -60,6 +67,37 @@ class ChunkRelevanceLabel(Base):
     title = Column(Text, nullable=True)
 
     labeled_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"), onupdate=text("now()")
+    )
+
+
+class ChunkGoldLabel(Base):
+    """An adjudicated 'gold' relevance verdict for a chunk, resolving annotator disagreement.
+
+    When present it overrides the majority vote in gold resolution, so an expert can settle a
+    tie or correct a wrong majority. One per (project, test_id, chunk_id).
+    """
+
+    __tablename__ = "chunk_gold_labels"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "test_id", "chunk_id", name="uq_chunk_gold_project_test_chunk"
+        ),
+        Index("idx_chunk_gold_project_test", "project_id", "test_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    test_id = Column(String(512), nullable=False)
+    chunk_id = Column(String(512), nullable=False)
+    relevant = Column(Boolean, nullable=False)
+    decided_by = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
