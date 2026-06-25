@@ -39,6 +39,10 @@ const EXPLAIN = {
   caseRecall: "The share of the expected documents that were found for this single question.",
   firstHit: "The position of the first correct document in the results. Lower is better. A dash means none were found.",
   targets: "Set the score you want each metric to reach. Cards turn green when they hit the goal, amber when close, and red when below.",
+  bpref:
+    "A recall-style score that ignores chunks nobody has judged yet, so it stays fair when only part of the pool is labeled. Best used while judging is still incomplete.",
+  cndcg:
+    "Like nDCG, but it only counts chunks that have actually been judged — so unlabeled chunks don't distort the ranking score during incomplete judging.",
 };
 
 function Info({ text }: { text: string }) {
@@ -240,6 +244,41 @@ function MiniBar({ v, ok }: { v: number; ok: boolean }) {
         />
       </div>
       <span className="font-mono tabular-nums text-gray-700 dark:text-slate-300 w-9 text-right">{pct(v)}</span>
+    </div>
+  );
+}
+
+// Coverage guidance: below ~25 measured queries, run-to-run metric deltas are mostly noise;
+// 50+ gives trustworthy comparisons. Silent at >=50 to avoid clutter.
+function ReliabilityBanner({ count, source }: { count: number; source: "urls" | "labels" }) {
+  if (count >= 50) return null;
+  const noun = source === "labels" ? "labeled" : "measured";
+  const strong = count < 25;
+  return (
+    <div
+      className={`mb-4 flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] ${
+        strong
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+          : "border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900/60 text-gray-500 dark:text-slate-400"
+      }`}
+    >
+      <span className="shrink-0">{strong ? "⚠" : "ℹ"}</span>
+      <span>
+        {strong ? (
+          <>
+            Only <span className="font-semibold tabular-nums">{count}</span> {noun}{" "}
+            {count === 1 ? "query" : "queries"} — below 25, differences between runs are mostly
+            noise. Aim for <span className="font-semibold">50+</span> for trustworthy
+            comparisons.
+          </>
+        ) : (
+          <>
+            <span className="font-semibold tabular-nums">{count}</span> {noun} queries.{" "}
+            <span className="font-semibold">50+</span> gives the most reliable run-to-run
+            comparisons.
+          </>
+        )}
+      </span>
     </div>
   );
 }
@@ -456,9 +495,19 @@ export default function RetrievalMetricsPanel() {
         </div>
       </div>
       <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
-        Measured against your test cases&apos; ground-truth source URLs, per eval run.
-        Recall@k = share of expected docs found in the top-k retrieved; nDCG rewards ranking
-        them high; MRR = how early the first relevant doc shows up.
+        {source === "labels" ? (
+          <>
+            Measured against human chunk relevance labels (pooled across runs), per eval run.
+            Recall@k = share of judged-relevant chunks found in the top-k; bpref and condensed
+            nDCG stay fair while judging is still incomplete.
+          </>
+        ) : (
+          <>
+            Measured against your test cases&apos; ground-truth source URLs, per eval run.
+            Recall@k = share of expected docs found in the top-k retrieved; nDCG rewards ranking
+            them high; MRR = how early the first relevant doc shows up.
+          </>
+        )}
       </p>
 
       {editing && targets && (
@@ -502,8 +551,11 @@ export default function RetrievalMetricsPanel() {
       ) : (
         <>
           <div className="text-xs text-gray-400 dark:text-slate-500 mb-3">
-            {metrics.evaluated_cases} of {metrics.total_cases} cases have ground-truth URLs
+            {metrics.evaluated_cases} of {metrics.total_cases} cases have{" "}
+            {source === "labels" ? "relevance labels" : "ground-truth URLs"}
           </div>
+
+          <ReliabilityBanner count={metrics.evaluated_cases} source={source} />
 
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
             {METRICS.map((m) => (
@@ -519,6 +571,36 @@ export default function RetrievalMetricsPanel() {
               />
             ))}
           </div>
+
+          {/* Incomplete-judgment-safe metrics: only on the human-label path, where the pool
+              is partly judged. Shown without targets — they're a robustness cross-check. */}
+          {source === "labels" && metrics.bpref != null && (
+            <div className="mb-4">
+              <div className="flex items-center text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-slate-500 mb-2">
+                Robust to incomplete judging
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <MetricCard
+                  label="bpref"
+                  value={metrics.bpref}
+                  target={null}
+                  kind="pct"
+                  hint="ignores unjudged"
+                  accent="violet"
+                  info={EXPLAIN.bpref}
+                />
+                <MetricCard
+                  label={`cNDCG@${largestK}`}
+                  value={metrics.condensed_ndcg_at_k?.[lk]}
+                  target={null}
+                  kind="pct"
+                  hint="judged-only ranking"
+                  accent="violet"
+                  info={EXPLAIN.cndcg}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
             <RecallCurve recall={metrics.recall_at_k} ks={metrics.ks} target={targets ? targets.recall : null} />

@@ -134,6 +134,9 @@ export interface RetrievalCaseMetrics {
   first_relevant_rank?: number | null;
   hit: boolean;
   missing_urls: string[];
+  // Incomplete-judgment-safe (chunk-label path only); null/empty on the URL path.
+  bpref?: number | null;
+  condensed_ndcg_at_k?: Record<string, number>;
 }
 
 export interface RetrievalRunMetrics {
@@ -148,5 +151,8 @@ export interface RetrievalRunMetrics {
   hit_rate_at_k: Record<string, number>;
   ndcg_at_k: Record<string, number>;
   mrr?: number | null;
+  // Incomplete-judgment-safe roll-ups (chunk-label path only); see RetrievalCaseMetrics.
+  bpref?: number | null;
+  condensed_ndcg_at_k?: Record<string, number>;
   cases: RetrievalCaseMetrics[];
 }
