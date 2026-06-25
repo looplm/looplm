@@ -12,6 +12,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY apps/web/ ./
 ENV NEXT_TELEMETRY_DISABLED=1
+# next.config rewrites() is evaluated at build time and baked into
+# routes-manifest.json, so the proxy target must be set here. Inside Docker
+# the API is reachable via its service hostname, not localhost.
+ARG API_INTERNAL_URL=http://api:8000
+ENV API_INTERNAL_URL=$API_INTERNAL_URL
 RUN pnpm build
 
 # Stage 3: Production

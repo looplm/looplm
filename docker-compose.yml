@@ -3,12 +3,16 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.web
+      args:
+        # Browser uses same-origin /api/* (proxied by next.config rewrites).
+        # The rewrite target is baked at build time and runs inside this
+        # container, so it points at the API service over the Docker network,
+        # not localhost.
+        - API_INTERNAL_URL=http://api:8000
     ports:
       - "3000:3000"
     env_file:
       - .env
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       - api
 
