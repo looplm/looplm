@@ -9,6 +9,7 @@ import type {
   RetrievalRunMetrics,
   RetrievalTargets,
   LabelingRunResponse,
+  LabelingPoolResponse,
   ChunkLabelUpsert,
   ChunkMetadataResponse,
 } from "../api-types/retrieval";
@@ -37,6 +38,17 @@ export const getLabelingView = (runId?: string) =>
   request<LabelingRunResponse>(
     `/api/pipeline/labeling${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
   );
+
+export const getLabelingPool = (
+  testId: string,
+  opts: { runId?: string; q?: string; depth?: number } = {},
+) => {
+  const params = new URLSearchParams({ test_id: testId });
+  if (opts.runId) params.set("run_id", opts.runId);
+  if (opts.q) params.set("q", opts.q);
+  if (opts.depth) params.set("depth", String(opts.depth));
+  return request<LabelingPoolResponse>(`/api/pipeline/labeling/pool?${params.toString()}`);
+};
 
 export const saveChunkLabels = (labels: ChunkLabelUpsert[]) =>
   request<{ saved: number }>(`/api/pipeline/labels`, {

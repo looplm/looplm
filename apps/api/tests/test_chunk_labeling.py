@@ -8,10 +8,42 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.evaluations import EvalResult, EvalRun
-from app.services.chunk_labeling import build_labeling_view, retrieved_chunk_ids
+from app.services.chunk_labeling import (
+    build_labeling_view,
+    build_pool_view,
+    retrieved_chunk_ids,
+)
+from app.services.chunk_pool import PooledChunk, PoolResult
 from app.services.retrieval_metrics_aggregate import (
     aggregate_run_retrieval_metrics_from_labels,
 )
+
+
+def test_build_pool_view_overlays_labels_and_provenance():
+    pool = PoolResult(
+        chunks=[
+            PooledChunk(chunk_id="t1", title="T", provenance=["trace", "keyword"]),
+            PooledChunk(chunk_id="v1", provenance=["vector"]),
+        ],
+        heads_ran=["trace", "keyword", "vector"],
+        heads_failed={"hybrid": "no vector field"},
+    )
+    out = build_pool_view(
+        "test-1",
+        "what is X?",
+        pool,
+        provider_connected=True,
+        labels_by_key={("test-1", "t1"): True},
+        labeler_by_key={("test-1", "t1"): "tim"},
+    )
+    assert out.pool_size == 2
+    assert out.heads_ran == ["trace", "keyword", "vector"]
+    assert out.heads_failed == {"hybrid": "no vector field"}
+    t1, v1 = out.chunks
+    assert t1.provenance == ["trace", "keyword"]
+    assert t1.relevant is True and t1.labeled_by == "tim"
+    # An unjudged, index-only candidate carries no label.
+    assert v1.provenance == ["vector"] and v1.relevant is None
 
 
 def _run():

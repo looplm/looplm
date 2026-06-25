@@ -148,6 +148,43 @@ class LabelingRunResponse(BaseModel):
     cases: list[LabelingCase] = Field(default_factory=list)
 
 
+class PooledChunkForLabeling(BaseModel):
+    """A pooled candidate chunk — surfaced by one or more retrieval heads, ready to judge.
+
+    Unlike :class:`ChunkForLabeling` (which mirrors a single ranked retrieval) this carries
+    ``provenance`` — the heads that found it (``trace``, ``keyword``, ``vector``, ``hybrid``) —
+    so the labeler sees *why* a chunk is in the pool. ``score`` is a best-effort backend score
+    and is not comparable across heads.
+    """
+
+    chunk_id: str
+    title: str | None = None
+    url: str | None = None
+    content_preview: str | None = None
+    score: float | None = None
+    provenance: list[str] = Field(default_factory=list)
+    relevant: bool | None = None
+    labeled_by: str | None = None
+
+
+class LabelingPoolResponse(BaseModel):
+    """The deduped candidate pool for one test case, built from the index + trace captures.
+
+    ``heads_ran`` lists the retrieval heads that contributed (``trace`` plus whichever index
+    modes ran); ``heads_failed`` maps a head to why it produced nothing (e.g. the index has no
+    vector field), so the UI can be honest about partial pools. ``provider_connected`` is False
+    when the project has no index provider — then the pool is just the trace chunks.
+    """
+
+    test_id: str
+    input: str | None = None
+    provider_connected: bool = False
+    pool_size: int = 0
+    heads_ran: list[str] = Field(default_factory=list)
+    heads_failed: dict[str, str] = Field(default_factory=dict)
+    chunks: list[PooledChunkForLabeling] = Field(default_factory=list)
+
+
 class ChunkLabelUpsert(BaseModel):
     test_id: str
     chunk_id: str

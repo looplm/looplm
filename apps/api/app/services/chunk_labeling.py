@@ -10,7 +10,14 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from app.models.evaluations import EvalResult, EvalRun
-from app.schemas.retrieval import ChunkForLabeling, LabelingCase, LabelingRunResponse
+from app.schemas.retrieval import (
+    ChunkForLabeling,
+    LabelingCase,
+    LabelingPoolResponse,
+    LabelingRunResponse,
+    PooledChunkForLabeling,
+)
+from app.services.chunk_pool import PoolResult
 
 
 def build_labeling_view(
@@ -96,6 +103,48 @@ def build_labeling_view(
         total_cases=len(result_list),
         labelable_cases=len(cases),
         cases=cases,
+    )
+
+
+def build_pool_view(
+    test_id: str,
+    input_text: str | None,
+    pool: PoolResult,
+    *,
+    provider_connected: bool,
+    labels_by_key: dict[tuple[str, str], bool],
+    labeler_by_key: dict[tuple[str, str], str] | None = None,
+) -> LabelingPoolResponse:
+    """Shape an assembled :class:`PoolResult` into the labeling-pool API response.
+
+    Overlays any existing human label (and labeler) onto each pooled chunk, keyed by
+    ``(test_id, chunk_id)`` — so a chunk already judged in any run shows its verdict. Pool
+    order is preserved (trace-seeded chunks first, then index-discovered).
+    """
+    labeler_by_key = labeler_by_key or {}
+    chunks: list[PooledChunkForLabeling] = []
+    for pc in pool.chunks:
+        key = (test_id, pc.chunk_id)
+        chunks.append(
+            PooledChunkForLabeling(
+                chunk_id=pc.chunk_id,
+                title=pc.title,
+                url=pc.url,
+                content_preview=pc.content_preview,
+                score=pc.score,
+                provenance=pc.provenance,
+                relevant=labels_by_key.get(key),
+                labeled_by=labeler_by_key.get(key),
+            )
+        )
+    return LabelingPoolResponse(
+        test_id=test_id,
+        input=input_text,
+        provider_connected=provider_connected,
+        pool_size=len(chunks),
+        heads_ran=pool.heads_ran,
+        heads_failed=pool.heads_failed,
+        chunks=chunks,
     )
 
 

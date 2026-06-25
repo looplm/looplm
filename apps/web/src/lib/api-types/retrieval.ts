@@ -97,6 +97,30 @@ export interface ChunkLabelUpsert {
   title?: string | null;
 }
 
+// --- Multi-head candidate pool (trace captures ∪ index search heads) ---
+
+export interface PooledChunkForLabeling {
+  chunk_id: string;
+  title?: string | null;
+  url?: string | null;
+  content_preview?: string | null;
+  score?: number | null;
+  // Heads that surfaced this chunk: "trace" | "keyword" | "vector" | "hybrid".
+  provenance: string[];
+  relevant?: boolean | null;
+  labeled_by?: string | null;
+}
+
+export interface LabelingPoolResponse {
+  test_id: string;
+  input?: string | null;
+  provider_connected: boolean;
+  pool_size: number;
+  heads_ran: string[];
+  heads_failed: Record<string, string>;
+  chunks: PooledChunkForLabeling[];
+}
+
 // --- Quantitative retrieval-quality metrics (eval-run based) ---
 
 export interface RetrievalCaseMetrics {

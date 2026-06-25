@@ -24,10 +24,12 @@ from app.models.user import User
 from app.schemas.retrieval import (
     ChunkLabelBatch,
     ChunkMetadataResponse,
+    LabelingPoolResponse,
     LabelingRunResponse,
     LabelingStatusUpdate,
 )
-from app.services.chunk_labeling import build_labeling_view
+from app.services.chunk_labeling import build_labeling_view, build_pool_view
+from app.services.chunk_pool import DEFAULT_POOL_DEPTH, assemble_pool
 
 
 def _display_name(email: str | None) -> str | None:
@@ -62,18 +64,14 @@ async def _latest_or_named_run(
     return run
 
 
-@router.get("/labeling", response_model=LabelingRunResponse)
-async def get_labeling_view(
-    run_id: UUID | None = None,
-    db: AsyncSession = Depends(get_db),
-    project: Project = Depends(get_current_project),
-):
-    """Retrieved chunks for a run, grouped by case, with any existing labels merged in."""
-    run = await _latest_or_named_run(db, project, run_id)
-    results = (
-        await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
-    ).scalars().all()
+async def _project_labels(
+    db: AsyncSession, project: Project
+) -> tuple[dict[tuple[str, str], bool], dict[tuple[str, str], str]]:
+    """Load the project's chunk labels as ``(test_id, chunk_id) ->`` relevant / labeler name.
 
+    Labels are pooled across runs, so a judgment made in any run shows up wherever that
+    ``(test_id, chunk_id)`` pair appears. Labeler ids are resolved to display names in one query.
+    """
     labels = (
         await db.execute(
             select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
@@ -81,7 +79,6 @@ async def get_labeling_view(
     ).scalars().all()
     labels_by_key = {(lbl.test_id, lbl.chunk_id): lbl.relevant for lbl in labels}
 
-    # Resolve labeler ids to display names in one query.
     labeler_ids = {lbl.labeled_by for lbl in labels if lbl.labeled_by}
     names: dict = {}
     if labeler_ids:
@@ -94,6 +91,22 @@ async def get_labeling_view(
         for lbl in labels
         if lbl.labeled_by and names.get(lbl.labeled_by)
     }
+    return labels_by_key, labeler_by_key
+
+
+@router.get("/labeling", response_model=LabelingRunResponse)
+async def get_labeling_view(
+    run_id: UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Retrieved chunks for a run, grouped by case, with any existing labels merged in."""
+    run = await _latest_or_named_run(db, project, run_id)
+    results = (
+        await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
+    ).scalars().all()
+
+    labels_by_key, labeler_by_key = await _project_labels(db, project)
 
     statuses = (
         await db.execute(
@@ -108,6 +121,79 @@ async def get_labeling_view(
         labels_by_key,
         labeler_by_key=labeler_by_key,
         complete_by_test=complete_by_test,
+    )
+
+
+# Hard cap on per-head pool depth so a "load deeper pool" request can't hammer the index.
+_MAX_POOL_DEPTH = 50
+
+
+@router.get("/labeling/pool", response_model=LabelingPoolResponse)
+async def get_labeling_pool(
+    test_id: str,
+    run_id: UUID | None = None,
+    q: str | None = None,
+    depth: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Multi-head candidate pool for one test case: trace captures ∪ index search heads.
+
+    Unions the chunks the case retrieved with fresh candidates from the connected index
+    (keyword/vector/hybrid), deduped by chunk id, so a labeler can judge relevant chunks the
+    system *missed* — the only way pooled recall can exceed what the system already found.
+    ``q`` overrides the search query (the A3 manual "find more candidates" box); without it the
+    case's own input is used and the trace chunks seed the pool. ``depth`` tunes per-head top-k.
+    Falls back to a trace-only pool when no index provider is connected.
+    """
+    run = await _latest_or_named_run(db, project, run_id)
+    result = (
+        await db.execute(
+            select(EvalResult)
+            .where(EvalResult.run_id == run.id, EvalResult.test_id == test_id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Test case not found in run"}},
+        )
+
+    # A manual-search query stands on its own; the case input seeds with its trace chunks.
+    manual = bool(q and q.strip())
+    query = (q if manual else str(result.input or "")).strip()
+    meta = result.result_metadata if isinstance(result.result_metadata, dict) else {}
+    raw_chunks = meta.get("retrieved_chunks")
+    trace_chunks = [] if manual else (raw_chunks if isinstance(raw_chunks, list) else [])
+
+    per_head = max(1, min(depth, _MAX_POOL_DEPTH)) if depth else DEFAULT_POOL_DEPTH
+
+    provider_row = (
+        await db.execute(
+            select(IndexProvider)
+            .where(IndexProvider.project_id == project.id)
+            .order_by(IndexProvider.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    provider = build_index_provider(provider_row) if provider_row is not None else None
+    try:
+        pool = await assemble_pool(
+            provider, query, trace_chunks=trace_chunks, per_head_depth=per_head
+        )
+    finally:
+        if provider is not None:
+            await provider.aclose()
+
+    labels_by_key, labeler_by_key = await _project_labels(db, project)
+    return build_pool_view(
+        test_id,
+        str(result.input or "") or None,
+        pool,
+        provider_connected=provider_row is not None,
+        labels_by_key=labels_by_key,
+        labeler_by_key=labeler_by_key,
     )
 
 

@@ -49,6 +49,8 @@ export type {
   RetrievalTargets,
   LabelingRunResponse,
   LabelingCase,
+  LabelingPoolResponse,
+  PooledChunkForLabeling,
   ChunkForLabeling,
   ChunkLabelUpsert,
   ChunkMetadataResponse,

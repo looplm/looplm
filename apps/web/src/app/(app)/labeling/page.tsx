@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   getEvalRuns,
   getLabelingView,
+  getLabelingPool,
   getChunkMetadata,
   getIndexProviders,
   saveChunkLabels,
@@ -12,7 +13,9 @@ import {
   type EvalRunListItem,
   type LabelingRunResponse,
   type LabelingCase,
+  type LabelingPoolResponse,
   type ChunkForLabeling,
+  type PooledChunkForLabeling,
 } from "@/lib/api";
 import { usePermissions } from "@/components/permissions-context";
 
@@ -227,8 +230,318 @@ function ChunkRow({
   );
 }
 
+// Provenance badge per retrieval head — tells the labeler *why* a chunk is in the pool.
+const PROVENANCE_BADGES: Record<string, { label: string; cls: string }> = {
+  trace: { label: "Retrieved", cls: "bg-slate-500/10 text-slate-600 dark:text-slate-300" },
+  keyword: { label: "BM25", cls: "bg-amber-500/10 text-amber-600 dark:text-amber-300" },
+  vector: { label: "Vector", cls: "bg-violet-500/10 text-violet-600 dark:text-violet-300" },
+  hybrid: { label: "Hybrid", cls: "bg-teal-500/10 text-teal-600 dark:text-teal-300" },
+};
+
+function ProvenanceBadges({ provenance }: { provenance: string[] }) {
+  return (
+    <>
+      {provenance.map((p) => {
+        const b =
+          PROVENANCE_BADGES[p] ?? {
+            label: p,
+            cls: "bg-gray-500/10 text-gray-600 dark:text-gray-300",
+          };
+        return (
+          <span
+            key={p}
+            className={`text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${b.cls}`}
+          >
+            {b.label}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+// A pooled candidate chunk (from an index search head). Lighter than ChunkRow — no rank or
+// document locators — but judgeable the same way, with provenance badges and full-text fetch.
+function PoolChunkRow({
+  chunk,
+  relevant,
+  disabled,
+  indexConnected,
+  onLabel,
+}: {
+  chunk: PooledChunkForLabeling;
+  relevant: boolean | null;
+  disabled: boolean;
+  indexConnected: boolean;
+  onLabel: (relevant: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [doc, setDoc] = useState<Record<string, unknown> | null>(null);
+  const [docState, setDocState] = useState<"idle" | "loading" | "loaded">("idle");
+
+  const previewText = chunk.content_preview || "";
+  const indexText = pickIndexText(doc);
+  const fullText = indexText ?? previewText;
+  const canFetchIndex = indexConnected && !!chunk.chunk_id;
+  const isLong = previewText.length > 240 || previewText.includes("\n") || canFetchIndex;
+
+  const loadDoc = () => {
+    if (docState !== "idle" || !canFetchIndex) return;
+    setDocState("loading");
+    getChunkMetadata(chunk.chunk_id)
+      .then((r) => setDoc(r.fields ?? null))
+      .catch(() => setDoc(null))
+      .finally(() => setDocState("loaded"));
+  };
+
+  return (
+    <div
+      className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 dark:border-slate-800/50 ${
+        relevant === true ? "bg-emerald-500/5" : relevant === false ? "bg-red-500/5" : ""
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap mb-1.5">
+          <ProvenanceBadges provenance={chunk.provenance} />
+          {chunk.score != null && (
+            <span className="text-[10px] font-mono text-gray-400 dark:text-slate-500">
+              score {chunk.score.toFixed(2)}
+            </span>
+          )}
+        </div>
+
+        {expanded && docState === "loading" ? (
+          <p className="text-sm italic text-gray-400 dark:text-slate-500">
+            Loading full chunk from index...
+          </p>
+        ) : (expanded ? fullText : previewText) ? (
+          <p
+            className={`text-sm text-gray-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap ${
+              expanded ? "" : "line-clamp-3"
+            }`}
+          >
+            {expanded ? fullText : previewText}
+          </p>
+        ) : (
+          <p className="text-sm italic text-gray-400 dark:text-slate-500">No chunk text.</p>
+        )}
+
+        <div className="flex items-center gap-3 mt-1 text-[11px] text-gray-400 dark:text-slate-500">
+          {isLong && (
+            <button
+              onClick={() => {
+                const next = !expanded;
+                setExpanded(next);
+                if (next) loadDoc();
+              }}
+              className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              {expanded ? "Show less" : "Show full chunk"}
+            </button>
+          )}
+          {chunk.url && (
+            <a
+              href={chunk.url}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-gray-600 dark:hover:text-slate-300 hover:underline truncate max-w-[240px]"
+            >
+              Open document ↗
+            </a>
+          )}
+          <span className="font-mono truncate">{chunk.chunk_id}</span>
+          {relevant != null && chunk.labeled_by && <span className="italic">by {chunk.labeled_by}</span>}
+        </div>
+      </div>
+
+      <div className="shrink-0 flex items-center gap-1.5">
+        <button
+          disabled={disabled}
+          onClick={() => onLabel(true)}
+          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${
+            relevant === true
+              ? "bg-emerald-500 border-emerald-500 text-white"
+              : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-emerald-400"
+          }`}
+        >
+          Relevant
+        </button>
+        <button
+          disabled={disabled}
+          onClick={() => onLabel(false)}
+          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${
+            relevant === false
+              ? "bg-red-500 border-red-500 text-white"
+              : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-red-400"
+          }`}
+        >
+          Not
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Per-case pool augmentation: union the case's retrieved chunks with fresh candidates from the
+// connected index (BM25/vector/hybrid), so a labeler can judge relevant chunks the system
+// missed. Also hosts the manual "search the index" box. Self-contained: it owns its labels
+// optimistically (pooled candidates aren't part of the trace-based case counts).
+function PoolSection({
+  testId,
+  runId,
+  canEdit,
+  indexConnected,
+  traceChunkIds,
+}: {
+  testId: string;
+  runId: string | null;
+  canEdit: boolean;
+  indexConnected: boolean;
+  traceChunkIds: Set<string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [pool, setPool] = useState<LabelingPoolResponse | null>(null);
+  const [q, setQ] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [labels, setLabels] = useState<Record<string, boolean>>({});
+
+  const load = useCallback(
+    (query?: string) => {
+      const busy = query !== undefined;
+      if (busy) setSearching(true);
+      else setState("loading");
+      return getLabelingPool(testId, { runId: runId ?? undefined, q: query })
+        .then((p) => {
+          setPool(p);
+          setState("loaded");
+        })
+        .catch(() => setState("error"))
+        .finally(() => busy && setSearching(false));
+    },
+    [testId, runId],
+  );
+
+  const onToggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && state === "idle") load();
+  };
+
+  const onLabelPool = (chunk: PooledChunkForLabeling, relevant: boolean) => {
+    const prev = labels[chunk.chunk_id];
+    setLabels((m) => ({ ...m, [chunk.chunk_id]: relevant }));
+    saveChunkLabels([
+      {
+        test_id: testId,
+        chunk_id: chunk.chunk_id,
+        relevant,
+        content_preview: chunk.content_preview,
+        url: chunk.url,
+        title: chunk.title,
+      },
+    ]).catch(() => {
+      toast.error("Failed to save label");
+      setLabels((m) => ({ ...m, [chunk.chunk_id]: prev }));
+    });
+  };
+
+  // Show only candidates not already listed above as retrieved chunks.
+  const candidates = (pool?.chunks ?? []).filter((c) => !traceChunkIds.has(c.chunk_id));
+
+  return (
+    <div className="border-t border-dashed border-gray-200 dark:border-slate-700/60">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-[12px] font-medium text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        Find more candidates from the index
+        {pool && open && (
+          <span className="text-[11px] font-normal text-gray-400 dark:text-slate-500">
+            · pooled {pool.pool_size}, {candidates.length} new
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="px-4 pb-3">
+          {!indexConnected ? (
+            <p className="text-[12px] text-gray-400 dark:text-slate-500 py-2">
+              Connect an index provider (Settings → Integrations) to pool BM25/vector/hybrid
+              candidates the system may have missed.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && q.trim() && load(q.trim())}
+                  placeholder="Search the index for more candidates (BM25 / vector / hybrid)…"
+                  className="flex-1 text-sm rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5"
+                />
+                <button
+                  disabled={!q.trim() || searching}
+                  onClick={() => q.trim() && load(q.trim())}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-indigo-400 disabled:opacity-40"
+                >
+                  {searching ? "…" : "Search"}
+                </button>
+                {q && (
+                  <button
+                    onClick={() => {
+                      setQ("");
+                      load();
+                    }}
+                    className="text-[12px] text-gray-400 hover:text-gray-600 dark:hover:text-slate-300"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              {pool && (
+                <p className="text-[11px] text-gray-400 dark:text-slate-500 mb-2">
+                  Heads: {pool.heads_ran.join(", ") || "none"}
+                  {Object.keys(pool.heads_failed).length > 0 &&
+                    ` · unavailable: ${Object.keys(pool.heads_failed).join(", ")}`}
+                </p>
+              )}
+
+              {state === "loading" ? (
+                <p className="text-[12px] text-gray-400 dark:text-slate-500 py-2">Pooling candidates…</p>
+              ) : state === "error" ? (
+                <p className="text-[12px] text-red-500 py-2">Failed to load the pool.</p>
+              ) : candidates.length === 0 ? (
+                <p className="text-[12px] text-gray-400 dark:text-slate-500 py-2">
+                  No additional candidates beyond what was already retrieved.
+                </p>
+              ) : (
+                <div className="rounded-lg border border-gray-100 dark:border-slate-800 overflow-hidden">
+                  {candidates.map((chunk) => (
+                    <PoolChunkRow
+                      key={chunk.chunk_id}
+                      chunk={chunk}
+                      relevant={labels[chunk.chunk_id] ?? chunk.relevant ?? null}
+                      disabled={!canEdit}
+                      indexConnected={indexConnected}
+                      onLabel={(relevant) => onLabelPool(chunk, relevant)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CaseCard({
   c,
+  runId,
   canEdit,
   indexConnected,
   collapsed,
@@ -237,6 +550,7 @@ function CaseCard({
   onLabel,
 }: {
   c: LabelingCase;
+  runId: string | null;
   canEdit: boolean;
   indexConnected: boolean;
   collapsed: boolean;
@@ -302,6 +616,15 @@ function CaseCard({
               onLabel={(relevant) => onLabel(c.test_id, chunk, relevant)}
             />
           ))}
+          <PoolSection
+            testId={c.test_id}
+            runId={runId}
+            canEdit={canEdit}
+            indexConnected={indexConnected}
+            traceChunkIds={
+              new Set(c.chunks.map((ch) => ch.chunk_id).filter((id): id is string => !!id))
+            }
+          />
         </div>
       )}
     </div>
@@ -453,6 +776,8 @@ export default function LabelingPage() {
         Judge the chunks each test case actually retrieved. Mark each one relevant or not;
         these labels become the ground truth for the chunk-level precision and recall on the
         Pipeline page. Labels are shared across runs, so you only judge a chunk once per query.
+        Expand a case to also pool extra candidates from the connected index (BM25/vector/hybrid)
+        and judge chunks the system may have missed.
       </p>
 
       {error && (
@@ -524,6 +849,7 @@ export default function LabelingPage() {
                       <CaseCard
                         key={c.test_id}
                         c={c}
+                        runId={runId}
                         canEdit={canEdit}
                         indexConnected={indexConnected}
                         collapsed={collapsed.has(c.test_id)}
