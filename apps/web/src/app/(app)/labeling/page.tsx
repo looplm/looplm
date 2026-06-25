@@ -10,6 +10,7 @@ import {
   getIndexProviders,
   saveChunkLabels,
   setLabelingComplete,
+  setLabelingSlice,
   type EvalRunListItem,
   type LabelingRunResponse,
   type LabelingCase,
@@ -17,6 +18,15 @@ import {
   type ChunkForLabeling,
   type PooledChunkForLabeling,
 } from "@/lib/api";
+
+// Risk slices a test case can be assigned to (matches the API's SLICE_VALUES).
+const SLICES = ["broad", "safety", "adversarial"] as const;
+
+const SLICE_BADGE: Record<string, string> = {
+  safety: "bg-red-500/10 text-red-600 dark:text-red-300 border-red-500/30",
+  adversarial: "bg-orange-500/10 text-orange-600 dark:text-orange-300 border-orange-500/30",
+  broad: "bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20",
+};
 import { usePermissions } from "@/components/permissions-context";
 
 // Index fields that hold the chunk's full text, in priority order.
@@ -547,6 +557,7 @@ function CaseCard({
   collapsed,
   onToggleCollapse,
   onToggleComplete,
+  onSetSlice,
   onLabel,
 }: {
   c: LabelingCase;
@@ -556,6 +567,7 @@ function CaseCard({
   collapsed: boolean;
   onToggleCollapse: () => void;
   onToggleComplete: (complete: boolean) => void;
+  onSetSlice: (slice: string | null) => void;
   onLabel: (testId: string, chunk: ChunkForLabeling, relevant: boolean) => void;
 }) {
   return (
@@ -592,6 +604,21 @@ function CaseCard({
           <span>
             {c.labeled_count}/{c.chunks.length} · {c.relevant_count} relevant
           </span>
+          <select
+            disabled={!canEdit}
+            value={c.slice ?? "broad"}
+            onChange={(e) => onSetSlice(e.target.value === "broad" ? null : e.target.value)}
+            title="Risk slice — safety/adversarial are pooled deeper and reported separately"
+            className={`rounded-lg border px-2 py-1 text-[11px] font-medium capitalize disabled:opacity-40 ${
+              SLICE_BADGE[c.slice ?? "broad"]
+            }`}
+          >
+            {SLICES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
           <button
             disabled={!canEdit}
             onClick={() => onToggleComplete(!c.complete)}
@@ -694,6 +721,23 @@ export default function LabelingPage() {
         await setLabelingComplete(testId, complete);
       } catch {
         toast.error("Failed to update status");
+        load(runId);
+      }
+    },
+    [runId, load],
+  );
+
+  const onSetSlice = useCallback(
+    async (testId: string, slice: string | null) => {
+      setView((prev) =>
+        prev
+          ? { ...prev, cases: prev.cases.map((c) => (c.test_id === testId ? { ...c, slice } : c)) }
+          : prev,
+      );
+      try {
+        await setLabelingSlice(testId, slice);
+      } catch {
+        toast.error("Failed to set slice");
         load(runId);
       }
     },
@@ -855,6 +899,7 @@ export default function LabelingPage() {
                         collapsed={collapsed.has(c.test_id)}
                         onToggleCollapse={() => toggleCase(c.test_id)}
                         onToggleComplete={(v) => onToggleComplete(c.test_id, v)}
+                        onSetSlice={(s) => onSetSlice(c.test_id, s)}
                         onLabel={onLabel}
                       />
                     ))}

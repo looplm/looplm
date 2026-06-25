@@ -14,8 +14,9 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from app.models.chunk_labels import DEFAULT_SLICE
 from app.models.evaluations import EvalResult, EvalRun
-from app.schemas.retrieval import RetrievalCaseMetrics, RetrievalRunMetrics
+from app.schemas.retrieval import RetrievalCaseMetrics, RetrievalRunMetrics, SliceMetrics
 from app.services.chunk_labeling import retrieved_chunk_ids
 from app.services.retrieval_metrics import (
     compute_bpref,
@@ -62,6 +63,37 @@ def _macro_avg_dict(dicts: list[dict[str, float]]) -> dict[str, float]:
     for k in keys:
         vals = [d[k] for d in dicts if k in d]
         out[k] = round(sum(vals) / len(vals), 4) if vals else 0.0
+    return out
+
+
+def _slice_summaries(cases: list[RetrievalCaseMetrics]) -> list[SliceMetrics]:
+    """Macro-average recall/nDCG/bpref within each risk slice.
+
+    Returns ``[]`` when no case carries an explicit slice (so the breakdown only appears once
+    slices are actually used). Otherwise every case is grouped, with unassigned cases folding
+    into the ``broad`` default so the breakdown covers the whole run.
+    """
+    if not any(c.slice for c in cases):
+        return []
+    grouped: dict[str, list[RetrievalCaseMetrics]] = {}
+    for c in cases:
+        grouped.setdefault(c.slice or DEFAULT_SLICE, []).append(c)
+
+    out: list[SliceMetrics] = []
+    for name, group in grouped.items():
+        bprefs = [c.bpref for c in group if c.bpref is not None]
+        out.append(
+            SliceMetrics(
+                slice=name,
+                case_count=len(group),
+                recall_at_k=_macro_avg_dict([c.recall_at_k for c in group]),
+                ndcg_at_k=_macro_avg_dict([c.ndcg_at_k for c in group]),
+                bpref=round(sum(bprefs) / len(bprefs), 4) if bprefs else None,
+            )
+        )
+    # Stable, meaningful order: safety/adversarial first (where deep misses matter), then broad.
+    order = {"safety": 0, "adversarial": 1, DEFAULT_SLICE: 2}
+    out.sort(key=lambda s: (order.get(s.slice, 3), s.slice))
     return out
 
 
@@ -134,6 +166,7 @@ def _aggregate_rows(
                 missing_urls=row.get("missing", []),
                 bpref=round(bpref, 4) if bpref is not None else None,
                 condensed_ndcg_at_k=cndcg,
+                slice=row.get("slice"),
             )
         )
 
@@ -164,14 +197,19 @@ def _aggregate_rows(
         mrr=round(sum(mrrs) / len(mrrs), 4) if mrrs else None,
         bpref=round(sum(bprefs) / len(bprefs), 4) if bprefs else None,
         condensed_ndcg_at_k=_macro_avg_dict(cndcgs),
+        slices=_slice_summaries(cases),
         cases=cases,
     )
 
 
 def aggregate_run_retrieval_metrics(
-    run: EvalRun, results: Iterable[EvalResult], ks: tuple[int, ...] = AGG_KS
+    run: EvalRun,
+    results: Iterable[EvalResult],
+    slice_by_test: dict[str, str] | None = None,
+    ks: tuple[int, ...] = AGG_KS,
 ) -> RetrievalRunMetrics:
     """Run summary from the ``contains_urls`` grader's per-case URL captures."""
+    slice_by_test = slice_by_test or {}
     result_list = list(results)
     rows: list[dict[str, Any]] = []
     for r in result_list:
@@ -185,6 +223,7 @@ def aggregate_run_retrieval_metrics(
                 "expected": _expected_from_details(details),
                 "retrieved": [u for u in (details.get("retrieved_urls") or []) if isinstance(u, str)],
                 "missing": [u for u in (details.get("missing_urls") or []) if isinstance(u, str)],
+                "slice": slice_by_test.get(r.test_id),
             }
         )
     return _aggregate_rows(run, len(result_list), rows, ks)
@@ -195,6 +234,7 @@ def aggregate_run_retrieval_metrics_from_labels(
     results: Iterable[EvalResult],
     relevant_by_test: dict[str, set[str]],
     judged_nonrelevant_by_test: dict[str, set[str]] | None = None,
+    slice_by_test: dict[str, str] | None = None,
     ks: tuple[int, ...] = AGG_KS,
 ) -> RetrievalRunMetrics:
     """Run summary from human chunk labels, with pooled recall.
@@ -203,10 +243,12 @@ def aggregate_run_retrieval_metrics_from_labels(
     query (pooled across all runs). ``judged_nonrelevant_by_test`` maps test_id → chunk ids
     explicitly judged *not* relevant; supplying it enables the incomplete-judgment-safe
     metrics (bpref, condensed nDCG), which need to tell judged-irrelevant chunks apart from
-    merely-unjudged ones. Retrieved chunk ids come from each result's captured
-    ``retrieved_chunks`` in rank order.
+    merely-unjudged ones. ``slice_by_test`` maps test_id → its risk slice for the per-slice
+    breakdown. Retrieved chunk ids come from each result's captured ``retrieved_chunks`` in
+    rank order.
     """
     judged_nonrelevant_by_test = judged_nonrelevant_by_test or {}
+    slice_by_test = slice_by_test or {}
     result_list = list(results)
     rows: list[dict[str, Any]] = []
     for r in result_list:
@@ -221,6 +263,7 @@ def aggregate_run_retrieval_metrics_from_labels(
                 "retrieved": retrieved_chunk_ids(r),
                 "missing": [],
                 "judged_nonrelevant": judged_nonrelevant_by_test.get(r.test_id, set()),
+                "slice": slice_by_test.get(r.test_id),
             }
         )
     return _aggregate_rows(run, len(result_list), rows, ks)

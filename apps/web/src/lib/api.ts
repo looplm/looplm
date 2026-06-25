@@ -46,6 +46,8 @@ export type {
   RetrievalMetric,
   RetrievalRunMetrics,
   RetrievalCaseMetrics,
+  SliceMetrics,
+  RiskSlice,
   RetrievalTargets,
   LabelingRunResponse,
   LabelingCase,

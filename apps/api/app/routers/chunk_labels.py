@@ -16,7 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
 from app.index_providers.registry import build_index_provider
-from app.models.chunk_labels import ChunkRelevanceLabel, TestCaseLabelingStatus
+from app.models.chunk_labels import (
+    SLICE_VALUES,
+    ChunkRelevanceLabel,
+    TestCaseLabelingStatus,
+)
 from app.models.evaluations import EvalResult, EvalRun
 from app.models.index_providers import IndexProvider
 from app.models.project import Project
@@ -26,10 +30,11 @@ from app.schemas.retrieval import (
     ChunkMetadataResponse,
     LabelingPoolResponse,
     LabelingRunResponse,
+    LabelingSliceUpdate,
     LabelingStatusUpdate,
 )
 from app.services.chunk_labeling import build_labeling_view, build_pool_view
-from app.services.chunk_pool import DEFAULT_POOL_DEPTH, assemble_pool
+from app.services.chunk_pool import DEFAULT_POOL_DEPTH, SLICE_POOL_DEPTH, assemble_pool
 
 
 def _display_name(email: str | None) -> str | None:
@@ -114,6 +119,7 @@ async def get_labeling_view(
         )
     ).scalars().all()
     complete_by_test = {s.test_id: s.complete for s in statuses}
+    slice_by_test = {s.test_id: s.slice for s in statuses if s.slice}
 
     return build_labeling_view(
         run,
@@ -121,6 +127,7 @@ async def get_labeling_view(
         labels_by_key,
         labeler_by_key=labeler_by_key,
         complete_by_test=complete_by_test,
+        slice_by_test=slice_by_test,
     )
 
 
@@ -167,7 +174,19 @@ async def get_labeling_pool(
     raw_chunks = meta.get("retrieved_chunks")
     trace_chunks = [] if manual else (raw_chunks if isinstance(raw_chunks, list) else [])
 
-    per_head = max(1, min(depth, _MAX_POOL_DEPTH)) if depth else DEFAULT_POOL_DEPTH
+    # Explicit depth wins; otherwise pool deeper on risk slices where a deep-rank miss matters.
+    if depth:
+        per_head = max(1, min(depth, _MAX_POOL_DEPTH))
+    else:
+        status = (
+            await db.execute(
+                select(TestCaseLabelingStatus.slice).where(
+                    TestCaseLabelingStatus.project_id == project.id,
+                    TestCaseLabelingStatus.test_id == test_id,
+                )
+            )
+        ).scalar_one_or_none()
+        per_head = SLICE_POOL_DEPTH.get(status or "", DEFAULT_POOL_DEPTH)
 
     provider_row = (
         await db.execute(
@@ -265,6 +284,48 @@ async def set_labeling_status(
         status.marked_by = user.id
     await db.flush()
     return {"test_id": body.test_id, "complete": body.complete}
+
+
+@router.put(
+    "/labeling/slice",
+    dependencies=[require_write("evaluate", "labeling")],
+)
+async def set_labeling_slice(
+    body: LabelingSliceUpdate,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """Assign a test case to a risk slice (broad | safety | adversarial), or clear it."""
+    new_slice = body.slice or None
+    if new_slice is not None and new_slice not in SLICE_VALUES:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "INVALID_SLICE", "message": f"slice must be one of {SLICE_VALUES}"}},
+        )
+    status = (
+        await db.execute(
+            select(TestCaseLabelingStatus).where(
+                TestCaseLabelingStatus.project_id == project.id,
+                TestCaseLabelingStatus.test_id == body.test_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if status is None:
+        db.add(
+            TestCaseLabelingStatus(
+                project_id=project.id,
+                test_id=body.test_id,
+                complete=False,
+                slice=new_slice,
+                marked_by=user.id,
+            )
+        )
+    else:
+        status.slice = new_slice
+        status.marked_by = user.id
+    await db.flush()
+    return {"test_id": body.test_id, "slice": new_slice}
 
 
 @router.post(

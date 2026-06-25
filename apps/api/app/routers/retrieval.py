@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
-from app.models.chunk_labels import ChunkRelevanceLabel
+from app.models.chunk_labels import ChunkRelevanceLabel, TestCaseLabelingStatus
 from app.models.evaluations import EvalResult, EvalRun
 from app.models.models import Integration, Trace
 from app.models.project import Project
@@ -119,6 +119,17 @@ async def get_retrieval_metrics(
         await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
     ).scalars().all()
 
+    # Risk slice per test case, for the per-slice metric breakdown (shared by both sources).
+    statuses = (
+        await db.execute(
+            select(TestCaseLabelingStatus.test_id, TestCaseLabelingStatus.slice).where(
+                TestCaseLabelingStatus.project_id == project.id,
+                TestCaseLabelingStatus.slice.is_not(None),
+            )
+        )
+    ).all()
+    slice_by_test = {test_id: slice_ for test_id, slice_ in statuses}
+
     if source == "labels":
         # Load all labels (relevant and judged-non-relevant). The non-relevant set powers the
         # incomplete-judgment-safe metrics (bpref / condensed nDCG); without it they can't
@@ -136,10 +147,10 @@ async def get_retrieval_metrics(
             bucket = relevant_by_test if lbl.relevant else nonrelevant_by_test
             bucket.setdefault(lbl.test_id, set()).add(lbl.chunk_id)
         return aggregate_run_retrieval_metrics_from_labels(
-            run, results, relevant_by_test, nonrelevant_by_test
+            run, results, relevant_by_test, nonrelevant_by_test, slice_by_test
         )
 
-    return aggregate_run_retrieval_metrics(run, results)
+    return aggregate_run_retrieval_metrics(run, results, slice_by_test)
 
 
 @router.get("/targets", response_model=RetrievalTargets)

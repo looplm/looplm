@@ -27,16 +27,18 @@ def build_labeling_view(
     *,
     labeler_by_key: dict[tuple[str, str], str] | None = None,
     complete_by_test: dict[str, bool] | None = None,
+    slice_by_test: dict[str, str] | None = None,
 ) -> LabelingRunResponse:
     """Assemble per-case retrieved chunks with their current relevance labels.
 
     ``labels_by_key`` maps ``(test_id, chunk_id) -> relevant`` for the project, so a label
     made in any run shows up here (labels are pooled across runs). ``labeler_by_key`` maps
     the same key to the display name of who made it; ``complete_by_test`` maps test_id to
-    the manual "labeling complete" flag.
+    the manual "labeling complete" flag; ``slice_by_test`` maps test_id to its risk slice.
     """
     labeler_by_key = labeler_by_key or {}
     complete_by_test = complete_by_test or {}
+    slice_by_test = slice_by_test or {}
     result_list = list(results)
     cases: list[LabelingCase] = []
 
@@ -89,6 +91,7 @@ def build_labeling_view(
                 labeled_count=labeled,
                 relevant_count=relevant,
                 complete=bool(complete_by_test.get(r.test_id)),
+                slice=slice_by_test.get(r.test_id),
                 labelers=labelers,
             )
         )

@@ -9,6 +9,7 @@ import {
   type EvalRunListItem,
   type RetrievalRunMetrics,
   type RetrievalTargets,
+  type SliceMetrics,
 } from "@/lib/api";
 import { usePermissions } from "@/components/permissions-context";
 
@@ -279,6 +280,59 @@ function ReliabilityBanner({ count, source }: { count: number; source: "urls" | 
           </>
         )}
       </span>
+    </div>
+  );
+}
+
+const SLICE_BADGE: Record<string, string> = {
+  safety: "bg-red-500/10 text-red-600 dark:text-red-300",
+  adversarial: "bg-orange-500/10 text-orange-600 dark:text-orange-300",
+  broad: "bg-slate-500/10 text-slate-600 dark:text-slate-300",
+};
+
+// Per-slice metric breakdown — a deep-rank miss on the safety slice shouldn't be averaged
+// away by the broad slice, so each risk slice is reported on its own row.
+function SliceBreakdown({ slices, largestK }: { slices: SliceMetrics[]; largestK: number }) {
+  const lk = String(largestK);
+  return (
+    <div className="mb-4 rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+      <div className="px-4 pt-4 pb-2 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-slate-500">
+        By risk slice
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-gray-400 dark:text-slate-500 border-b border-gray-100 dark:border-slate-800">
+            <tr>
+              <th className="text-left font-medium px-4 py-2">Slice</th>
+              <th className="text-right font-medium px-3 py-2">Cases</th>
+              <th className="text-right font-medium px-3 py-2">Recall@{largestK}</th>
+              <th className="text-right font-medium px-3 py-2">nDCG@{largestK}</th>
+              <th className="text-right font-medium px-4 py-2">
+                <span className="inline-flex items-center">bpref<Info text={EXPLAIN.bpref} /></span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {slices.map((s) => (
+              <tr key={s.slice} className="border-b border-gray-50 dark:border-slate-800/50">
+                <td className="px-4 py-2.5">
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide capitalize ${
+                      SLICE_BADGE[s.slice] ?? SLICE_BADGE.broad
+                    }`}
+                  >
+                    {s.slice}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">{s.case_count}</td>
+                <td className="px-3 py-2.5 text-right font-mono tabular-nums text-gray-700 dark:text-slate-300">{pct(s.recall_at_k[lk])}</td>
+                <td className="px-3 py-2.5 text-right font-mono tabular-nums text-gray-700 dark:text-slate-300">{pct(s.ndcg_at_k[lk])}</td>
+                <td className="px-4 py-2.5 text-right font-mono tabular-nums text-gray-700 dark:text-slate-300">{s.bpref == null ? "-" : pct(s.bpref)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -600,6 +654,10 @@ export default function RetrievalMetricsPanel() {
                 />
               </div>
             </div>
+          )}
+
+          {metrics.slices && metrics.slices.length > 0 && (
+            <SliceBreakdown slices={metrics.slices} largestK={largestK} />
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">

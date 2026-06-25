@@ -25,6 +25,10 @@ from app.index_providers.base import SEARCH_MODES, BaseIndexProvider
 # dedup across heads yields the ~20-30 unique chunks/query the pooling methodology targets.
 DEFAULT_POOL_DEPTH = 15
 
+# Deeper per-head depth for risk slices where a miss at deep rank is the failure that matters
+# (safety/adversarial). Pools these to ~30-40 unique chunks. Slices not listed use the default.
+SLICE_POOL_DEPTH = {"safety": 35, "adversarial": 35}
+
 
 @dataclass
 class PooledChunk:

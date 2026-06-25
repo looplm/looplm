@@ -96,6 +96,22 @@ class RetrievalCaseMetrics(BaseModel):
     # a judged-non-relevant set). Null/empty on the URL path, which assumes complete truth.
     bpref: float | None = None
     condensed_ndcg_at_k: dict[str, float] = Field(default_factory=dict)
+    # Risk slice (broad | safety | adversarial), when assigned to this test case.
+    slice: str | None = None
+
+
+class SliceMetrics(BaseModel):
+    """Macro-averaged metrics for one risk slice within a run.
+
+    A relevant chunk missed at deep rank only matters on the safety/adversarial slices, so
+    aggregate scores are reported per slice rather than blended into one number.
+    """
+
+    slice: str
+    case_count: int = 0
+    recall_at_k: dict[str, float] = Field(default_factory=dict)
+    ndcg_at_k: dict[str, float] = Field(default_factory=dict)
+    bpref: float | None = None
 
 
 # --- Chunk-level human relevance labeling ----------------------------------------
@@ -129,6 +145,8 @@ class LabelingCase(BaseModel):
     relevant_count: int = 0
     # Manual "labeling complete" flag (human decision, not derived from counts).
     complete: bool = False
+    # Risk slice (broad | safety | adversarial), when assigned.
+    slice: str | None = None
     # Distinct people who have labeled chunks in this case.
     labelers: list[str] = Field(default_factory=list)
 
@@ -203,6 +221,12 @@ class LabelingStatusUpdate(BaseModel):
     complete: bool
 
 
+class LabelingSliceUpdate(BaseModel):
+    test_id: str
+    # broad | safety | adversarial, or null to clear (back to the broad default).
+    slice: str | None = None
+
+
 class ChunkMetadataResponse(BaseModel):
     """All index fields for a chunk, fetched live from the connected index provider."""
 
@@ -233,4 +257,7 @@ class RetrievalRunMetrics(BaseModel):
     # Incomplete-judgment-safe roll-ups (chunk-label path only); see RetrievalCaseMetrics.
     bpref: float | None = None
     condensed_ndcg_at_k: dict[str, float] = Field(default_factory=dict)
+    # Per-risk-slice breakdown (empty when no slices are assigned). Reported separately so a
+    # deep-rank miss on the safety slice isn't averaged away by the broad slice.
+    slices: list[SliceMetrics] = Field(default_factory=list)
     cases: list[RetrievalCaseMetrics] = Field(default_factory=list)

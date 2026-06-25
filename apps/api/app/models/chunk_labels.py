@@ -23,6 +23,12 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from app.models.base import Base
 
+# Risk slices for a test case. Aggregate metrics are reported per slice because a relevant
+# chunk missed at deep rank only matters on the safety/adversarial slices; ``broad`` is the
+# default when unset. Safety/adversarial pools are judged deeper (see chunk_pool).
+SLICE_VALUES = ("broad", "safety", "adversarial")
+DEFAULT_SLICE = "broad"
+
 
 class ChunkRelevanceLabel(Base):
     """One human relevance judgment: is this chunk relevant for this test case's query."""
@@ -85,6 +91,8 @@ class TestCaseLabelingStatus(Base):
     )
     test_id = Column(String(512), nullable=False)
     complete = Column(Boolean, nullable=False, server_default=text("false"))
+    # Risk slice (broad | safety | adversarial); null = unset, treated as broad. See SLICE_VALUES.
+    slice = Column(String(32), nullable=True)
     marked_by = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

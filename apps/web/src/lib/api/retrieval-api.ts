@@ -62,6 +62,12 @@ export const setLabelingComplete = (testId: string, complete: boolean) =>
     body: JSON.stringify({ test_id: testId, complete }),
   });
 
+export const setLabelingSlice = (testId: string, slice: string | null) =>
+  request<{ test_id: string; slice: string | null }>(`/api/pipeline/labeling/slice`, {
+    method: "PUT",
+    body: JSON.stringify({ test_id: testId, slice }),
+  });
+
 export const getChunkMetadata = (chunkId: string) =>
   request<ChunkMetadataResponse>(
     `/api/pipeline/chunk-metadata?chunk_id=${encodeURIComponent(chunkId)}`,

@@ -70,8 +70,11 @@ export interface LabelingCase {
   labeled_count: number;
   relevant_count: number;
   complete: boolean;
+  slice?: string | null;
   labelers: string[];
 }
+
+export type RiskSlice = "broad" | "safety" | "adversarial";
 
 export interface LabelingRunResponse {
   available: boolean;
@@ -137,6 +140,15 @@ export interface RetrievalCaseMetrics {
   // Incomplete-judgment-safe (chunk-label path only); null/empty on the URL path.
   bpref?: number | null;
   condensed_ndcg_at_k?: Record<string, number>;
+  slice?: string | null;
+}
+
+export interface SliceMetrics {
+  slice: string;
+  case_count: number;
+  recall_at_k: Record<string, number>;
+  ndcg_at_k: Record<string, number>;
+  bpref?: number | null;
 }
 
 export interface RetrievalRunMetrics {
@@ -154,5 +166,6 @@ export interface RetrievalRunMetrics {
   // Incomplete-judgment-safe roll-ups (chunk-label path only); see RetrievalCaseMetrics.
   bpref?: number | null;
   condensed_ndcg_at_k?: Record<string, number>;
+  slices?: SliceMetrics[];
   cases: RetrievalCaseMetrics[];
 }

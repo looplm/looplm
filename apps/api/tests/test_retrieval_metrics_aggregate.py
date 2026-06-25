@@ -120,6 +120,37 @@ def test_labels_path_reports_bpref_and_condensed_ndcg():
     assert out.cases[0].bpref == 1.0
 
 
+def test_per_slice_breakdown():
+    # Two safety cases (one perfect, one miss) + one broad case. Slices report separately.
+    results = [
+        _chunk_result("safe-good", ["r1"]),
+        _chunk_result("safe-bad", ["x"]),  # relevant chunk never retrieved
+        _chunk_result("broad-1", ["r1"]),
+    ]
+    out = aggregate_run_retrieval_metrics_from_labels(
+        _run(),
+        results,
+        relevant_by_test={"safe-good": {"r1"}, "safe-bad": {"r1"}, "broad-1": {"r1"}},
+        slice_by_test={"safe-good": "safety", "safe-bad": "safety", "broad-1": "broad"},
+    )
+    by_slice = {s.slice: s for s in out.slices}
+    assert set(by_slice) == {"safety", "broad"}
+    # safety first in the ordering (deep misses matter there).
+    assert out.slices[0].slice == "safety"
+    assert by_slice["safety"].case_count == 2
+    # safety recall@10 = mean(1.0, 0.0) = 0.5; broad = 1.0
+    assert by_slice["safety"].recall_at_k["10"] == 0.5
+    assert by_slice["broad"].recall_at_k["10"] == 1.0
+
+
+def test_no_slices_when_none_assigned():
+    out = aggregate_run_retrieval_metrics_from_labels(
+        _run(), [_chunk_result("t1", ["r1"])], relevant_by_test={"t1": {"r1"}}
+    )
+    assert out.slices == []
+    assert out.cases[0].slice is None
+
+
 def test_labels_path_without_nonrelevant_still_works():
     # No judged-non-relevant set supplied → bpref reduces to relevant-fraction, no crash.
     results = [_chunk_result("t1", ["r1"])]
