@@ -57,6 +57,15 @@ class CorpusDoc:
     title: str | None = None
     url: str | None = None
     snippet: str | None = None
+    # Backend relevance score for the matching query, when the doc came from a search
+    # (``@search.score`` for Azure — the RRF fusion score in hybrid mode). ``None`` for
+    # facet/sample paths, which don't rank.
+    score: float | None = None
+
+
+# Retrieval strategies a provider can pool candidates from. ``keyword`` is BM25/full-text,
+# ``vector`` is dense ANN over the embedding field, ``hybrid`` fuses both (RRF on Azure).
+SEARCH_MODES = ("keyword", "vector", "hybrid")
 
 
 class BaseIndexProvider(ABC):
@@ -110,13 +119,22 @@ class BaseIndexProvider(ABC):
         raise NotImplementedError(f"{type(self).__name__} does not support lookup_ids")
 
     async def search_documents(
-        self, query: str, n: int, filters: dict[str, str] | None = None
+        self,
+        query: str,
+        n: int,
+        filters: dict[str, str] | None = None,
+        *,
+        mode: str = "keyword",
     ) -> list[CorpusDoc]:
-        """Full-text search returning up to ``n`` best-matching documents.
+        """Search returning up to ``n`` best-matching documents, scored, in rank order.
 
-        Used as a fallback matching strategy when an expected source has no
-        directly checkable ID (platform/crawler-discovered documents). Optional
-        capability — backends without text search keep the default.
+        ``mode`` selects the retrieval strategy (see :data:`SEARCH_MODES`): ``keyword``
+        (BM25/full-text), ``vector`` (dense ANN), or ``hybrid`` (both, fused). Used both as a
+        fallback matching strategy when an expected source has no checkable ID, and to build
+        the multi-head candidate pool for chunk labeling. Optional capability — backends
+        without text search keep the default; a backend that has keyword but not vector
+        should raise ``NotImplementedError`` for the modes it can't serve so the pool builder
+        can record which heads ran.
         """
         raise NotImplementedError(f"{type(self).__name__} does not support search_documents")
 

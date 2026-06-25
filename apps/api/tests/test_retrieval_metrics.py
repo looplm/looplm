@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from app.services.retrieval_metrics import (
+    compute_bpref,
+    compute_condensed_ndcg_at_k,
     compute_first_relevant_rank,
     compute_hit_rate_at_k,
     compute_mrr,
@@ -175,3 +177,58 @@ def test_compute_retrieval_metrics_bundles_all():
 
 def test_compute_retrieval_metrics_none_without_truth():
     assert compute_retrieval_metrics([], ["https://a.example/p1"]) is None
+
+
+# --- bpref (incomplete-judgment-safe) ---
+
+def test_bpref_perfect_when_relevant_ranked_above_nonrelevant():
+    # Both relevant chunks retrieved, no judged-non-relevant ranked above them.
+    assert compute_bpref({"r1", "r2"}, {"n1"}, ["r1", "r2", "n1"]) == 1.0
+
+
+def test_bpref_ignores_unjudged_chunks():
+    # "u1"/"u2" are unjudged — dropped from scoring, so this scores like ["r1"].
+    rel, nonrel = {"r1"}, {"n1"}
+    with_unjudged = compute_bpref(rel, nonrel, ["u1", "r1", "u2", "n1"])
+    without = compute_bpref(rel, nonrel, ["r1", "n1"])
+    assert with_unjudged == without == 1.0
+
+
+def test_bpref_penalizes_nonrelevant_ranked_above_relevant():
+    # R=1, N=1, denom=1; one non-relevant ranked above the relevant chunk → term 1-1/1 = 0.
+    assert compute_bpref({"r1"}, {"n1"}, ["n1", "r1"]) == 0.0
+
+
+def test_bpref_unretrieved_relevant_lowers_score():
+    # R=2 but only one relevant retrieved, no non-relevant → 1/2.
+    assert compute_bpref({"r1", "r2"}, set(), ["r1"]) == 0.5
+
+
+def test_bpref_no_nonrelevant_reduces_to_relevant_fraction():
+    # denom=0 → penalty term vanishes; both relevant retrieved → 1.0.
+    assert compute_bpref({"r1", "r2"}, set(), ["r1", "r2"]) == 1.0
+
+
+def test_bpref_none_without_relevant():
+    assert compute_bpref(set(), {"n1"}, ["n1"]) is None
+
+
+# --- condensed nDCG (incomplete-judgment-safe) ---
+
+def test_condensed_ndcg_drops_unjudged_before_discount():
+    # "u1" at rank 1 is unjudged: condensed away, so the relevant chunk is effectively rank 1
+    # → perfect, unlike raw nDCG which would discount it for sitting at rank 2.
+    out = compute_condensed_ndcg_at_k({"r1"}, {"n1"}, ["u1", "r1", "n1"])
+    assert out == {"5": 1.0, "10": 1.0}
+
+
+def test_condensed_ndcg_penalizes_nonrelevant_above_relevant():
+    import math
+    # Condensed ranking is [n1, r1] (both judged); relevant at condensed rank 2.
+    out = compute_condensed_ndcg_at_k({"r1"}, {"n1"}, ["n1", "r1"])
+    assert out["5"] == 1.0 / math.log2(3)
+    assert out["5"] < 1.0
+
+
+def test_condensed_ndcg_none_without_relevant():
+    assert compute_condensed_ndcg_at_k(set(), {"n1"}, ["n1"]) is None

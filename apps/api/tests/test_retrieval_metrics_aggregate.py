@@ -6,7 +6,10 @@ from __future__ import annotations
 from uuid import uuid4
 
 from app.models.evaluations import EvalResult, EvalRun
-from app.services.retrieval_metrics_aggregate import aggregate_run_retrieval_metrics
+from app.services.retrieval_metrics_aggregate import (
+    aggregate_run_retrieval_metrics,
+    aggregate_run_retrieval_metrics_from_labels,
+)
 
 
 def _run():
@@ -85,3 +88,43 @@ def test_rank_sensitivity_in_mrr():
     out = aggregate_run_retrieval_metrics(_run(), results)
     assert out.mrr == round(1.0 / 3, 4)
     assert out.cases[0].first_relevant_rank == 3
+
+
+# --- chunk-label path with incomplete-judgment-safe metrics ---
+
+def _chunk_result(test_id, chunk_ids):
+    """An EvalResult whose captured retrieved_chunks are the given ids in rank order."""
+    return EvalResult(
+        id=uuid4(),
+        run_id=uuid4(),
+        test_id=test_id,
+        pass_=True,
+        input="q",
+        result_metadata={"retrieved_chunks": [{"chunk_id": c} for c in chunk_ids]},
+    )
+
+
+def test_labels_path_reports_bpref_and_condensed_ndcg():
+    # Pool for t1: r1 relevant, n1 judged-non-relevant, u1 unjudged. Retrieved [u1, r1, n1].
+    results = [_chunk_result("t1", ["u1", "r1", "n1"])]
+    out = aggregate_run_retrieval_metrics_from_labels(
+        _run(),
+        results,
+        relevant_by_test={"t1": {"r1"}},
+        judged_nonrelevant_by_test={"t1": {"n1"}},
+    )
+    assert out.available is True
+    # r1 ranked above n1, unjudged u1 ignored → perfect bpref + condensed nDCG.
+    assert out.bpref == 1.0
+    assert out.condensed_ndcg_at_k["10"] == 1.0
+    assert out.cases[0].bpref == 1.0
+
+
+def test_labels_path_without_nonrelevant_still_works():
+    # No judged-non-relevant set supplied → bpref reduces to relevant-fraction, no crash.
+    results = [_chunk_result("t1", ["r1"])]
+    out = aggregate_run_retrieval_metrics_from_labels(
+        _run(), results, relevant_by_test={"t1": {"r1", "r2"}}
+    )
+    assert out.bpref == 0.5  # only 1 of 2 relevant retrieved
+    assert out.recall_at_k["10"] == 0.5

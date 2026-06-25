@@ -120,18 +120,24 @@ async def get_retrieval_metrics(
     ).scalars().all()
 
     if source == "labels":
+        # Load all labels (relevant and judged-non-relevant). The non-relevant set powers the
+        # incomplete-judgment-safe metrics (bpref / condensed nDCG); without it they can't
+        # tell a judged-irrelevant chunk from an unjudged one.
         labels = (
             await db.execute(
                 select(ChunkRelevanceLabel).where(
-                    ChunkRelevanceLabel.project_id == project.id,
-                    ChunkRelevanceLabel.relevant.is_(True),
+                    ChunkRelevanceLabel.project_id == project.id
                 )
             )
         ).scalars().all()
         relevant_by_test: dict[str, set[str]] = {}
+        nonrelevant_by_test: dict[str, set[str]] = {}
         for lbl in labels:
-            relevant_by_test.setdefault(lbl.test_id, set()).add(lbl.chunk_id)
-        return aggregate_run_retrieval_metrics_from_labels(run, results, relevant_by_test)
+            bucket = relevant_by_test if lbl.relevant else nonrelevant_by_test
+            bucket.setdefault(lbl.test_id, set()).add(lbl.chunk_id)
+        return aggregate_run_retrieval_metrics_from_labels(
+            run, results, relevant_by_test, nonrelevant_by_test
+        )
 
     return aggregate_run_retrieval_metrics(run, results)
 

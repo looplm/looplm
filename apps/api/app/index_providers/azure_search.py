@@ -212,8 +212,28 @@ class AzureSearchIndexProvider(BaseIndexProvider):
                     found[str(b["value"])] = int(b.get("count") or 0)
         return found
 
+    async def _vector_field(self) -> str | None:
+        """The embedding field used for dense/hybrid search, or None if the index has none.
+
+        Azure represents vector fields as ``Collection(Edm.Single)``; the first such field is
+        used. Cached via ``_get_fields``. Vector and hybrid search additionally require the
+        index to declare a *vectorizer* (so Azure can embed the query text server-side) — that
+        isn't visible in the field type, so the actual call may still fail; the caller treats
+        a failure as "this head is unavailable".
+        """
+        fields = await self._get_fields()
+        for f in fields.values():
+            if f.type == "Collection(Edm.Single)":
+                return f.name
+        return None
+
     async def search_documents(
-        self, query: str, n: int, filters: dict[str, str] | None = None
+        self,
+        query: str,
+        n: int,
+        filters: dict[str, str] | None = None,
+        *,
+        mode: str = "keyword",
     ) -> list[CorpusDoc]:
         fields = await self._get_fields()
         select = [f for f in _PREFERRED_SAMPLE_FIELDS if f in fields]
@@ -221,25 +241,52 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         if key_field and key_field not in select:
             select.append(key_field)
 
-        results = await self._search_client.search(
-            search_text=query,
-            filter=await self._build_filter(filters),
-            select=select or None,
-            top=max(1, n),
-        )
+        top = max(1, n)
+        kwargs: dict = {
+            "filter": await self._build_filter(filters),
+            "select": select or None,
+            "top": top,
+        }
+        if mode in ("vector", "hybrid"):
+            vector_field = await self._vector_field()
+            if not vector_field:
+                raise NotImplementedError(
+                    f"index '{self._index_name}' has no vector field for {mode} search"
+                )
+            from azure.search.documents.models import VectorizableTextQuery
+
+            kwargs["vector_queries"] = [
+                VectorizableTextQuery(
+                    text=query, k_nearest_neighbors=top, fields=vector_field
+                )
+            ]
+            # hybrid = keyword + vector fused (Azure applies RRF automatically); vector-only
+            # omits search_text so ranking is purely the ANN score.
+            kwargs["search_text"] = query if mode == "hybrid" else None
+        elif mode == "keyword":
+            kwargs["search_text"] = query
+        else:
+            raise ValueError(f"unknown search mode: {mode!r}")
+
+        results = await self._search_client.search(**kwargs)
         docs: list[CorpusDoc] = []
         async for doc in results:
             snippet = doc.get("chunk_text")
             if isinstance(snippet, str) and len(snippet) > 600:
                 snippet = snippet[:600] + "…"
+            score = doc.get("@search.score")
             docs.append(
                 CorpusDoc(
-                    id=str(doc.get("page_id") or doc.get(key_field) or doc.get("id") or ""),
+                    # Key field first: this is the chunk/doc key that dedups against the
+                    # trace-captured ``chunk_id`` when building the labeling pool. (Source-gap
+                    # title matching reads only title/url, so the id choice is free here.)
+                    id=str((key_field and doc.get(key_field)) or doc.get("page_id") or doc.get("id") or ""),
                     # Prefer the descriptive page title for text matching —
                     # attachment filenames are often opaque (e.g. "12080.pdf").
                     title=doc.get("page_title") or doc.get("attachment_filename"),
                     url=doc.get("page_url") or doc.get("attachment_url"),
                     snippet=snippet,
+                    score=float(score) if isinstance(score, (int, float)) else None,
                 )
             )
         return docs

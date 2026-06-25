@@ -24,6 +24,7 @@ the order is best-effort document order, so treat MRR/nDCG as indicative there.
 from __future__ import annotations
 
 import math
+from typing import Iterable
 
 from app.services.retrieval_config import normalize_source_url
 
@@ -172,6 +173,99 @@ def compute_ndcg_at_k(
             if url in relevant
         )
         ideal_hits = min(len(relevant), k)
+        idcg = sum(1.0 / math.log2(i + 1) for i in range(1, ideal_hits + 1))
+        out[str(k)] = dcg / idcg if idcg > 0 else 0.0
+    return out
+
+
+# --- Incomplete-judgment-safe metrics --------------------------------------------
+#
+# Recall/precision/nDCG above assume the ground truth is complete: any retrieved doc
+# not in the relevant set counts as a miss. That holds for the URL path (expected_sources
+# is curated) but breaks for *pooled chunk labels*, where most retrieved chunks in a fresh
+# run are simply *unjudged* — neither confirmed relevant nor confirmed irrelevant. Scoring
+# unjudged as irrelevant punishes retrieval for surfacing things nobody has labeled yet.
+#
+# bpref and condensed nDCG fix this by operating only over the *judged* set (relevant +
+# judged-non-relevant): unjudged retrieved docs are dropped from the ranking before scoring
+# rather than penalized. They take chunk ids (opaque keys), so — unlike the URL metrics —
+# they are *not* run through ``normalize_source_url``.
+
+
+def compute_bpref(
+    relevant: Iterable[str],
+    judged_nonrelevant: Iterable[str],
+    retrieved: list[str],
+) -> float | None:
+    """Binary preference (Buckley & Voorhees 2004) — robust to incomplete judgments.
+
+    ``bpref = (1/R) Σ_r (1 − min(n_above_r, denom) / denom)`` where R is the number of
+    judged-relevant docs for the query, n_above_r the count of judged-non-relevant docs
+    ranked above relevant doc ``r``, and ``denom = min(R, N)`` with N the judged-non-relevant
+    count. Unjudged retrieved docs are skipped (neither rewarded nor penalized). Relevant
+    docs never retrieved contribute 0, so bpref still drops when recall is poor. When there
+    are no judged-non-relevant docs (N=0) the penalty term vanishes and bpref reduces to the
+    fraction of relevant docs retrieved.
+
+    Returns ``None`` when there are no judged-relevant docs (nothing to measure).
+    """
+    rel = set(relevant)
+    if not rel:
+        return None
+    nonrel = set(judged_nonrelevant) - rel  # a chunk can't be both; relevant wins
+    R = len(rel)
+    denom = min(R, len(nonrel))
+
+    seen: set[str] = set()
+    nonrel_above = 0
+    total = 0.0
+    for cid in retrieved:
+        if cid in seen:
+            continue
+        seen.add(cid)
+        if cid in rel:
+            total += 1.0 - (min(nonrel_above, denom) / denom if denom else 0.0)
+        elif cid in nonrel:
+            nonrel_above += 1
+        # unjudged → ignored
+    return total / R
+
+
+def compute_condensed_ndcg_at_k(
+    relevant: Iterable[str],
+    judged_nonrelevant: Iterable[str],
+    retrieved: list[str],
+    ks: tuple[int, ...] = DEFAULT_KS,
+) -> dict[str, float] | None:
+    """nDCG@k over the *condensed* ranking — unjudged docs removed before scoring.
+
+    Same binary-relevance nDCG as :func:`compute_ndcg_at_k`, but the retrieved list is first
+    condensed to judged docs only (relevant ∪ judged-non-relevant), so an unjudged chunk
+    sitting at rank 2 doesn't push a relevant chunk down to rank 3 in the discount. This is
+    the inferred/condensed-nDCG idea (Sakai 2007) for incomplete pools.
+
+    Returns ``None`` when there are no judged-relevant docs. Keys are stringified k values.
+    """
+    rel = set(relevant)
+    if not rel:
+        return None
+    judged = rel | set(judged_nonrelevant)
+
+    seen: set[str] = set()
+    condensed: list[str] = []
+    for cid in retrieved:
+        if cid in judged and cid not in seen:
+            seen.add(cid)
+            condensed.append(cid)
+
+    out: dict[str, float] = {}
+    for k in ks:
+        dcg = sum(
+            1.0 / math.log2(i + 1)
+            for i, cid in enumerate(condensed[:k], start=1)
+            if cid in rel
+        )
+        ideal_hits = min(len(rel), k)
         idcg = sum(1.0 / math.log2(i + 1) for i in range(1, ideal_hits + 1))
         out[str(k)] = dcg / idcg if idcg > 0 else 0.0
     return out

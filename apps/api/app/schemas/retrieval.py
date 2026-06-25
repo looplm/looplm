@@ -92,6 +92,10 @@ class RetrievalCaseMetrics(BaseModel):
     first_relevant_rank: int | None = None
     hit: bool = False
     missing_urls: list[str] = Field(default_factory=list)
+    # Incomplete-judgment-safe metrics — populated only on the chunk-label path (they need
+    # a judged-non-relevant set). Null/empty on the URL path, which assumes complete truth.
+    bpref: float | None = None
+    condensed_ndcg_at_k: dict[str, float] = Field(default_factory=dict)
 
 
 # --- Chunk-level human relevance labeling ----------------------------------------
@@ -189,4 +193,7 @@ class RetrievalRunMetrics(BaseModel):
     hit_rate_at_k: dict[str, float] = Field(default_factory=dict)
     ndcg_at_k: dict[str, float] = Field(default_factory=dict)
     mrr: float | None = None
+    # Incomplete-judgment-safe roll-ups (chunk-label path only); see RetrievalCaseMetrics.
+    bpref: float | None = None
+    condensed_ndcg_at_k: dict[str, float] = Field(default_factory=dict)
     cases: list[RetrievalCaseMetrics] = Field(default_factory=list)

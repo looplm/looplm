@@ -17,7 +17,11 @@ from typing import Any, Iterable
 from app.models.evaluations import EvalResult, EvalRun
 from app.schemas.retrieval import RetrievalCaseMetrics, RetrievalRunMetrics
 from app.services.chunk_labeling import retrieved_chunk_ids
-from app.services.retrieval_metrics import compute_retrieval_metrics
+from app.services.retrieval_metrics import (
+    compute_bpref,
+    compute_condensed_ndcg_at_k,
+    compute_retrieval_metrics,
+)
 
 # Richer k grid than the grader default so the run view can draw a recall curve.
 AGG_KS: tuple[int, ...] = (1, 3, 5, 10)
@@ -70,7 +74,10 @@ def _aggregate_rows(
     """Shared core: turn per-case (expected, retrieved) rows into a run summary.
 
     Each row: ``{test_id, input, expected: list[str], retrieved: list[str], missing: list[str]}``.
-    Rows with no expected ids are dropped (recall is undefined without ground truth).
+    Rows with no expected ids are dropped (recall is undefined without ground truth). A row may
+    also carry ``judged_nonrelevant: set[str]`` (chunk-label path); when present, the
+    incomplete-judgment-safe metrics (bpref, condensed nDCG) are computed for that case and
+    rolled up. The URL path omits it, so those metrics stay null there.
     """
     cases: list[RetrievalCaseMetrics] = []
     recalls: list[dict[str, float]] = []
@@ -78,6 +85,8 @@ def _aggregate_rows(
     hit_rates: list[dict[str, float]] = []
     ndcgs: list[dict[str, float]] = []
     mrrs: list[float] = []
+    bprefs: list[float] = []
+    cndcgs: list[dict[str, float]] = []
     largest_k = str(max(ks))
 
     for row in rows:
@@ -97,6 +106,20 @@ def _aggregate_rows(
         if metrics["mrr"] is not None:
             mrrs.append(metrics["mrr"])
 
+        # Incomplete-judgment-safe metrics — only when the row carries a judged-non-relevant
+        # set (the chunk-label path). bpref/condensed nDCG drop unjudged retrieved chunks
+        # instead of scoring them as misses.
+        bpref: float | None = None
+        cndcg: dict[str, float] = {}
+        if "judged_nonrelevant" in row:
+            nonrel = row["judged_nonrelevant"]
+            bpref = compute_bpref(expected, nonrel, retrieved)
+            cndcg = compute_condensed_ndcg_at_k(expected, nonrel, retrieved, ks) or {}
+            if bpref is not None:
+                bprefs.append(bpref)
+            if cndcg:
+                cndcgs.append(cndcg)
+
         cases.append(
             RetrievalCaseMetrics(
                 test_id=row["test_id"],
@@ -109,6 +132,8 @@ def _aggregate_rows(
                 first_relevant_rank=metrics["first_relevant_rank"],
                 hit=hit_rate.get(largest_k, 0.0) >= 1.0,
                 missing_urls=row.get("missing", []),
+                bpref=round(bpref, 4) if bpref is not None else None,
+                condensed_ndcg_at_k=cndcg,
             )
         )
 
@@ -137,6 +162,8 @@ def _aggregate_rows(
         hit_rate_at_k=_macro_avg_dict(hit_rates),
         ndcg_at_k=_macro_avg_dict(ndcgs),
         mrr=round(sum(mrrs) / len(mrrs), 4) if mrrs else None,
+        bpref=round(sum(bprefs) / len(bprefs), 4) if bprefs else None,
+        condensed_ndcg_at_k=_macro_avg_dict(cndcgs),
         cases=cases,
     )
 
@@ -167,14 +194,19 @@ def aggregate_run_retrieval_metrics_from_labels(
     run: EvalRun,
     results: Iterable[EvalResult],
     relevant_by_test: dict[str, set[str]],
+    judged_nonrelevant_by_test: dict[str, set[str]] | None = None,
     ks: tuple[int, ...] = AGG_KS,
 ) -> RetrievalRunMetrics:
     """Run summary from human chunk labels, with pooled recall.
 
     ``relevant_by_test`` maps test_id → the set of chunk ids judged relevant for that
-    query (pooled across all runs). Retrieved chunk ids come from each result's captured
+    query (pooled across all runs). ``judged_nonrelevant_by_test`` maps test_id → chunk ids
+    explicitly judged *not* relevant; supplying it enables the incomplete-judgment-safe
+    metrics (bpref, condensed nDCG), which need to tell judged-irrelevant chunks apart from
+    merely-unjudged ones. Retrieved chunk ids come from each result's captured
     ``retrieved_chunks`` in rank order.
     """
+    judged_nonrelevant_by_test = judged_nonrelevant_by_test or {}
     result_list = list(results)
     rows: list[dict[str, Any]] = []
     for r in result_list:
@@ -188,6 +220,7 @@ def aggregate_run_retrieval_metrics_from_labels(
                 "expected": list(relevant),
                 "retrieved": retrieved_chunk_ids(r),
                 "missing": [],
+                "judged_nonrelevant": judged_nonrelevant_by_test.get(r.test_id, set()),
             }
         )
     return _aggregate_rows(run, len(result_list), rows, ks)
