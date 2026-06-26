@@ -10,10 +10,11 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
+from app.cache import cache_get_json, cache_set_json
 from app.db import get_db
 from app.index_providers.registry import build_index_provider
 from app.models.chunk_labels import (
@@ -31,13 +32,18 @@ from app.schemas.retrieval import (
     ChunkLabelBatch,
     ChunkMetadataResponse,
     GoldUpdate,
+    LabelingCase,
     LabelingPoolResponse,
     LabelingRunResponse,
     LabelingSliceUpdate,
     LabelingStatusUpdate,
 )
 from app.services.chunk_agreement import Vote, build_agreement_report
-from app.services.chunk_labeling import build_labeling_view, build_pool_view
+from app.services.chunk_labeling import (
+    build_labeling_cases,
+    build_pool_view,
+    merge_labeling_view,
+)
 from app.services.chunk_pool import DEFAULT_POOL_DEPTH, SLICE_POOL_DEPTH, assemble_pool
 
 
@@ -52,6 +58,33 @@ router = APIRouter(
     tags=["pipeline"],
     dependencies=[require_section("evaluate", "labeling")],
 )
+
+
+# Safety bound on the cached labeling skeleton — freshness is enforced by the fingerprint, so
+# this just keeps abandoned project keys from living forever (1 day).
+_LABELING_CACHE_TTL = 86_400
+
+
+def _labeling_cache_key(project_id: UUID) -> str:
+    return f"labeling:cases:{project_id}"
+
+
+async def _results_fingerprint(db: AsyncSession, project: Project) -> str:
+    """Cheap content fingerprint of the project's eval results.
+
+    Changes whenever a result is added or removed (new run, streamed result, deleted run), so a
+    cached labeling skeleton built under a different fingerprint is recomputed on the next read.
+    Counting + max(created_at) avoids loading the (large) ``result_metadata`` JSONB the skeleton
+    is built from.
+    """
+    count, latest = (
+        await db.execute(
+            select(func.count(EvalResult.id), func.max(EvalResult.created_at))
+            .join(EvalRun, EvalResult.run_id == EvalRun.id)
+            .where(EvalRun.project_id == project.id)
+        )
+    ).one()
+    return f"{count or 0}:{latest.isoformat() if latest else '0'}"
 
 
 async def _latest_or_named_run(
@@ -125,25 +158,50 @@ async def get_labeling_view(
     Labels are pooled per query across runs, so labeling isn't tied to a single run: by default
     this aggregates every test case the project's eval runs captured, deduped by ``test_id`` with
     the most recent run's capture winning. Passing ``run_id`` scopes the view to one run instead.
+
+    The expensive part — reading every result's ``retrieved_chunks`` JSON into the per-case
+    skeleton — is cached in Redis per project (default, all-runs path), keyed against a cheap
+    result fingerprint so new/removed results recompute it immediately. The viewer's own labels
+    and per-case status are small and always re-merged live, so judgments are never stale.
     """
-    run_name: str | None = None
+    # Per-case skeleton (no labels) + total case count, from cache when possible.
     if run_id is not None:
         run = await _latest_or_named_run(db, project, run_id)
-        run_name = run.name
         results = (
             await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
         ).scalars().all()
+        cases, total_cases = build_labeling_cases(results)
+        view_run_id: str | None = str(run_id)
+        view_run_name: str | None = run.name
     else:
-        # All results across the project's runs, newest run first so the latest capture of a
-        # query wins when build_labeling_view dedupes by test_id.
-        results = (
-            await db.execute(
-                select(EvalResult)
-                .join(EvalRun, EvalResult.run_id == EvalRun.id)
-                .where(EvalRun.project_id == project.id)
-                .order_by(EvalRun.created_at.desc())
+        view_run_id = view_run_name = None
+        cache_key = _labeling_cache_key(project.id)
+        fingerprint = await _results_fingerprint(db, project)
+        cached = await cache_get_json(cache_key)
+        if cached and cached.get("fingerprint") == fingerprint:
+            cases = [LabelingCase.model_validate(c) for c in cached["cases"]]
+            total_cases = cached["total_cases"]
+        else:
+            # All results across the project's runs, newest run first so the latest capture of a
+            # query wins when build_labeling_cases dedupes by test_id.
+            results = (
+                await db.execute(
+                    select(EvalResult)
+                    .join(EvalRun, EvalResult.run_id == EvalRun.id)
+                    .where(EvalRun.project_id == project.id)
+                    .order_by(EvalRun.created_at.desc())
+                )
+            ).scalars().all()
+            cases, total_cases = build_labeling_cases(results)
+            await cache_set_json(
+                cache_key,
+                {
+                    "fingerprint": fingerprint,
+                    "total_cases": total_cases,
+                    "cases": [c.model_dump() for c in cases],
+                },
+                ttl_seconds=_LABELING_CACHE_TTL,
             )
-        ).scalars().all()
 
     labels_by_key, labeler_by_key, labelers_by_test = await _project_labels(
         db, project, user_id=user.id
@@ -157,11 +215,12 @@ async def get_labeling_view(
     complete_by_test = {s.test_id: s.complete for s in statuses}
     slice_by_test = {s.test_id: s.slice for s in statuses if s.slice}
 
-    return build_labeling_view(
-        results,
+    return merge_labeling_view(
+        cases,
+        total_cases,
         labels_by_key,
-        run_id=str(run_id) if run_id is not None else None,
-        run_name=run_name,
+        run_id=view_run_id,
+        run_name=view_run_name,
         labeler_by_key=labeler_by_key,
         complete_by_test=complete_by_test,
         slice_by_test=slice_by_test,

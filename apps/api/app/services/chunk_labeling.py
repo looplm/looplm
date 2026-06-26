@@ -20,36 +20,16 @@ from app.schemas.retrieval import (
 from app.services.chunk_pool import PoolResult
 
 
-def build_labeling_view(
-    results: Iterable[EvalResult],
-    labels_by_key: dict[tuple[str, str], bool],
-    *,
-    run_id: str | None = None,
-    run_name: str | None = None,
-    labeler_by_key: dict[tuple[str, str], str] | None = None,
-    complete_by_test: dict[str, bool] | None = None,
-    slice_by_test: dict[str, str] | None = None,
-    labelers_by_test: dict[str, list[str]] | None = None,
-) -> LabelingRunResponse:
-    """Assemble per-case retrieved chunks with their current relevance labels.
+def build_labeling_cases(results: Iterable[EvalResult]) -> tuple[list[LabelingCase], int]:
+    """Build the per-case retrieved-chunk skeleton (no labels merged) plus the total case count.
 
-    ``results`` may span multiple eval runs; they are deduped by ``test_id`` so each query
-    yields one case (labels are pooled per query, not per run). When results are passed
-    newest-run-first, the most recent capture of a query wins. ``run_id``/``run_name`` describe
-    the source run when the view is scoped to one, and are ``None`` when aggregating across all
-    of a project's runs.
-
-    ``labels_by_key`` maps ``(test_id, chunk_id) -> relevant`` (scoped to the viewing user, so
-    each annotator sees and edits their own judgments). ``labeler_by_key`` maps the same key to
-    the display name of who made the shown label; ``complete_by_test`` is the manual
-    "labeling complete" flag; ``slice_by_test`` is the risk slice. ``labelers_by_test`` lists
-    *every* annotator who has judged any chunk in a case (across all annotators), shown as the
-    case's labeler set; when omitted it falls back to the labelers of the shown labels.
+    This is the heavy, *user-independent* half of the labeling view: it dedupes results by
+    ``test_id`` (so each query yields one case; pass results newest-run-first so the most recent
+    capture wins) and reads each result's ``retrieved_chunks`` JSON into ranked
+    :class:`ChunkForLabeling` rows. It touches no per-user state, so the result is identical for
+    every annotator and safe to cache per project. Labels and status are layered on later by
+    :func:`merge_labeling_view`.
     """
-    labeler_by_key = labeler_by_key or {}
-    complete_by_test = complete_by_test or {}
-    slice_by_test = slice_by_test or {}
-    labelers_by_test = labelers_by_test or {}
     result_list = list(results)
     cases: list[LabelingCase] = []
     seen_tests: set[str] = set()
@@ -63,26 +43,13 @@ def build_labeling_view(
             continue
 
         chunks: list[ChunkForLabeling] = []
-        labeled = 0
-        relevant = 0
-        labelers: list[str] = []
         for i, c in enumerate(raw_chunks, start=1):
             if not isinstance(c, dict):
                 continue
-            chunk_id = c.get("chunk_id")
-            key = (r.test_id, chunk_id) if chunk_id else None
-            label = labels_by_key.get(key) if key else None
-            labeler = labeler_by_key.get(key) if key else None
-            if label is not None:
-                labeled += 1
-                if label:
-                    relevant += 1
-                if labeler and labeler not in labelers:
-                    labelers.append(labeler)
             pdf_page = c.get("pdf_page_number")
             chunks.append(
                 ChunkForLabeling(
-                    chunk_id=chunk_id,
+                    chunk_id=c.get("chunk_id"),
                     title=c.get("title"),
                     url=c.get("url"),
                     content=c.get("content") or c.get("content_preview"),
@@ -91,8 +58,6 @@ def build_labeling_view(
                     pdf_page_number=pdf_page if isinstance(pdf_page, int) else None,
                     score=c.get("score") if isinstance(c.get("score"), (int, float)) else None,
                     rank=i,
-                    relevant=label,
-                    labeled_by=labeler,
                 )
             )
         if not chunks:
@@ -103,24 +68,110 @@ def build_labeling_view(
                 test_id=r.test_id,
                 input=(r.input or None) and str(r.input)[:300],
                 chunks=chunks,
-                labeled_count=labeled,
-                relevant_count=relevant,
-                complete=bool(complete_by_test.get(r.test_id)),
-                slice=slice_by_test.get(r.test_id),
-                labelers=labelers_by_test.get(r.test_id, labelers),
+            )
+        )
+
+    return cases, len({r.test_id for r in result_list})
+
+
+def merge_labeling_view(
+    cases: list[LabelingCase],
+    total_cases: int,
+    labels_by_key: dict[tuple[str, str], bool],
+    *,
+    run_id: str | None = None,
+    run_name: str | None = None,
+    labeler_by_key: dict[tuple[str, str], str] | None = None,
+    complete_by_test: dict[str, bool] | None = None,
+    slice_by_test: dict[str, str] | None = None,
+    labelers_by_test: dict[str, list[str]] | None = None,
+) -> LabelingRunResponse:
+    """Layer per-user labels and per-case status onto a :func:`build_labeling_cases` skeleton.
+
+    This is the cheap, *per-request* half: it never touches the (large) result rows, only the
+    small label/status maps, so it's fine to run on every request even when ``cases`` came from
+    a cache. ``labels_by_key`` maps ``(test_id, chunk_id) -> relevant`` (scoped to the viewing
+    user, so each annotator sees and edits their own judgments). ``labeler_by_key`` maps the same
+    key to the display name of who made the shown label; ``complete_by_test`` is the manual
+    "labeling complete" flag; ``slice_by_test`` is the risk slice. ``labelers_by_test`` lists
+    *every* annotator who has judged any chunk in a case; when omitted it falls back to the
+    labelers of the shown labels.
+    """
+    labeler_by_key = labeler_by_key or {}
+    complete_by_test = complete_by_test or {}
+    slice_by_test = slice_by_test or {}
+    labelers_by_test = labelers_by_test or {}
+    out: list[LabelingCase] = []
+
+    for c in cases:
+        labeled = 0
+        relevant = 0
+        labelers: list[str] = []
+        merged_chunks: list[ChunkForLabeling] = []
+        for ch in c.chunks:
+            key = (c.test_id, ch.chunk_id) if ch.chunk_id else None
+            label = labels_by_key.get(key) if key else None
+            labeler = labeler_by_key.get(key) if key else None
+            if label is not None:
+                labeled += 1
+                if label:
+                    relevant += 1
+                if labeler and labeler not in labelers:
+                    labelers.append(labeler)
+            merged_chunks.append(ch.model_copy(update={"relevant": label, "labeled_by": labeler}))
+        out.append(
+            c.model_copy(
+                update={
+                    "chunks": merged_chunks,
+                    "labeled_count": labeled,
+                    "relevant_count": relevant,
+                    "complete": bool(complete_by_test.get(c.test_id)),
+                    "slice": slice_by_test.get(c.test_id),
+                    "labelers": labelers_by_test.get(c.test_id, labelers),
+                }
             )
         )
 
     # Incomplete first, then least-labeled, so a human always lands on unfinished work.
-    cases.sort(key=lambda c: (c.complete, c.labeled_count, c.test_id))
+    out.sort(key=lambda c: (c.complete, c.labeled_count, c.test_id))
 
     return LabelingRunResponse(
-        available=bool(cases),
+        available=bool(out),
         run_id=run_id,
         run_name=run_name,
-        total_cases=len({r.test_id for r in result_list}),
-        labelable_cases=len(cases),
-        cases=cases,
+        total_cases=total_cases,
+        labelable_cases=len(out),
+        cases=out,
+    )
+
+
+def build_labeling_view(
+    results: Iterable[EvalResult],
+    labels_by_key: dict[tuple[str, str], bool],
+    *,
+    run_id: str | None = None,
+    run_name: str | None = None,
+    labeler_by_key: dict[tuple[str, str], str] | None = None,
+    complete_by_test: dict[str, bool] | None = None,
+    slice_by_test: dict[str, str] | None = None,
+    labelers_by_test: dict[str, list[str]] | None = None,
+) -> LabelingRunResponse:
+    """Build the labeling view straight from results (uncached): cases skeleton + label merge.
+
+    Convenience for the run-scoped path and tests. The cached project-wide path instead calls
+    :func:`build_labeling_cases` (cacheable) and :func:`merge_labeling_view` separately.
+    """
+    cases, total_cases = build_labeling_cases(results)
+    return merge_labeling_view(
+        cases,
+        total_cases,
+        labels_by_key,
+        run_id=run_id,
+        run_name=run_name,
+        labeler_by_key=labeler_by_key,
+        complete_by_test=complete_by_test,
+        slice_by_test=slice_by_test,
+        labelers_by_test=labelers_by_test,
     )
 
 

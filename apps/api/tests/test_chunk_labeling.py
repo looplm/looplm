@@ -8,9 +8,12 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.evaluations import EvalResult, EvalRun
+from app.schemas.retrieval import LabelingCase
 from app.services.chunk_labeling import (
+    build_labeling_cases,
     build_labeling_view,
     build_pool_view,
+    merge_labeling_view,
     retrieved_chunk_ids,
 )
 from app.services.chunk_pool import PooledChunk, PoolResult
@@ -95,6 +98,32 @@ def test_build_labeling_view_skips_cases_without_chunks():
     assert view.available is False
     assert view.total_cases == 1
     assert view.labelable_cases == 0
+
+
+def test_cases_skeleton_is_label_free_and_merge_layers_labels():
+    # The cacheable skeleton must carry no per-user state, so one cached copy serves every
+    # annotator. Labels are applied only at merge time.
+    cases, total = build_labeling_cases([_result("t1", CHUNKS)])
+    assert total == 1
+    skel = cases[0]
+    assert skel.labeled_count == 0 and skel.relevant_count == 0
+    assert all(ch.relevant is None and ch.labeled_by is None for ch in skel.chunks)
+
+    # Round-trip the skeleton through dump/validate to mimic the Redis cache, then merge.
+    cached = [LabelingCase.model_validate(c.model_dump()) for c in cases]
+    view = merge_labeling_view(
+        cached,
+        total,
+        {("t1", "c1"): True},
+        labeler_by_key={("t1", "c1"): "tim"},
+        complete_by_test={"t1": True},
+    )
+    case = view.cases[0]
+    assert case.labeled_count == 1 and case.relevant_count == 1 and case.complete is True
+    assert case.chunks[0].relevant is True and case.chunks[0].labeled_by == "tim"
+    assert case.chunks[1].relevant is None
+    # Merging must not have mutated the source skeleton (it's the shared cached object).
+    assert cached[0].chunks[0].relevant is None and cached[0].labeled_count == 0
 
 
 def test_build_labeling_view_dedupes_test_case_across_runs():
