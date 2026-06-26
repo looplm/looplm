@@ -148,6 +148,8 @@ export interface PooledChunkForLabeling {
   score?: number | null;
   // Heads that surfaced this chunk: "trace" | "keyword" | "vector" | "hybrid".
   provenance: string[];
+  // head -> 1-indexed rank the chunk held in that head's results, e.g. { vector: 3, hybrid: 2 }.
+  ranks: Record<string, number>;
   relevant?: boolean | null;
   labeled_by?: string | null;
 }

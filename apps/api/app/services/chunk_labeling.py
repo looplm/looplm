@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from app.models.evaluations import EvalResult, EvalRun
+from app.models.evaluations import EvalResult
 from app.schemas.retrieval import (
     ChunkForLabeling,
     LabelingCase,
@@ -21,16 +21,23 @@ from app.services.chunk_pool import PoolResult
 
 
 def build_labeling_view(
-    run: EvalRun,
     results: Iterable[EvalResult],
     labels_by_key: dict[tuple[str, str], bool],
     *,
+    run_id: str | None = None,
+    run_name: str | None = None,
     labeler_by_key: dict[tuple[str, str], str] | None = None,
     complete_by_test: dict[str, bool] | None = None,
     slice_by_test: dict[str, str] | None = None,
     labelers_by_test: dict[str, list[str]] | None = None,
 ) -> LabelingRunResponse:
     """Assemble per-case retrieved chunks with their current relevance labels.
+
+    ``results`` may span multiple eval runs; they are deduped by ``test_id`` so each query
+    yields one case (labels are pooled per query, not per run). When results are passed
+    newest-run-first, the most recent capture of a query wins. ``run_id``/``run_name`` describe
+    the source run when the view is scoped to one, and are ``None`` when aggregating across all
+    of a project's runs.
 
     ``labels_by_key`` maps ``(test_id, chunk_id) -> relevant`` (scoped to the viewing user, so
     each annotator sees and edits their own judgments). ``labeler_by_key`` maps the same key to
@@ -45,8 +52,11 @@ def build_labeling_view(
     labelers_by_test = labelers_by_test or {}
     result_list = list(results)
     cases: list[LabelingCase] = []
+    seen_tests: set[str] = set()
 
     for r in result_list:
+        if r.test_id in seen_tests:
+            continue
         meta = r.result_metadata if isinstance(r.result_metadata, dict) else {}
         raw_chunks = meta.get("retrieved_chunks")
         if not isinstance(raw_chunks, list) or not raw_chunks:
@@ -87,6 +97,7 @@ def build_labeling_view(
             )
         if not chunks:
             continue
+        seen_tests.add(r.test_id)
         cases.append(
             LabelingCase(
                 test_id=r.test_id,
@@ -105,9 +116,9 @@ def build_labeling_view(
 
     return LabelingRunResponse(
         available=bool(cases),
-        run_id=str(run.id),
-        run_name=run.name,
-        total_cases=len(result_list),
+        run_id=run_id,
+        run_name=run_name,
+        total_cases=len({r.test_id for r in result_list}),
         labelable_cases=len(cases),
         cases=cases,
     )
@@ -140,6 +151,7 @@ def build_pool_view(
                 content_preview=pc.content_preview,
                 score=pc.score,
                 provenance=pc.provenance,
+                ranks=pc.ranks,
                 relevant=labels_by_key.get(key),
                 labeled_by=labeler_by_key.get(key),
             )

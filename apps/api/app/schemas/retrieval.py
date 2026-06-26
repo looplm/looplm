@@ -171,8 +171,9 @@ class PooledChunkForLabeling(BaseModel):
 
     Unlike :class:`ChunkForLabeling` (which mirrors a single ranked retrieval) this carries
     ``provenance`` — the heads that found it (``trace``, ``keyword``, ``vector``, ``hybrid``) —
-    so the labeler sees *why* a chunk is in the pool. ``score`` is a best-effort backend score
-    and is not comparable across heads.
+    so the labeler sees *why* a chunk is in the pool, and ``ranks`` — the 1-indexed rank the
+    chunk held in each of those heads — so they see *where* each method ranked it. ``score`` is
+    a best-effort backend score and is not comparable across heads.
     """
 
     chunk_id: str
@@ -181,6 +182,8 @@ class PooledChunkForLabeling(BaseModel):
     content_preview: str | None = None
     score: float | None = None
     provenance: list[str] = Field(default_factory=list)
+    # head -> 1-indexed rank in that head's results (e.g. {"vector": 3, "hybrid": 2}).
+    ranks: dict[str, int] = Field(default_factory=dict)
     relevant: bool | None = None
     labeled_by: str | None = None
 

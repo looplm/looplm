@@ -78,6 +78,28 @@ async def test_backfills_missing_fields_from_index_head():
 
 
 @pytest.mark.asyncio
+async def test_ranks_capture_per_head_position():
+    # "shared" is 2nd in keyword but 1st in vector; "trace" rank follows trace order.
+    provider = FakeProvider(
+        {
+            "keyword": [_doc("kw_only"), _doc("shared")],
+            "vector": [_doc("shared"), _doc("vec_only")],
+        }
+    )
+    res = await assemble_pool(
+        provider,
+        "q",
+        trace_chunks=[{"chunk_id": "t1"}, {"chunk_id": "shared"}],
+        modes=["keyword", "vector"],
+    )
+    by_id = {c.chunk_id: c for c in res.chunks}
+    assert by_id["t1"].ranks == {"trace": 1}
+    assert by_id["shared"].ranks == {"trace": 2, "keyword": 2, "vector": 1}
+    assert by_id["kw_only"].ranks == {"keyword": 1}
+    assert by_id["vec_only"].ranks == {"vector": 2}
+
+
+@pytest.mark.asyncio
 async def test_no_provider_returns_trace_only_pool():
     res = await assemble_pool(None, "q", trace_chunks=[{"chunk_id": "t1"}])
     assert [c.chunk_id for c in res.chunks] == ["t1"]

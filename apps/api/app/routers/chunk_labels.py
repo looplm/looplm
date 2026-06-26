@@ -120,11 +120,30 @@ async def get_labeling_view(
     project: Project = Depends(get_current_project),
     user: User = Depends(get_current_user),
 ):
-    """Retrieved chunks for a run, grouped by case, with the viewer's own labels merged in."""
-    run = await _latest_or_named_run(db, project, run_id)
-    results = (
-        await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
-    ).scalars().all()
+    """Retrieved chunks grouped by test case, with the viewer's own labels merged in.
+
+    Labels are pooled per query across runs, so labeling isn't tied to a single run: by default
+    this aggregates every test case the project's eval runs captured, deduped by ``test_id`` with
+    the most recent run's capture winning. Passing ``run_id`` scopes the view to one run instead.
+    """
+    run_name: str | None = None
+    if run_id is not None:
+        run = await _latest_or_named_run(db, project, run_id)
+        run_name = run.name
+        results = (
+            await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
+        ).scalars().all()
+    else:
+        # All results across the project's runs, newest run first so the latest capture of a
+        # query wins when build_labeling_view dedupes by test_id.
+        results = (
+            await db.execute(
+                select(EvalResult)
+                .join(EvalRun, EvalResult.run_id == EvalRun.id)
+                .where(EvalRun.project_id == project.id)
+                .order_by(EvalRun.created_at.desc())
+            )
+        ).scalars().all()
 
     labels_by_key, labeler_by_key, labelers_by_test = await _project_labels(
         db, project, user_id=user.id
@@ -139,9 +158,10 @@ async def get_labeling_view(
     slice_by_test = {s.test_id: s.slice for s in statuses if s.slice}
 
     return build_labeling_view(
-        run,
         results,
         labels_by_key,
+        run_id=str(run_id) if run_id is not None else None,
+        run_name=run_name,
         labeler_by_key=labeler_by_key,
         complete_by_test=complete_by_test,
         slice_by_test=slice_by_test,
@@ -172,14 +192,26 @@ async def get_labeling_pool(
     case's own input is used and the trace chunks seed the pool. ``depth`` tunes per-head top-k.
     Falls back to a trace-only pool when no index provider is connected.
     """
-    run = await _latest_or_named_run(db, project, run_id)
-    result = (
-        await db.execute(
-            select(EvalResult)
-            .where(EvalResult.run_id == run.id, EvalResult.test_id == test_id)
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    if run_id is not None:
+        run = await _latest_or_named_run(db, project, run_id)
+        result = (
+            await db.execute(
+                select(EvalResult)
+                .where(EvalResult.run_id == run.id, EvalResult.test_id == test_id)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    else:
+        # No run pinned: take the most recent capture of this test case across all runs.
+        result = (
+            await db.execute(
+                select(EvalResult)
+                .join(EvalRun, EvalResult.run_id == EvalRun.id)
+                .where(EvalRun.project_id == project.id, EvalResult.test_id == test_id)
+                .order_by(EvalRun.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
     if result is None:
         raise HTTPException(
             status_code=404,

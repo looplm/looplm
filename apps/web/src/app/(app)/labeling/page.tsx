@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  getEvalRuns,
   getLabelingView,
   getLabelingPool,
   getChunkMetadata,
@@ -13,7 +12,6 @@ import {
   saveChunkLabels,
   setLabelingComplete,
   setLabelingSlice,
-  type EvalRunListItem,
   type LabelingRunResponse,
   type LabelingCase,
   type LabelingPoolResponse,
@@ -252,7 +250,15 @@ const PROVENANCE_BADGES: Record<string, { label: string; cls: string }> = {
   hybrid: { label: "Hybrid", cls: "bg-teal-500/10 text-teal-600 dark:text-teal-300" },
 };
 
-function ProvenanceBadges({ provenance }: { provenance: string[] }) {
+// Each badge shows the head and, when known, the rank the chunk held in that head — so the
+// labeler sees both *why* a chunk is pooled and *where* each method ranked it (e.g. "Vector #3").
+function ProvenanceBadges({
+  provenance,
+  ranks,
+}: {
+  provenance: string[];
+  ranks?: Record<string, number>;
+}) {
   return (
     <>
       {provenance.map((p) => {
@@ -261,12 +267,14 @@ function ProvenanceBadges({ provenance }: { provenance: string[] }) {
             label: p,
             cls: "bg-gray-500/10 text-gray-600 dark:text-gray-300",
           };
+        const rank = ranks?.[p];
         return (
           <span
             key={p}
             className={`text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${b.cls}`}
           >
             {b.label}
+            {rank != null && <span className="ml-1 font-mono normal-case">#{rank}</span>}
           </span>
         );
       })}
@@ -316,7 +324,7 @@ function PoolChunkRow({
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap mb-1.5">
-          <ProvenanceBadges provenance={chunk.provenance} />
+          <ProvenanceBadges provenance={chunk.provenance} ranks={chunk.ranks} />
           {chunk.score != null && (
             <span className="text-[10px] font-mono text-gray-400 dark:text-slate-500">
               score {chunk.score.toFixed(2)}
@@ -402,13 +410,11 @@ function PoolChunkRow({
 // optimistically (pooled candidates aren't part of the trace-based case counts).
 function PoolSection({
   testId,
-  runId,
   canEdit,
   indexConnected,
   traceChunkIds,
 }: {
   testId: string;
-  runId: string | null;
   canEdit: boolean;
   indexConnected: boolean;
   traceChunkIds: Set<string>;
@@ -425,7 +431,7 @@ function PoolSection({
       const busy = query !== undefined;
       if (busy) setSearching(true);
       else setState("loading");
-      return getLabelingPool(testId, { runId: runId ?? undefined, q: query })
+      return getLabelingPool(testId, { q: query })
         .then((p) => {
           setPool(p);
           setState("loaded");
@@ -433,7 +439,7 @@ function PoolSection({
         .catch(() => setState("error"))
         .finally(() => busy && setSearching(false));
     },
-    [testId, runId],
+    [testId],
   );
 
   const onToggle = () => {
@@ -555,7 +561,6 @@ function PoolSection({
 
 function CaseCard({
   c,
-  runId,
   canEdit,
   indexConnected,
   collapsed,
@@ -565,7 +570,6 @@ function CaseCard({
   onLabel,
 }: {
   c: LabelingCase;
-  runId: string | null;
   canEdit: boolean;
   indexConnected: boolean;
   collapsed: boolean;
@@ -649,7 +653,6 @@ function CaseCard({
           ))}
           <PoolSection
             testId={c.test_id}
-            runId={runId}
             canEdit={canEdit}
             indexConnected={indexConnected}
             traceChunkIds={
@@ -832,8 +835,6 @@ export default function LabelingPage() {
   const { canWrite } = usePermissions();
   const canEdit = canWrite("labeling");
 
-  const [runs, setRuns] = useState<EvalRunListItem[]>([]);
-  const [runId, setRunId] = useState<string | null>(null);
   const [view, setView] = useState<LabelingRunResponse | null>(null);
   const [tab, setTab] = useState<"in_progress" | "complete">("in_progress");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -842,22 +843,19 @@ export default function LabelingPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getEvalRuns({ limit: "50" })
-      .then((res) => setRuns(res.data))
-      .catch(() => setRuns([]));
     getIndexProviders()
       .then((res) => setIndexConnected(res.data.length > 0))
       .catch(() => setIndexConnected(false));
   }, []);
 
-  const load = useCallback((id: string | null) => {
+  // Labeling aggregates every test case across the project's runs — no run selection needed.
+  const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    return getLabelingView(id ?? undefined)
+    return getLabelingView()
       .then((v) => {
         setView(v);
         setCollapsed(new Set());
-        if (!id && v.run_id) setRunId(v.run_id);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -891,10 +889,10 @@ export default function LabelingPage() {
         await setLabelingComplete(testId, complete);
       } catch {
         toast.error("Failed to update status");
-        load(runId);
+        load();
       }
     },
-    [runId, load],
+    [load],
   );
 
   const onSetSlice = useCallback(
@@ -908,16 +906,15 @@ export default function LabelingPage() {
         await setLabelingSlice(testId, slice);
       } catch {
         toast.error("Failed to set slice");
-        load(runId);
+        load();
       }
     },
-    [runId, load],
+    [load],
   );
 
   useEffect(() => {
-    load(runId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId]);
+    load();
+  }, [load]);
 
   // Optimistic label: update local state, persist, roll back on error.
   const onLabel = useCallback(
@@ -951,10 +948,10 @@ export default function LabelingPage() {
         ]);
       } catch {
         toast.error("Failed to save label");
-        load(runId);
+        load();
       }
     },
-    [runId, load],
+    [load],
   );
 
   const progress = useMemo(() => {
@@ -972,19 +969,6 @@ export default function LabelingPage() {
     <div>
       <div className="flex items-center justify-between gap-4 mb-1">
         <h1 className="text-3xl font-bold">Labeling</h1>
-        {runs.length > 0 && (
-          <select
-            value={runId ?? ""}
-            onChange={(e) => setRunId(e.target.value || null)}
-            className="text-sm rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 max-w-[280px]"
-          >
-            {runs.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        )}
       </div>
       <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
         Judge the chunks each test case actually retrieved. Mark each one relevant or not;
@@ -1006,7 +990,7 @@ export default function LabelingPage() {
         </div>
       ) : !view || !view.available ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
-          No retrieved chunks captured for this run. Run an evaluation against the retrieval
+          No retrieved chunks captured yet. Run an evaluation against the retrieval
           endpoint so its responses (with chunk ids) are captured, then come back to label.
         </div>
       ) : (
@@ -1065,7 +1049,6 @@ export default function LabelingPage() {
                       <CaseCard
                         key={c.test_id}
                         c={c}
-                        runId={runId}
                         canEdit={canEdit}
                         indexConnected={indexConnected}
                         collapsed={collapsed.has(c.test_id)}

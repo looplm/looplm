@@ -40,8 +40,22 @@ class PooledChunk:
     content_preview: str | None = None
     # Best-effort backend score (not comparable across heads — informational only).
     score: float | None = None
-    # Subset of {"trace", "keyword", "vector", "hybrid"} — why this chunk is in the pool.
+    # Subset of {"trace", "keyword", "vector", "hybrid"} — why this chunk is in the pool,
+    # in the order the heads first surfaced it.
     provenance: list[str] = field(default_factory=list)
+    # head -> 1-indexed rank this chunk held in that head's results (e.g. {"vector": 3,
+    # "hybrid": 2}). Lets the labeler see *where* each method ranked the chunk, not just that
+    # it surfaced it. A head missing from the map didn't surface this chunk.
+    ranks: dict[str, int] = field(default_factory=dict)
+
+    def _seen(self, head: str, rank: int) -> None:
+        """Record that ``head`` surfaced this chunk at ``rank`` (keeping the best/first)."""
+        if head not in self.provenance:
+            self.provenance.append(head)
+        # Heads don't repeat a chunk, but guard anyway: keep the strongest (lowest) rank.
+        existing = self.ranks.get(head)
+        if existing is None or rank < existing:
+            self.ranks[head] = rank
 
 
 @dataclass
@@ -64,8 +78,13 @@ def _coalesce(*values: Any) -> str | None:
 def _seed_from_trace(
     pool: dict[str, PooledChunk], trace_chunks: Iterable[dict[str, Any]]
 ) -> bool:
-    """Seed the pool with the trace-captured chunks; returns True if any were added."""
+    """Seed the pool with the trace-captured chunks; returns True if any were added.
+
+    Trace chunks arrive in the order the system under test ranked them, so their position is
+    the ``trace`` head's rank.
+    """
     seeded = False
+    rank = 0
     for c in trace_chunks:
         if not isinstance(c, dict):
             continue
@@ -73,19 +92,21 @@ def _seed_from_trace(
         if not isinstance(chunk_id, str) or not chunk_id:
             continue
         seeded = True
+        rank += 1
         existing = pool.get(chunk_id)
         if existing is None:
             score = c.get("score")
-            pool[chunk_id] = PooledChunk(
+            chunk = PooledChunk(
                 chunk_id=chunk_id,
                 title=_coalesce(c.get("title")),
                 url=_coalesce(c.get("url")),
                 content_preview=_coalesce(c.get("content_preview"), c.get("content")),
                 score=float(score) if isinstance(score, (int, float)) else None,
-                provenance=["trace"],
             )
-        elif "trace" not in existing.provenance:
-            existing.provenance.append("trace")
+            chunk._seen("trace", rank)
+            pool[chunk_id] = chunk
+        else:
+            existing._seen("trace", rank)
     return seeded
 
 
@@ -130,22 +151,22 @@ async def assemble_pool(
                 continue
 
             heads_ran.append(mode)
-            for d in docs:
+            for rank, d in enumerate(docs, start=1):
                 if not d.id:
                     continue
                 existing = pool.get(d.id)
                 if existing is None:
-                    pool[d.id] = PooledChunk(
+                    chunk = PooledChunk(
                         chunk_id=d.id,
                         title=_coalesce(d.title),
                         url=_coalesce(d.url),
                         content_preview=_coalesce(d.snippet),
                         score=d.score,
-                        provenance=[mode],
                     )
+                    chunk._seen(mode, rank)
+                    pool[d.id] = chunk
                 else:
-                    if mode not in existing.provenance:
-                        existing.provenance.append(mode)
+                    existing._seen(mode, rank)
                     # Backfill anything the trace capture lacked.
                     existing.title = existing.title or _coalesce(d.title)
                     existing.url = existing.url or _coalesce(d.url)

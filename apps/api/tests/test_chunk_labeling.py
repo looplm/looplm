@@ -76,7 +76,7 @@ def test_retrieved_chunk_ids_in_rank_order():
 def test_build_labeling_view_merges_labels_and_sorts_unfinished_first():
     results = [_result("done", CHUNKS), _result("todo", CHUNKS)]
     labels = {("done", "c1"): True, ("done", "c2"): False}
-    view = build_labeling_view(_run(), results, labels)
+    view = build_labeling_view(results, labels)
     assert view.available is True
     assert view.labelable_cases == 2
     # Least-labeled case first.
@@ -91,10 +91,20 @@ def test_build_labeling_view_merges_labels_and_sorts_unfinished_first():
 
 def test_build_labeling_view_skips_cases_without_chunks():
     r = EvalResult(id=uuid4(), run_id=uuid4(), test_id="t", pass_=True, graders={}, result_metadata={})
-    view = build_labeling_view(_run(), [r], {})
+    view = build_labeling_view([r], {})
     assert view.available is False
     assert view.total_cases == 1
     assert view.labelable_cases == 0
+
+
+def test_build_labeling_view_dedupes_test_case_across_runs():
+    # Same query captured by two runs (passed newest-first). One case, newest capture wins.
+    newest = _result("q1", [{"chunk_id": "new", "content_preview": "n"}])
+    oldest = _result("q1", CHUNKS)
+    view = build_labeling_view([newest, oldest], {})
+    assert view.total_cases == 1
+    assert view.labelable_cases == 1
+    assert [ch.chunk_id for ch in view.cases[0].chunks] == ["new"]
 
 
 def test_label_based_pooled_metrics():
