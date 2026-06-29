@@ -7,7 +7,9 @@ from uuid import uuid4
 import pytest
 from httpx import AsyncClient
 
-from app.models.evaluations import EvalResult, EvalRun
+from app.models.base import IndexProviderType
+from app.models.datasets import TestCase, TestDataset
+from app.models.index_providers import IndexProvider
 from app.services.chunk_agreement import (
     Vote,
     build_agreement_report,
@@ -119,13 +121,18 @@ def test_agreement_report_reflects_gold_override():
 # --- endpoints ---
 
 @pytest.mark.asyncio
-async def test_agreement_and_gold_endpoints(client: AsyncClient, auth_headers, db_session, test_project):
-    run = EvalRun(id=uuid4(), project_id=test_project.id, name="agree-run")
-    db_session.add(run)
+async def test_agreement_and_gold_endpoints(
+    client: AsyncClient, auth_headers, db_session, test_project, monkeypatch
+):
+    import app.routers.retrieval as retrieval_router
+
+    dataset = TestDataset(id=uuid4(), project_id=test_project.id, name="set")
+    db_session.add(dataset)
+    db_session.add(TestCase(id=uuid4(), dataset_id=dataset.id, test_id="q1", prompt="q"))
     db_session.add(
-        EvalResult(
-            id=uuid4(), run_id=run.id, test_id="q1", pass_=True, input="q",
-            graders={}, result_metadata={"retrieved_chunks": [{"chunk_id": "c1"}]},
+        IndexProvider(
+            id=uuid4(), project_id=test_project.id, type=IndexProviderType.azure_search,
+            name="idx", config={"index_name": "i"}, api_key=b"x", base_url="https://example.net",
         )
     )
     await db_session.commit()
@@ -139,14 +146,25 @@ async def test_agreement_and_gold_endpoints(client: AsyncClient, auth_headers, d
     assert resp.status_code == 200
     assert resp.json()["available"] is False
 
-    # Adjudicate a gold grade; metrics then score against it.
+    # Adjudicate a gold grade; metrics then score it against what the live probe retrieves.
     gold = await client.put(
         "/api/pipeline/labeling/gold", headers=auth_headers,
         json={"test_id": "q1", "chunk_id": "c1", "relevance": 3},
     )
     assert gold.status_code == 200
+
+    class _FakeProvider:
+        async def aclose(self):
+            pass
+
+    async def _fake_probe(provider, project_id, test_id, query, k, *, refresh=False):
+        return ["c1"]
+
+    monkeypatch.setattr(retrieval_router, "build_index_provider", lambda row: _FakeProvider())
+    monkeypatch.setattr(retrieval_router, "cached_probe_chunk_ids", _fake_probe)
+
     metrics = await client.get(
-        f"/api/pipeline/retrieval-metrics?run_id={run.id}&source=labels", headers=auth_headers
+        "/api/pipeline/retrieval-metrics?source=labels", headers=auth_headers
     )
     assert metrics.status_code == 200
     assert metrics.json()["available"] is True

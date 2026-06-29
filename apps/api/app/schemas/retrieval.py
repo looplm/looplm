@@ -154,16 +154,27 @@ class LabelingCase(BaseModel):
     labelers: list[str] = Field(default_factory=list)
 
 
-class LabelingRunResponse(BaseModel):
-    """Retrieved chunks for an eval run, grouped by case, ready for labeling.
+class LabelingDatasetOption(BaseModel):
+    """A dataset the labeling page can switch to (for the picker)."""
 
-    ``available`` is False when no case in the run captured retrieved chunks (e.g. the
-    target response carried no structured sources).
+    id: str
+    name: str
+    test_count: int = 0
+
+
+class LabelingRunResponse(BaseModel):
+    """A dataset's test cases, grouped per case, ready for labeling.
+
+    Cases come from the selected dataset's test cases (not eval runs); the chunks to judge
+    are pooled live from the connected index per case. ``available`` is False when the
+    project has no dataset with test cases. ``datasets`` lists every dataset for the picker;
+    ``dataset_id`` / ``dataset_name`` identify the one these cases belong to.
     """
 
     available: bool = False
-    run_id: str | None = None
-    run_name: str | None = None
+    dataset_id: str | None = None
+    dataset_name: str | None = None
+    datasets: list[LabelingDatasetOption] = Field(default_factory=list)
     total_cases: int = 0
     labelable_cases: int = 0
     cases: list[LabelingCase] = Field(default_factory=list)
@@ -231,8 +242,8 @@ class ChunkLabelBatch(BaseModel):
 
 class AiJudgeRequest(BaseModel):
     test_id: str
-    # Optionally scope to one run's capture of the case; defaults to the most recent.
-    run_id: str | None = None
+    # Dataset the case belongs to; defaults to the most recently updated dataset.
+    dataset_id: str | None = None
     # Optional override of the default grading rubric (system prompt) for this run.
     instructions: str | None = None
 

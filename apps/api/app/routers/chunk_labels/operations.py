@@ -18,7 +18,6 @@ from app.models.chunk_labels import (
     TestCaseLabelingStatus,
     is_valid_grade,
 )
-from app.models.evaluations import EvalResult, EvalRun
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import (
@@ -35,7 +34,13 @@ from app.services.chunk_agreement import Vote, build_agreement_report
 from app.services.chunk_ai_judge import AiJudgeChunk, ai_judge_chunks
 from app.services.llm_usage_tracker import record_llm_usage
 
-from ._helpers import _display_name
+from ._helpers import (
+    _as_uuid,
+    _dataset_case_query,
+    _display_name,
+    _resolve_dataset,
+    assemble_case_pool,
+)
 
 router = APIRouter()
 
@@ -245,51 +250,43 @@ async def ai_judge_case(
             detail={"error": {"code": "LLM_NOT_CONFIGURED", "message": str(exc)}},
         ) from exc
 
-    # Most recent capture of the case (optionally pinned to a run), for its retrieved chunks.
-    result_filter = [EvalResult.test_id == body.test_id, EvalRun.project_id == project.id]
-    if body.run_id:
-        result_filter.append(EvalRun.id == body.run_id)
-    result = (
-        await db.execute(
-            select(EvalResult)
-            .join(EvalRun, EvalResult.run_id == EvalRun.id)
-            .where(*result_filter)
-            .order_by(EvalRun.created_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if result is None:
+    # Resolve the dataset case's query, then judge the same pooled chunks the labeler sees.
+    dataset = await _resolve_dataset(db, project, _as_uuid(body.dataset_id))
+    if dataset is None:
         raise HTTPException(
             status_code=404,
-            detail={"error": {"code": "NOT_FOUND", "message": "Test case not found"}},
+            detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found"}},
+        )
+    query = await _dataset_case_query(db, dataset.id, body.test_id)
+    if query is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Test case not found in dataset"}},
         )
 
-    meta = result.result_metadata if isinstance(result.result_metadata, dict) else {}
-    raw_chunks = meta.get("retrieved_chunks")
-    raw_chunks = raw_chunks if isinstance(raw_chunks, list) else []
-    # Only judgeable (chunk_id-bearing) chunks; keep their snapshot fields for the stored label.
-    judgeable = [
-        c
-        for c in raw_chunks
-        if isinstance(c, dict) and isinstance(c.get("chunk_id"), str)
-    ]
-    if not judgeable:
+    pool, _computed_at, _connected = await assemble_case_pool(db, project, body.test_id, query)
+    if not pool.chunks:
         raise HTTPException(
             status_code=422,
             detail={
                 "error": {
                     "code": "NO_CHUNKS",
-                    "message": "This case has no chunks with ids to judge.",
+                    "message": "No chunks to judge — connect an index provider so candidates can be pooled.",
                 }
             },
         )
 
+    # Snapshot fields (kept on the stored label so the chunk stays readable) come from the pool.
+    snapshots = {
+        pc.chunk_id: {"content_preview": pc.content_preview, "url": pc.url, "title": pc.title}
+        for pc in pool.chunks
+    }
     chunks = [
-        AiJudgeChunk(chunk_id=c["chunk_id"], text=str(c.get("content") or c.get("content_preview") or ""))
-        for c in judgeable
+        AiJudgeChunk(chunk_id=pc.chunk_id, text=str(pc.content_preview or ""))
+        for pc in pool.chunks
     ]
     try:
-        grades, usage = await ai_judge_chunks(llm, str(result.input or ""), chunks)
+        grades, usage = await ai_judge_chunks(llm, query, chunks)
     except AnalysisLlmConfigError as exc:
         raise HTTPException(
             status_code=400,
@@ -324,7 +321,6 @@ async def ai_judge_case(
         )
     ).scalars().all()
     by_chunk = {lbl.chunk_id: lbl for lbl in existing}
-    snapshots = {c["chunk_id"]: c for c in judgeable}
 
     for chunk_id, grade in grades.items():
         snap = snapshots.get(chunk_id, {})

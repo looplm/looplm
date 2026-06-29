@@ -17,7 +17,6 @@ from typing import Any, Iterable
 from app.models.chunk_labels import DEFAULT_SLICE
 from app.models.evaluations import EvalResult, EvalRun
 from app.schemas.retrieval import RetrievalCaseMetrics, RetrievalRunMetrics, SliceMetrics
-from app.services.chunk_labeling import retrieved_chunk_ids
 from app.services.retrieval_metrics import (
     compute_bpref,
     compute_condensed_ndcg_at_k,
@@ -99,7 +98,8 @@ def _slice_summaries(cases: list[RetrievalCaseMetrics]) -> list[SliceMetrics]:
 
 
 def _aggregate_rows(
-    run: EvalRun,
+    run_id: str | None,
+    run_name: str | None,
     total_cases: int,
     rows: list[dict[str, Any]],
     ks: tuple[int, ...],
@@ -182,8 +182,8 @@ def _aggregate_rows(
     if not cases:
         return RetrievalRunMetrics(
             available=False,
-            run_id=str(run.id),
-            run_name=run.name,
+            run_id=run_id,
+            run_name=run_name,
             total_cases=total_cases,
             evaluated_cases=0,
             ks=list(ks),
@@ -194,8 +194,8 @@ def _aggregate_rows(
 
     return RetrievalRunMetrics(
         available=True,
-        run_id=str(run.id),
-        run_name=run.name,
+        run_id=run_id,
+        run_name=run_name,
         total_cases=total_cases,
         evaluated_cases=len(cases),
         ks=list(ks),
@@ -235,49 +235,50 @@ def aggregate_run_retrieval_metrics(
                 "slice": slice_by_test.get(r.test_id),
             }
         )
-    return _aggregate_rows(run, len(result_list), rows, ks)
+    return _aggregate_rows(str(run.id), run.name, len(result_list), rows, ks)
 
 
-def aggregate_run_retrieval_metrics_from_labels(
-    run: EvalRun,
-    results: Iterable[EvalResult],
+def aggregate_retrieval_metrics_from_labels(
+    cases: Iterable[tuple[str, str | None]],
+    retrieved_by_test: dict[str, list[str]],
     relevant_by_test: dict[str, set[str]],
     judged_nonrelevant_by_test: dict[str, set[str]] | None = None,
     slice_by_test: dict[str, str] | None = None,
     grade_by_test: dict[str, dict[str, int]] | None = None,
+    *,
+    dataset_id: str | None = None,
+    dataset_name: str | None = None,
     ks: tuple[int, ...] = AGG_KS,
 ) -> RetrievalRunMetrics:
-    """Run summary from human chunk labels, with pooled recall.
+    """Summary from human chunk labels vs. a live retrieval probe, over a dataset's cases.
 
-    ``relevant_by_test`` maps test_id → the set of chunk ids judged relevant for that
-    query (pooled across all runs). ``judged_nonrelevant_by_test`` maps test_id → chunk ids
-    explicitly judged *not* relevant; supplying it enables the incomplete-judgment-safe
-    metrics (bpref, condensed nDCG), which need to tell judged-irrelevant chunks apart from
-    merely-unjudged ones. ``grade_by_test`` maps test_id → ``{chunk_id: gold grade}`` for the
-    relevant chunks; supplying it makes nDCG / condensed nDCG use graded gains (gain = grade)
-    instead of binary relevance. ``slice_by_test`` maps test_id → its risk slice for the
-    per-slice breakdown. Retrieved chunk ids come from each result's captured
-    ``retrieved_chunks`` in rank order.
+    ``cases`` are ``(test_id, query)`` pairs from the dataset. ``retrieved_by_test`` maps
+    test_id → the ranked chunk ids the live retrieval probe returned for that query (what "the
+    system" retrieves now). ``relevant_by_test`` maps test_id → chunk ids judged relevant
+    (pooled across all labelers). ``judged_nonrelevant_by_test`` enables the
+    incomplete-judgment-safe metrics (bpref, condensed nDCG); ``grade_by_test`` makes nDCG use
+    graded gains; ``slice_by_test`` drives the per-slice breakdown. Cases without any relevant
+    label are dropped (recall is undefined without ground truth).
     """
     judged_nonrelevant_by_test = judged_nonrelevant_by_test or {}
     grade_by_test = grade_by_test or {}
     slice_by_test = slice_by_test or {}
-    result_list = list(results)
+    case_list = list(cases)
     rows: list[dict[str, Any]] = []
-    for r in result_list:
-        relevant = relevant_by_test.get(r.test_id)
+    for test_id, query in case_list:
+        relevant = relevant_by_test.get(test_id)
         if not relevant:
             continue
         rows.append(
             {
-                "test_id": r.test_id,
-                "input": (r.input or None) and str(r.input)[:200],
+                "test_id": test_id,
+                "input": (query or None) and str(query)[:200],
                 "expected": list(relevant),
-                "retrieved": retrieved_chunk_ids(r),
+                "retrieved": retrieved_by_test.get(test_id, []),
                 "missing": [],
-                "judged_nonrelevant": judged_nonrelevant_by_test.get(r.test_id, set()),
-                "gains": {k: float(v) for k, v in grade_by_test.get(r.test_id, {}).items()},
-                "slice": slice_by_test.get(r.test_id),
+                "judged_nonrelevant": judged_nonrelevant_by_test.get(test_id, set()),
+                "gains": {k: float(v) for k, v in grade_by_test.get(test_id, {}).items()},
+                "slice": slice_by_test.get(test_id),
             }
         )
-    return _aggregate_rows(run, len(result_list), rows, ks)
+    return _aggregate_rows(dataset_id, dataset_name, len(case_list), rows, ks)

@@ -4,9 +4,9 @@ import { useMemo } from "react";
 import {
   type LabelingCase,
   type LabelingPoolResponse,
-  type ChunkForLabeling,
+  type PooledChunkForLabeling,
 } from "@/lib/api";
-import { ChunkRow } from "./chunk-row";
+import { PoolChunkRow } from "./pool-chunk-row";
 import { PoolSection } from "./pool-section";
 
 // Risk slices a test case can be assigned to (matches the API's SLICE_VALUES).
@@ -22,6 +22,7 @@ export function CaseCard({
   c,
   canEdit,
   indexConnected,
+  datasetId,
   pool,
   poolLoading,
   collapsed,
@@ -36,35 +37,40 @@ export function CaseCard({
   c: LabelingCase;
   canEdit: boolean;
   indexConnected: boolean;
-  // The case's index pool (trace chunks ∪ Azure heads), eager-loaded by the page. Used to
-  // overlay per-method ranks onto the retrieved chunks and to seed the PoolSection.
+  datasetId?: string;
+  // The case's live index pool — the chunks to judge — eager-loaded by the page.
   pool: LabelingPoolResponse | null;
   poolLoading: boolean;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onToggleComplete: (complete: boolean) => void;
   onSetSlice: (slice: string | null) => void;
-  onGrade: (testId: string, chunk: ChunkForLabeling, grade: number) => void;
-  onClearGrade: (testId: string, chunk: ChunkForLabeling) => void;
-  // Run the LLM "AI judge" over this case's chunks (a one-click second annotator).
+  onGrade: (testId: string, chunk: PooledChunkForLabeling, grade: number) => void;
+  onClearGrade: (testId: string, chunk: PooledChunkForLabeling) => void;
+  // Run the LLM "AI judge" over this case's pooled chunks (a one-click second annotator).
   onAiJudge: () => void;
   aiJudging: boolean;
 }) {
-  // chunk_id -> the heads that surfaced it and the rank it held in each, from the pool.
-  const ranksByChunk = useMemo(() => {
-    const m: Record<string, { provenance: string[]; ranks: Record<string, number> }> = {};
-    for (const pc of pool?.chunks ?? []) {
-      m[pc.chunk_id] = { provenance: pc.provenance, ranks: pc.ranks };
-    }
-    return m;
-  }, [pool]);
+  const chunks = useMemo(() => pool?.chunks ?? [], [pool]);
+  // Counts come from the live pool once loaded; until then fall back to the view's tallies.
+  const counts = useMemo(() => {
+    if (!pool) return { labeled: c.labeled_count, relevant: c.relevant_count, total: null as number | null };
+    return {
+      labeled: chunks.filter((ch) => ch.relevance != null).length,
+      relevant: chunks.filter((ch) => (ch.relevance ?? 0) >= 1).length,
+      total: chunks.length,
+    };
+  }, [pool, chunks, c.labeled_count, c.relevant_count]);
+
+  const shownIds = useMemo(
+    () => new Set(chunks.map((ch) => ch.chunk_id)),
+    [chunks],
+  );
+
   return (
     <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30">
-        <button
-          onClick={onToggleCollapse}
-          className="flex items-center gap-2 min-w-0 text-left"
-        >
+        <button onClick={onToggleCollapse} className="flex items-center gap-2 min-w-0 text-left">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="14"
@@ -90,7 +96,8 @@ export function CaseCard({
             </span>
           )}
           <span>
-            {c.labeled_count}/{c.chunks.length} · {c.relevant_count} relevant
+            {counts.labeled}
+            {counts.total != null ? `/${counts.total}` : ""} · {counts.relevant} relevant
           </span>
           <select
             disabled={!canEdit}
@@ -108,7 +115,7 @@ export function CaseCard({
             ))}
           </select>
           <button
-            disabled={!canEdit || aiJudging || !c.chunks.some((ch) => ch.chunk_id)}
+            disabled={!canEdit || aiJudging || !indexConnected}
             onClick={onAiJudge}
             title="Grade this case's chunks with the LLM — a second opinion that shows up in annotator agreement"
             className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border border-violet-300 dark:border-violet-700/60 text-violet-600 dark:text-violet-300 hover:border-violet-400 disabled:opacity-40"
@@ -131,30 +138,40 @@ export function CaseCard({
       </div>
       {!collapsed && (
         <div>
-          {c.chunks.map((chunk) => {
-            const pr = chunk.chunk_id ? ranksByChunk[chunk.chunk_id] : undefined;
-            return (
-              <ChunkRow
-                key={`${chunk.chunk_id ?? "x"}-${chunk.rank}`}
+          {!indexConnected ? (
+            <p className="px-4 py-6 text-[12px] text-gray-400 dark:text-slate-500">
+              Connect an index provider (Settings → Integrations) to pool candidate chunks for
+              this query.
+            </p>
+          ) : poolLoading && !pool ? (
+            <p className="px-4 py-6 text-[12px] text-gray-400 dark:text-slate-500">Pooling candidates…</p>
+          ) : chunks.length === 0 ? (
+            <p className="px-4 py-6 text-[12px] text-gray-400 dark:text-slate-500">
+              No candidates found for this query
+              {pool && Object.keys(pool.heads_failed).length > 0
+                ? ` (${Object.keys(pool.heads_failed).join(", ")} unavailable)`
+                : ""}
+              . Use the search box below to try a different query.
+            </p>
+          ) : (
+            chunks.map((chunk) => (
+              <PoolChunkRow
+                key={chunk.chunk_id}
                 chunk={chunk}
+                relevance={chunk.relevance ?? null}
                 disabled={!canEdit}
                 indexConnected={indexConnected}
-                provenance={pr?.provenance}
-                ranks={pr?.ranks}
-                ranksLoading={poolLoading}
                 onGrade={(grade) => onGrade(c.test_id, chunk, grade)}
                 onClear={() => onClearGrade(c.test_id, chunk)}
               />
-            );
-          })}
+            ))
+          )}
           <PoolSection
             testId={c.test_id}
+            datasetId={datasetId}
             canEdit={canEdit}
             indexConnected={indexConnected}
-            initialPool={pool}
-            traceChunkIds={
-              new Set(c.chunks.map((ch) => ch.chunk_id).filter((id): id is string => !!id))
-            }
+            alreadyShownIds={shownIds}
           />
         </div>
       )}

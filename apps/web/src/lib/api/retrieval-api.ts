@@ -30,23 +30,27 @@ function buildQuery(filters: AnalyticsFilters): string {
 export const getRetrievalPipeline = (filters: AnalyticsFilters = {}) =>
   request<RetrievalPipelineResponse>(`/api/pipeline/graph${buildQuery(filters)}`);
 
-export const getRetrievalMetrics = (runId?: string, source: "urls" | "labels" = "urls") => {
-  const params = new URLSearchParams({ source });
-  if (runId) params.set("run_id", runId);
+export const getRetrievalMetrics = (
+  opts: { runId?: string; datasetId?: string; source?: "urls" | "labels"; refresh?: boolean } = {},
+) => {
+  const params = new URLSearchParams({ source: opts.source ?? "urls" });
+  if (opts.runId) params.set("run_id", opts.runId);
+  if (opts.datasetId) params.set("dataset_id", opts.datasetId);
+  if (opts.refresh) params.set("refresh", "true");
   return request<RetrievalRunMetrics>(`/api/pipeline/retrieval-metrics?${params.toString()}`);
 };
 
-export const getLabelingView = (runId?: string) =>
+export const getLabelingView = (datasetId?: string) =>
   request<LabelingRunResponse>(
-    `/api/pipeline/labeling${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`,
+    `/api/pipeline/labeling${datasetId ? `?dataset_id=${encodeURIComponent(datasetId)}` : ""}`,
   );
 
 export const getLabelingPool = (
   testId: string,
-  opts: { runId?: string; q?: string; depth?: number; refresh?: boolean } = {},
+  opts: { datasetId?: string; q?: string; depth?: number; refresh?: boolean } = {},
 ) => {
   const params = new URLSearchParams({ test_id: testId });
-  if (opts.runId) params.set("run_id", opts.runId);
+  if (opts.datasetId) params.set("dataset_id", opts.datasetId);
   if (opts.q) params.set("q", opts.q);
   if (opts.depth) params.set("depth", String(opts.depth));
   if (opts.refresh) params.set("refresh", "true");
@@ -66,12 +70,15 @@ export const deleteChunkLabel = (testId: string, chunkId: string) => {
   });
 };
 
-export const aiJudgeCase = (testId: string, opts: { runId?: string; instructions?: string } = {}) =>
+export const aiJudgeCase = (
+  testId: string,
+  opts: { datasetId?: string; instructions?: string } = {},
+) =>
   request<AiJudgeResponse>(`/api/pipeline/labeling/ai-judge`, {
     method: "POST",
     body: JSON.stringify({
       test_id: testId,
-      run_id: opts.runId,
+      dataset_id: opts.datasetId,
       instructions: opts.instructions,
     }),
   });

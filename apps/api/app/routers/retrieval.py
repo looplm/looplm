@@ -8,6 +8,7 @@ read from already-synced span input/output — no re-sync required.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from uuid import UUID
 
@@ -18,12 +19,15 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_project, require_section, require_write
 from app.db import get_db
+from app.index_providers.registry import build_index_provider
 from app.models.chunk_labels import (
     ChunkGoldLabel,
     ChunkRelevanceLabel,
     TestCaseLabelingStatus,
 )
+from app.models.datasets import TestCase, TestDataset
 from app.models.evaluations import EvalResult, EvalRun
+from app.models.index_providers import IndexProvider
 from app.models.models import Integration, Trace
 from app.models.project import Project
 from app.schemas.retrieval import (
@@ -34,10 +38,12 @@ from app.schemas.retrieval import (
 from app.services.chunk_agreement import resolve_gold
 from app.services.retrieval_config import get_rag_span_names
 from app.services.retrieval_metrics_aggregate import (
+    AGG_KS,
+    aggregate_retrieval_metrics_from_labels,
     aggregate_run_retrieval_metrics,
-    aggregate_run_retrieval_metrics_from_labels,
 )
 from app.services.retrieval_pipeline_aggregate import build_retrieval_pipeline_aggregate
+from app.services.retrieval_probe import cached_probe_chunk_ids
 from app.services.retrieval_targets import (
     SETTINGS_KEY as TARGETS_SETTINGS_KEY,
     get_retrieval_targets,
@@ -91,39 +97,28 @@ async def get_retrieval_pipeline(
     return build_retrieval_pipeline_aggregate(traces, get_rag_span_names(project))
 
 
+# Bound concurrent index probes so computing labels-metrics over a big dataset can't hammer
+# the index. Matches the labeling page's per-case pool concurrency.
+_PROBE_CONCURRENCY = 4
+
+
 @router.get("/retrieval-metrics", response_model=RetrievalRunMetrics)
 async def get_retrieval_metrics(
     run_id: UUID | None = None,
+    dataset_id: UUID | None = None,
     source: str = "urls",
+    refresh: bool = False,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
-    """Run-level retrieval-quality metrics (recall@k / precision@k / MRR / nDCG).
+    """Retrieval-quality metrics (recall@k / precision@k / MRR / nDCG).
 
-    ``source=urls`` (default) measures against each test case's ground-truth URLs via the
-    ``contains_urls`` evaluator captures. ``source=labels`` measures against pooled human
-    chunk relevance labels (recall is pooled across runs). Defaults to the project's most
-    recent eval run; returns ``available=False`` when there is nothing to measure against.
+    ``source=labels`` measures pooled human chunk labels against a *live retrieval probe* of the
+    connected index, over a dataset's test cases (``dataset_id``, default most-recent). This is
+    the data-labeling lens and needs no eval run. ``source=urls`` measures each case's
+    ground-truth URLs via the ``contains_urls`` evaluator captures of an eval run (``run_id``,
+    default most-recent). Returns ``available=False`` when there is nothing to measure against.
     """
-    run_filter = [EvalRun.project_id == project.id]
-    if run_id is not None:
-        run_filter.append(EvalRun.id == run_id)
-
-    run = (
-        await db.execute(
-            select(EvalRun).where(*run_filter).order_by(EvalRun.created_at.desc()).limit(1)
-        )
-    ).scalar_one_or_none()
-    if run is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": {"code": "NOT_FOUND", "message": "Eval run not found"}},
-        )
-
-    results = (
-        await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
-    ).scalars().all()
-
     # Risk slice per test case, for the per-slice metric breakdown (shared by both sources).
     statuses = (
         await db.execute(
@@ -136,43 +131,122 @@ async def get_retrieval_metrics(
     slice_by_test = {test_id: slice_ for test_id, slice_ in statuses}
 
     if source == "labels":
-        # Resolve per-annotator labels into a single gold verdict per chunk (majority vote, or
-        # an adjudicated override). The relevant + judged-non-relevant gold sets feed pooled
-        # recall and the incomplete-judgment-safe metrics (bpref / condensed nDCG); ties stay
-        # unjudged so a contested chunk isn't silently scored either way.
-        labels = (
-            await db.execute(
-                select(ChunkRelevanceLabel).where(
-                    ChunkRelevanceLabel.project_id == project.id
-                )
-            )
-        ).scalars().all()
-        golds = (
-            await db.execute(
-                select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id)
-            )
-        ).scalars().all()
-        overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
-        # AI judge labels (annotator set) are a second opinion only — excluded from the gold the
-        # metrics score against, so the human labels stay the ground truth.
-        relevant_by_test, nonrelevant_by_test, grade_by_test = resolve_gold(
-            (
-                (lbl.test_id, lbl.chunk_id, lbl.relevance, lbl.labeled_by)
-                for lbl in labels
-                if lbl.annotator is None
-            ),
-            overrides,
+        return await _labels_metrics(db, project, dataset_id, slice_by_test, refresh)
+
+    run_filter = [EvalRun.project_id == project.id]
+    if run_id is not None:
+        run_filter.append(EvalRun.id == run_id)
+    run = (
+        await db.execute(
+            select(EvalRun).where(*run_filter).order_by(EvalRun.created_at.desc()).limit(1)
         )
-        return aggregate_run_retrieval_metrics_from_labels(
-            run,
-            results,
-            relevant_by_test,
-            nonrelevant_by_test,
-            slice_by_test,
-            grade_by_test=grade_by_test,
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Eval run not found"}},
+        )
+    results = (
+        await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
+    ).scalars().all()
+    return aggregate_run_retrieval_metrics(run, results, slice_by_test)
+
+
+async def _labels_metrics(
+    db: AsyncSession,
+    project: Project,
+    dataset_id: UUID | None,
+    slice_by_test: dict[str, str],
+    refresh: bool,
+) -> RetrievalRunMetrics:
+    """Labels-vs-live-probe metrics over a dataset's cases."""
+    ds_filter = [TestDataset.project_id == project.id]
+    if dataset_id is not None:
+        ds_filter.append(TestDataset.id == dataset_id)
+    dataset = (
+        await db.execute(
+            select(TestDataset).where(*ds_filter).order_by(TestDataset.updated_at.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    if dataset is None:
+        return RetrievalRunMetrics(available=False, ks=list(AGG_KS))
+
+    case_rows = (
+        await db.execute(
+            select(TestCase.test_id, TestCase.prompt).where(TestCase.dataset_id == dataset.id)
+        )
+    ).all()
+    cases = [(tid, prompt) for tid, prompt in case_rows]
+
+    # Resolve per-annotator labels into a single gold verdict per chunk (majority vote / adjudicated
+    # override). AI judge labels (annotator set) are a second opinion only — excluded from the gold.
+    labels = (
+        await db.execute(
+            select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
+        )
+    ).scalars().all()
+    golds = (
+        await db.execute(select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id))
+    ).scalars().all()
+    overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
+    relevant_by_test, nonrelevant_by_test, grade_by_test = resolve_gold(
+        (
+            (lbl.test_id, lbl.chunk_id, lbl.relevance, lbl.labeled_by)
+            for lbl in labels
+            if lbl.annotator is None
+        ),
+        overrides,
+    )
+
+    # Probe the connected index live for what "the system" retrieves per case. No index → no
+    # system retrieval to measure against.
+    provider_row = (
+        await db.execute(
+            select(IndexProvider)
+            .where(IndexProvider.project_id == project.id)
+            .order_by(IndexProvider.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if provider_row is None:
+        return RetrievalRunMetrics(
+            available=False,
+            run_id=str(dataset.id),
+            run_name=dataset.name,
+            total_cases=len(cases),
+            ks=list(AGG_KS),
         )
 
-    return aggregate_run_retrieval_metrics(run, results, slice_by_test)
+    k = max(AGG_KS)
+    provider = build_index_provider(provider_row)
+    sem = asyncio.Semaphore(_PROBE_CONCURRENCY)
+
+    async def _probe(test_id: str, query: str) -> tuple[str, list[str]]:
+        async with sem:
+            ids = await cached_probe_chunk_ids(
+                provider, project.id, test_id, str(query or ""), k, refresh=refresh
+            )
+            return test_id, ids
+
+    try:
+        # Only probe cases that have a gold relevant set (others are dropped by the aggregator).
+        probed = await asyncio.gather(
+            *(_probe(tid, q) for tid, q in cases if relevant_by_test.get(tid))
+        )
+    finally:
+        await provider.aclose()
+    retrieved_by_test = dict(probed)
+
+    return aggregate_retrieval_metrics_from_labels(
+        cases,
+        retrieved_by_test,
+        relevant_by_test,
+        nonrelevant_by_test,
+        slice_by_test,
+        grade_by_test=grade_by_test,
+        dataset_id=str(dataset.id),
+        dataset_name=dataset.name,
+    )
 
 
 @router.get("/targets", response_model=RetrievalTargets)

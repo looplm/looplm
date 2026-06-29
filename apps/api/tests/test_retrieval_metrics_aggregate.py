@@ -7,8 +7,8 @@ from uuid import uuid4
 
 from app.models.evaluations import EvalResult, EvalRun
 from app.services.retrieval_metrics_aggregate import (
+    aggregate_retrieval_metrics_from_labels,
     aggregate_run_retrieval_metrics,
-    aggregate_run_retrieval_metrics_from_labels,
 )
 
 
@@ -91,26 +91,15 @@ def test_rank_sensitivity_in_mrr():
 
 
 # --- chunk-label path with incomplete-judgment-safe metrics ---
-
-def _chunk_result(test_id, chunk_ids):
-    """An EvalResult whose captured retrieved_chunks are the given ids in rank order."""
-    return EvalResult(
-        id=uuid4(),
-        run_id=uuid4(),
-        test_id=test_id,
-        pass_=True,
-        input="q",
-        result_metadata={"retrieved_chunks": [{"chunk_id": c} for c in chunk_ids]},
-    )
-
+# Cases are (test_id, query) pairs; the live probe's ranked chunk ids come in via
+# ``retrieved_by_test`` (what the system retrieves), compared against the human-labeled gold.
 
 def test_labels_path_reports_bpref_and_condensed_ndcg():
     # Pool for t1: r1 relevant, n1 judged-non-relevant, u1 unjudged. Retrieved [u1, r1, n1].
-    results = [_chunk_result("t1", ["u1", "r1", "n1"])]
-    out = aggregate_run_retrieval_metrics_from_labels(
-        _run(),
-        results,
-        relevant_by_test={"t1": {"r1"}},
+    out = aggregate_retrieval_metrics_from_labels(
+        [("t1", "q")],
+        {"t1": ["u1", "r1", "n1"]},
+        {"t1": {"r1"}},
         judged_nonrelevant_by_test={"t1": {"n1"}},
     )
     assert out.available is True
@@ -124,11 +113,10 @@ def test_labels_path_graded_ndcg_penalizes_low_grade_on_top():
     # Two relevant chunks: hi (grade 3) and lo (grade 1). Retrieving lo above hi is worse than
     # the ideal (hi first), so graded nDCG@10 is below 1.0 even though both relevant docs are
     # retrieved (binary nDCG would be a perfect 1.0 here).
-    results = [_chunk_result("t1", ["lo", "hi"])]
-    out = aggregate_run_retrieval_metrics_from_labels(
-        _run(),
-        results,
-        relevant_by_test={"t1": {"hi", "lo"}},
+    out = aggregate_retrieval_metrics_from_labels(
+        [("t1", "q")],
+        {"t1": ["lo", "hi"]},
+        {"t1": {"hi", "lo"}},
         judged_nonrelevant_by_test={"t1": set()},
         grade_by_test={"t1": {"hi": 3, "lo": 1}},
     )
@@ -140,15 +128,10 @@ def test_labels_path_graded_ndcg_penalizes_low_grade_on_top():
 
 def test_per_slice_breakdown():
     # Two safety cases (one perfect, one miss) + one broad case. Slices report separately.
-    results = [
-        _chunk_result("safe-good", ["r1"]),
-        _chunk_result("safe-bad", ["x"]),  # relevant chunk never retrieved
-        _chunk_result("broad-1", ["r1"]),
-    ]
-    out = aggregate_run_retrieval_metrics_from_labels(
-        _run(),
-        results,
-        relevant_by_test={"safe-good": {"r1"}, "safe-bad": {"r1"}, "broad-1": {"r1"}},
+    out = aggregate_retrieval_metrics_from_labels(
+        [("safe-good", "q"), ("safe-bad", "q"), ("broad-1", "q")],
+        {"safe-good": ["r1"], "safe-bad": ["x"], "broad-1": ["r1"]},
+        {"safe-good": {"r1"}, "safe-bad": {"r1"}, "broad-1": {"r1"}},
         slice_by_test={"safe-good": "safety", "safe-bad": "safety", "broad-1": "broad"},
     )
     by_slice = {s.slice: s for s in out.slices}
@@ -162,8 +145,8 @@ def test_per_slice_breakdown():
 
 
 def test_no_slices_when_none_assigned():
-    out = aggregate_run_retrieval_metrics_from_labels(
-        _run(), [_chunk_result("t1", ["r1"])], relevant_by_test={"t1": {"r1"}}
+    out = aggregate_retrieval_metrics_from_labels(
+        [("t1", "q")], {"t1": ["r1"]}, {"t1": {"r1"}}
     )
     assert out.slices == []
     assert out.cases[0].slice is None
@@ -171,9 +154,8 @@ def test_no_slices_when_none_assigned():
 
 def test_labels_path_without_nonrelevant_still_works():
     # No judged-non-relevant set supplied → bpref reduces to relevant-fraction, no crash.
-    results = [_chunk_result("t1", ["r1"])]
-    out = aggregate_run_retrieval_metrics_from_labels(
-        _run(), results, relevant_by_test={"t1": {"r1", "r2"}}
+    out = aggregate_retrieval_metrics_from_labels(
+        [("t1", "q")], {"t1": ["r1"]}, {"t1": {"r1", "r2"}}
     )
     assert out.bpref == 0.5  # only 1 of 2 relevant retrieved
     assert out.recall_at_k["10"] == 0.5

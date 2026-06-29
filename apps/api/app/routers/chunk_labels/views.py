@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,17 +9,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user
-from app.cache import cache_get_json, cache_set_json
 from app.db import get_db
 from app.index_providers.registry import build_index_provider
 from app.models.chunk_labels import TestCaseLabelingStatus
-from app.models.evaluations import EvalResult, EvalRun
+from app.models.datasets import TestCase
 from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import (
     ChunkMetadataResponse,
-    LabelingCase,
     LabelingPoolResponse,
     LabelingRunResponse,
 )
@@ -29,24 +26,13 @@ from app.services.chunk_labeling import (
     build_pool_view,
     merge_labeling_view,
 )
-from app.services.chunk_pool import (
-    DEFAULT_POOL_DEPTH,
-    SLICE_POOL_DEPTH,
-    PoolResult,
-    assemble_pool,
-)
 
 from ._helpers import (
-    _LABELING_CACHE_TTL,
-    _MAX_POOL_DEPTH,
-    _POOL_CACHE_TTL,
-    _deserialize_pool,
-    _labeling_cache_key,
-    _latest_or_named_run,
-    _pool_cache_key,
+    _dataset_case_query,
+    _list_dataset_options,
     _project_labels,
-    _results_fingerprint,
-    _serialize_pool,
+    _resolve_dataset,
+    assemble_case_pool,
 )
 
 router = APIRouter()
@@ -54,62 +40,31 @@ router = APIRouter()
 
 @router.get("/labeling", response_model=LabelingRunResponse)
 async def get_labeling_view(
-    run_id: UUID | None = None,
+    dataset_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
     user: User = Depends(get_current_user),
 ):
-    """Retrieved chunks grouped by test case, with the viewer's own labels merged in.
+    """A dataset's test cases, grouped per case, with the viewer's own label tallies merged in.
 
-    Labels are pooled per query across runs, so labeling isn't tied to a single run: by default
-    this aggregates every test case the project's eval runs captured, deduped by ``test_id`` with
-    the most recent run's capture winning. Passing ``run_id`` scopes the view to one run instead.
-
-    The expensive part — reading every result's ``retrieved_chunks`` JSON into the per-case
-    skeleton — is cached in Redis per project (default, all-runs path), keyed against a cheap
-    result fingerprint so new/removed results recompute it immediately. The viewer's own labels
-    and per-case status are small and always re-merged live, so judgments are never stale.
+    Labeling operates on a dataset (chosen with ``dataset_id``; defaults to the most recently
+    updated one). Each case is a query to judge; the chunks themselves are pooled live per case
+    from the connected index via ``/labeling/pool``. Labels and per-case status are keyed by
+    ``test_id`` and re-merged live, so judgments made under any dataset that shares a test_id
+    carry over. ``datasets`` lists every dataset for the picker.
     """
-    # Per-case skeleton (no labels) + total case count, from cache when possible.
-    if run_id is not None:
-        run = await _latest_or_named_run(db, project, run_id)
-        results = (
-            await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
-        ).scalars().all()
-        cases, total_cases = build_labeling_cases(results)
-        view_run_id: str | None = str(run_id)
-        view_run_name: str | None = run.name
-    else:
-        view_run_id = view_run_name = None
-        cache_key = _labeling_cache_key(project.id)
-        fingerprint = await _results_fingerprint(db, project)
-        cached = await cache_get_json(cache_key)
-        if cached and cached.get("fingerprint") == fingerprint:
-            cases = [LabelingCase.model_validate(c) for c in cached["cases"]]
-            total_cases = cached["total_cases"]
-        else:
-            # All results across the project's runs, newest run first so the latest capture of a
-            # query wins when build_labeling_cases dedupes by test_id.
-            results = (
-                await db.execute(
-                    select(EvalResult)
-                    .join(EvalRun, EvalResult.run_id == EvalRun.id)
-                    .where(EvalRun.project_id == project.id)
-                    .order_by(EvalRun.created_at.desc())
-                )
-            ).scalars().all()
-            cases, total_cases = build_labeling_cases(results)
-            await cache_set_json(
-                cache_key,
-                {
-                    "fingerprint": fingerprint,
-                    "total_cases": total_cases,
-                    "cases": [c.model_dump() for c in cases],
-                },
-                ttl_seconds=_LABELING_CACHE_TTL,
-            )
+    datasets = await _list_dataset_options(db, project)
+    dataset = await _resolve_dataset(db, project, dataset_id)
+    if dataset is None:
+        # Project has no datasets yet — nothing to label, but still return the (empty) picker.
+        return LabelingRunResponse(available=False, datasets=datasets)
 
-    labels_by_key, labeler_by_key, labelers_by_test, ai_labels_by_key = await _project_labels(
+    test_cases = (
+        await db.execute(select(TestCase).where(TestCase.dataset_id == dataset.id))
+    ).scalars().all()
+    cases, total_cases = build_labeling_cases(test_cases)
+
+    labels_by_key, _labeler_by_key, labelers_by_test, _ai = await _project_labels(
         db, project, user_id=user.id
     )
 
@@ -125,20 +80,19 @@ async def get_labeling_view(
         cases,
         total_cases,
         labels_by_key,
-        run_id=view_run_id,
-        run_name=view_run_name,
-        labeler_by_key=labeler_by_key,
+        dataset_id=str(dataset.id),
+        dataset_name=dataset.name,
+        datasets=datasets,
         complete_by_test=complete_by_test,
         slice_by_test=slice_by_test,
         labelers_by_test=labelers_by_test,
-        ai_labels_by_key=ai_labels_by_key,
     )
 
 
 @router.get("/labeling/pool", response_model=LabelingPoolResponse)
 async def get_labeling_pool(
     test_id: str,
-    run_id: UUID | None = None,
+    dataset_id: UUID | None = None,
     q: str | None = None,
     depth: int | None = None,
     refresh: bool = False,
@@ -146,106 +100,43 @@ async def get_labeling_pool(
     project: Project = Depends(get_current_project),
     user: User = Depends(get_current_user),
 ):
-    """Multi-head candidate pool for one test case: trace captures ∪ index search heads.
+    """Multi-head candidate pool for one dataset test case: the chunks to judge.
 
-    Unions the chunks the case retrieved with fresh candidates from the connected index
-    (keyword/vector/hybrid), deduped by chunk id, so a labeler can judge relevant chunks the
-    system *missed* — the only way pooled recall can exceed what the system already found.
-    ``q`` overrides the search query (the A3 manual "find more candidates" box); without it the
-    case's own input is used and the trace chunks seed the pool. ``depth`` tunes per-head top-k.
-    Falls back to a trace-only pool when no index provider is connected.
+    Runs the connected index's heads (keyword/vector/hybrid) for the case's query and merges
+    them, deduped by chunk id — this *is* the set of chunks the labeler judges. ``q`` overrides
+    the query (the manual "find more candidates" box); without it the dataset case's prompt is
+    used. ``depth`` tunes per-head top-k (otherwise slice-driven). With no index provider
+    connected the pool is empty (nothing to label).
     """
-    if run_id is not None:
-        run = await _latest_or_named_run(db, project, run_id)
-        result = (
-            await db.execute(
-                select(EvalResult)
-                .where(EvalResult.run_id == run.id, EvalResult.test_id == test_id)
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-    else:
-        # No run pinned: take the most recent capture of this test case across all runs.
-        result = (
-            await db.execute(
-                select(EvalResult)
-                .join(EvalRun, EvalResult.run_id == EvalRun.id)
-                .where(EvalRun.project_id == project.id, EvalResult.test_id == test_id)
-                .order_by(EvalRun.created_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-    if result is None:
+    dataset = await _resolve_dataset(db, project, dataset_id)
+    if dataset is None:
         raise HTTPException(
             status_code=404,
-            detail={"error": {"code": "NOT_FOUND", "message": "Test case not found in run"}},
+            detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found"}},
         )
 
-    # A manual-search query stands on its own; the case input seeds with its trace chunks.
+    # A manual-search query stands on its own; otherwise use the dataset case's prompt.
     manual = bool(q and q.strip())
-    query = (q if manual else str(result.input or "")).strip()
-    meta = result.result_metadata if isinstance(result.result_metadata, dict) else {}
-    raw_chunks = meta.get("retrieved_chunks")
-    trace_chunks = [] if manual else (raw_chunks if isinstance(raw_chunks, list) else [])
-
-    # Explicit depth wins; otherwise pool deeper on risk slices where a deep-rank miss matters.
-    if depth:
-        per_head = max(1, min(depth, _MAX_POOL_DEPTH))
-    else:
-        status = (
-            await db.execute(
-                select(TestCaseLabelingStatus.slice).where(
-                    TestCaseLabelingStatus.project_id == project.id,
-                    TestCaseLabelingStatus.test_id == test_id,
-                )
-            )
-        ).scalar_one_or_none()
-        per_head = SLICE_POOL_DEPTH.get(status or "", DEFAULT_POOL_DEPTH)
-
-    provider_row = (
-        await db.execute(
-            select(IndexProvider)
-            .where(IndexProvider.project_id == project.id)
-            .order_by(IndexProvider.created_at.asc())
-            .limit(1)
+    case_query = await _dataset_case_query(db, dataset.id, test_id)
+    if not manual and case_query is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Test case not found in dataset"}},
         )
-    ).scalar_one_or_none()
+    query = (q if manual else str(case_query or "")).strip()
 
-    # The auto-pool is user-independent and stable until re-index, so serve it from Redis when
-    # cached. ``refresh`` forces a recompute (the explicit "recompute pooling" button); a manual
-    # search query stands alone and is always run fresh.
-    cache_key = None if manual else _pool_cache_key(project.id, test_id, per_head)
-    pool: PoolResult | None = None
-    computed_at: str | None = None
-    if cache_key and not refresh:
-        cached = await cache_get_json(cache_key)
-        if cached is not None:
-            pool = _deserialize_pool(cached)
-            computed_at = cached.get("computed_at")
-
-    if pool is None:
-        provider = build_index_provider(provider_row) if provider_row is not None else None
-        try:
-            pool = await assemble_pool(
-                provider, query, trace_chunks=trace_chunks, per_head_depth=per_head
-            )
-        finally:
-            if provider is not None:
-                await provider.aclose()
-        computed_at = datetime.now(timezone.utc).isoformat()
-        if cache_key:
-            await cache_set_json(
-                cache_key, _serialize_pool(pool, computed_at), ttl_seconds=_POOL_CACHE_TTL
-            )
+    pool, computed_at, provider_connected = await assemble_case_pool(
+        db, project, test_id, query, depth=depth, manual=manual, refresh=refresh
+    )
 
     labels_by_key, labeler_by_key, _, ai_labels_by_key = await _project_labels(
         db, project, user_id=user.id
     )
     return build_pool_view(
         test_id,
-        str(result.input or "") or None,
+        (case_query or query) or None,
         pool,
-        provider_connected=provider_row is not None,
+        provider_connected=provider_connected,
         labels_by_key=labels_by_key,
         labeler_by_key=labeler_by_key,
         ai_labels_by_key=ai_labels_by_key,

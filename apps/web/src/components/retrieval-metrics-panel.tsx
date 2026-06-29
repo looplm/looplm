@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  getDatasets,
   getEvalRuns,
   getRetrievalMetrics,
   getRetrievalTargets,
@@ -125,6 +126,9 @@ export default function RetrievalMetricsPanel() {
 
   const [runs, setRuns] = useState<EvalRunListItem[]>([]);
   const [runId, setRunId] = useState<string | null>(null);
+  // Datasets drive the "Human labels" source (labels vs a live retrieval probe, per dataset).
+  const [datasets, setDatasets] = useState<{ id: string; name: string }[]>([]);
+  const [datasetId, setDatasetId] = useState<string | null>(null);
   const [source, setSource] = useState<"urls" | "labels">("urls");
   const [metrics, setMetrics] = useState<RetrievalRunMetrics | null>(null);
   const [targets, setTargets] = useState<RetrievalTargets | null>(null);
@@ -136,6 +140,9 @@ export default function RetrievalMetricsPanel() {
     getEvalRuns({ limit: "50" })
       .then((res) => setRuns(res.data))
       .catch(() => setRuns([]));
+    getDatasets({ per_page: "100" })
+      .then((res) => setDatasets(res.data.map((d) => ({ id: d.id, name: d.name }))))
+      .catch(() => setDatasets([]));
     getRetrievalTargets()
       .then(setTargets)
       .catch(() => setTargets(null));
@@ -145,11 +152,19 @@ export default function RetrievalMetricsPanel() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getRetrievalMetrics(runId ?? undefined, source)
+    const req =
+      source === "labels"
+        ? getRetrievalMetrics({ datasetId: datasetId ?? undefined, source: "labels" })
+        : getRetrievalMetrics({ runId: runId ?? undefined, source: "urls" });
+    req
       .then((m) => {
-        if (!cancelled) {
-          setMetrics(m);
-          if (!runId && m.run_id) setRunId(m.run_id);
+        if (cancelled) return;
+        setMetrics(m);
+        // The labels path returns the dataset id/name in run_id/run_name; seed the right picker.
+        if (source === "labels") {
+          if (!datasetId && m.run_id) setDatasetId(m.run_id);
+        } else if (!runId && m.run_id) {
+          setRunId(m.run_id);
         }
       })
       .catch((e) => {
@@ -161,7 +176,7 @@ export default function RetrievalMetricsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [runId, source]);
+  }, [runId, datasetId, source]);
 
   const largestK = metrics?.ks.length ? Math.max(...metrics.ks) : 10;
   const lk = String(largestK);
@@ -216,27 +231,42 @@ export default function RetrievalMetricsPanel() {
               Targets
             </button>
           )}
-          {runs.length > 0 && (
-            <select
-              value={runId ?? ""}
-              onChange={(e) => setRunId(e.target.value || null)}
-              className="text-sm rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 max-w-[260px]"
-            >
-              {runs.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          )}
+          {source === "labels"
+            ? datasets.length > 0 && (
+                <select
+                  value={datasetId ?? ""}
+                  onChange={(e) => setDatasetId(e.target.value || null)}
+                  className="text-sm rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 max-w-[260px]"
+                >
+                  {datasets.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              )
+            : runs.length > 0 && (
+                <select
+                  value={runId ?? ""}
+                  onChange={(e) => setRunId(e.target.value || null)}
+                  className="text-sm rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 max-w-[260px]"
+                >
+                  {runs.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              )}
         </div>
       </div>
       <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
         {source === "labels" ? (
           <>
-            Measured against human chunk relevance labels (pooled across runs), per eval run.
-            Recall@k = share of judged-relevant chunks found in the top-k; bpref and condensed
-            nDCG stay fair while judging is still incomplete.
+            Measured against human chunk relevance labels vs. a live retrieval probe of the
+            connected index, per dataset. Recall@k = share of judged-relevant chunks the index
+            returns in the top-k; bpref and condensed nDCG stay fair while judging is still
+            incomplete.
           </>
         ) : (
           <>
@@ -274,8 +304,9 @@ export default function RetrievalMetricsPanel() {
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
           {source === "labels" ? (
             <>
-              No chunk relevance labels for this run yet. Judge the retrieved chunks on the
-              Labeling page, then this measures recall against those human labels.
+              No chunk relevance labels for this dataset yet, or no index is connected to probe.
+              Judge candidates on the Labeling page (and connect an index provider), then this
+              measures the index&apos;s recall against those human labels.
             </>
           ) : (
             <>

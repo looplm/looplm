@@ -69,6 +69,7 @@ export interface ChunkForLabeling {
 export interface LabelingCase {
   test_id: string;
   input?: string | null;
+  // The chunks to judge come from the per-case index pool, not the case; kept for compat.
   chunks: ChunkForLabeling[];
   labeled_count: number;
   relevant_count: number;
@@ -79,10 +80,17 @@ export interface LabelingCase {
 
 export type RiskSlice = "broad" | "safety" | "adversarial";
 
+export interface LabelingDatasetOption {
+  id: string;
+  name: string;
+  test_count: number;
+}
+
 export interface LabelingRunResponse {
   available: boolean;
-  run_id?: string | null;
-  run_name?: string | null;
+  dataset_id?: string | null;
+  dataset_name?: string | null;
+  datasets: LabelingDatasetOption[];
   total_cases: number;
   labelable_cases: number;
   cases: LabelingCase[];

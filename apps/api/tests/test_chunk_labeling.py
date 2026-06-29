@@ -1,34 +1,38 @@
-"""Tests for chunk-level labeling: view builder, label-based metrics, and endpoints."""
+"""Tests for dataset-driven chunk labeling: view builder, probe-based metrics, and endpoints."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
 
-from app.models.evaluations import EvalResult, EvalRun
-from app.schemas.retrieval import LabelingCase
+from app.models.base import IndexProviderType
+from app.models.datasets import TestCase, TestDataset
+from app.models.index_providers import IndexProvider
 from app.services.chunk_labeling import (
     build_labeling_cases,
     build_labeling_view,
     build_pool_view,
     merge_labeling_view,
-    retrieved_chunk_ids,
 )
 from app.services.chunk_pool import PooledChunk, PoolResult
-from app.services.retrieval_metrics_aggregate import (
-    aggregate_run_retrieval_metrics_from_labels,
-)
+from app.services.retrieval_metrics_aggregate import aggregate_retrieval_metrics_from_labels
+
+
+def _tc(test_id, prompt):
+    """A minimal stand-in for a TestCase row (build_labeling_cases reads .test_id / .prompt)."""
+    return SimpleNamespace(test_id=test_id, prompt=prompt)
 
 
 def test_build_pool_view_overlays_labels_and_provenance():
     pool = PoolResult(
         chunks=[
-            PooledChunk(chunk_id="t1", title="T", provenance=["trace", "keyword"]),
+            PooledChunk(chunk_id="t1", title="T", provenance=["keyword"]),
             PooledChunk(chunk_id="v1", provenance=["vector"]),
         ],
-        heads_ran=["trace", "keyword", "vector"],
+        heads_ran=["keyword", "vector"],
         heads_failed={"hybrid": "no vector field"},
     )
     out = build_pool_view(
@@ -38,202 +42,123 @@ def test_build_pool_view_overlays_labels_and_provenance():
         provider_connected=True,
         labels_by_key={("test-1", "t1"): 2},
         labeler_by_key={("test-1", "t1"): "tim"},
+        ai_labels_by_key={("test-1", "v1"): 1},
     )
     assert out.pool_size == 2
-    assert out.heads_ran == ["trace", "keyword", "vector"]
     assert out.heads_failed == {"hybrid": "no vector field"}
     t1, v1 = out.chunks
-    assert t1.provenance == ["trace", "keyword"]
     assert t1.relevance == 2 and t1.labeled_by == "tim"
-    # An unjudged, index-only candidate carries no label.
-    assert v1.provenance == ["vector"] and v1.relevance is None
+    # An unjudged candidate carries no human label, but may carry the AI judge's grade.
+    assert v1.relevance is None and v1.ai_relevance == 1
 
 
-def _run():
-    return EvalRun(id=uuid4(), name="run-1")
+def test_build_labeling_cases_from_test_cases():
+    cases, total = build_labeling_cases([_tc("a", "query a"), _tc("b", "query b")])
+    assert total == 2
+    assert [c.test_id for c in cases] == ["a", "b"]
+    assert cases[0].input == "query a"
+    # The skeleton carries no chunks (they're pooled per case) and no labels.
+    assert cases[0].chunks == [] and cases[0].labeled_count == 0
 
 
-def _result(test_id, chunks, input_text="q"):
-    return EvalResult(
-        id=uuid4(),
-        run_id=uuid4(),
-        test_id=test_id,
-        pass_=True,
-        input=input_text,
-        graders={},
-        result_metadata={"retrieved_chunks": chunks},
+def test_build_labeling_cases_dedupes_test_id():
+    cases, total = build_labeling_cases([_tc("q1", "first"), _tc("q1", "dup")])
+    assert total == 1 and len(cases) == 1 and cases[0].input == "first"
+
+
+def test_merge_labeling_view_counts_labels_and_sorts_unfinished_first():
+    cases, total = build_labeling_cases([_tc("done", "q"), _tc("todo", "q")])
+    view = merge_labeling_view(
+        cases,
+        total,
+        {("done", "c1"): 2, ("done", "c2"): 0},
+        dataset_id="ds1",
+        dataset_name="My set",
+        complete_by_test={"done": False},
+        labelers_by_test={"done": ["tim"]},
     )
-
-
-CHUNKS = [
-    {"chunk_id": "c1", "title": "A", "url": "https://x/p1", "score": 5.0, "content_preview": "aa"},
-    {"chunk_id": "c2", "title": "B", "url": "https://x/p2", "score": 4.0, "content_preview": "bb"},
-]
-
-
-def test_retrieved_chunk_ids_in_rank_order():
-    r = _result("t1", CHUNKS)
-    assert retrieved_chunk_ids(r) == ["c1", "c2"]
-
-
-def test_build_labeling_view_merges_labels_and_sorts_unfinished_first():
-    results = [_result("done", CHUNKS), _result("todo", CHUNKS)]
-    labels = {("done", "c1"): 2, ("done", "c2"): 0}
-    view = build_labeling_view(results, labels)
-    assert view.available is True
-    assert view.labelable_cases == 2
+    assert view.available is True and view.dataset_id == "ds1" and view.dataset_name == "My set"
     # Least-labeled case first.
-    assert view.cases[0].test_id == "todo"
-    assert view.cases[0].labeled_count == 0
+    assert view.cases[0].test_id == "todo" and view.cases[0].labeled_count == 0
     done = next(c for c in view.cases if c.test_id == "done")
     assert done.labeled_count == 2
     assert done.relevant_count == 1  # grade 2 counts as relevant, grade 0 does not
-    assert done.chunks[0].relevance == 2
-    assert done.chunks[1].relevance == 0
+    assert done.labelers == ["tim"]
 
 
-def test_build_labeling_view_skips_cases_without_chunks():
-    r = EvalResult(id=uuid4(), run_id=uuid4(), test_id="t", pass_=True, graders={}, result_metadata={})
-    view = build_labeling_view([r], {})
-    assert view.available is False
-    assert view.total_cases == 1
-    assert view.labelable_cases == 0
+def test_build_labeling_view_empty_without_cases():
+    view = build_labeling_view([], {})
+    assert view.available is False and view.labelable_cases == 0
 
 
-def test_cases_skeleton_is_label_free_and_merge_layers_labels():
-    # The cacheable skeleton must carry no per-user state, so one cached copy serves every
-    # annotator. Labels are applied only at merge time.
-    cases, total = build_labeling_cases([_result("t1", CHUNKS)])
-    assert total == 1
-    skel = cases[0]
-    assert skel.labeled_count == 0 and skel.relevant_count == 0
-    assert all(ch.relevance is None and ch.labeled_by is None for ch in skel.chunks)
-
-    # Round-trip the skeleton through dump/validate to mimic the Redis cache, then merge.
-    cached = [LabelingCase.model_validate(c.model_dump()) for c in cases]
-    view = merge_labeling_view(
-        cached,
-        total,
-        {("t1", "c1"): 3},
-        labeler_by_key={("t1", "c1"): "tim"},
-        complete_by_test={"t1": True},
+def test_aggregate_metrics_from_labels_uses_probe_retrieved():
+    # c1 judged relevant for t1; the probe returns c1 at rank 1 → perfect recall + MRR.
+    out = aggregate_retrieval_metrics_from_labels(
+        [("t1", "q")],
+        {"t1": ["c1", "c2"]},
+        {"t1": {"c1"}},
+        dataset_id="ds1",
+        dataset_name="set",
     )
-    case = view.cases[0]
-    assert case.labeled_count == 1 and case.relevant_count == 1 and case.complete is True
-    assert case.chunks[0].relevance == 3 and case.chunks[0].labeled_by == "tim"
-    assert case.chunks[1].relevance is None
-    # Merging must not have mutated the source skeleton (it's the shared cached object).
-    assert cached[0].chunks[0].relevance is None and cached[0].labeled_count == 0
-
-
-def test_build_labeling_view_dedupes_test_case_across_runs():
-    # Same query captured by two runs (passed newest-first). One case, newest capture wins.
-    newest = _result("q1", [{"chunk_id": "new", "content_preview": "n"}])
-    oldest = _result("q1", CHUNKS)
-    view = build_labeling_view([newest, oldest], {})
-    assert view.total_cases == 1
-    assert view.labelable_cases == 1
-    assert [ch.chunk_id for ch in view.cases[0].chunks] == ["new"]
-
-
-def test_label_based_pooled_metrics():
-    results = [_result("t1", CHUNKS)]
-    # c1 judged relevant for t1; c2 not labeled (so not relevant).
-    relevant_by_test = {"t1": {"c1"}}
-    out = aggregate_run_retrieval_metrics_from_labels(_run(), results, relevant_by_test)
-    assert out.available is True
-    assert out.evaluated_cases == 1
-    # c1 relevant and retrieved at rank 1 → perfect recall + MRR.
+    assert out.available is True and out.evaluated_cases == 1
     assert out.recall_at_k["10"] == 1.0
     assert out.mrr == 1.0
-    # Precision@1: 1 relevant of top-1.
     assert out.precision_at_k["1"] == 1.0
+    assert out.run_id == "ds1" and out.run_name == "set"
 
 
-def test_label_based_skips_unlabeled_cases():
-    out = aggregate_run_retrieval_metrics_from_labels(_run(), [_result("t1", CHUNKS)], {})
+def test_aggregate_metrics_skips_unlabeled_cases():
+    out = aggregate_retrieval_metrics_from_labels([("t1", "q")], {"t1": ["c1"]}, {})
     assert out.available is False
+
+
+async def _seed_dataset(db_session, project, *, test_id="q1", prompt="how to X"):
+    dataset = TestDataset(id=uuid4(), project_id=project.id, name="set")
+    db_session.add(dataset)
+    db_session.add(TestCase(id=uuid4(), dataset_id=dataset.id, test_id=test_id, prompt=prompt))
+    await db_session.commit()
+    return dataset
 
 
 @pytest.mark.asyncio
 async def test_labeling_endpoints_roundtrip(client: AsyncClient, auth_headers, db_session, test_project):
-    # Seed a run + result with retrieved chunks.
-    run = EvalRun(id=uuid4(), project_id=test_project.id, name="seeded")
-    db_session.add(run)
-    db_session.add(
-        EvalResult(
-            id=uuid4(), run_id=run.id, test_id="q1",
-            pass_=True, input="how to X", graders={},
-            result_metadata={"retrieved_chunks": CHUNKS},
-        )
-    )
-    await db_session.commit()
+    dataset = await _seed_dataset(db_session, test_project)
 
-    # Labeling view shows the chunks, unlabeled.
-    resp = await client.get(f"/api/pipeline/labeling?run_id={run.id}", headers=auth_headers)
+    # The dataset's case shows up, unlabeled.
+    resp = await client.get("/api/pipeline/labeling", headers=auth_headers)
     assert resp.status_code == 200
     body = resp.json()
-    assert body["available"] is True
-    assert body["cases"][0]["chunks"][0]["relevance"] is None
+    assert body["available"] is True and body["dataset_id"] == str(dataset.id)
+    case = body["cases"][0]
+    assert case["test_id"] == "q1" and case["labeled_count"] == 0
 
-    # Save a graded label.
+    # Grade a chunk (labels persist by test_id+chunk_id, independent of the pool).
     save = await client.post(
         "/api/pipeline/labels",
         headers=auth_headers,
-        json={"labels": [{"test_id": "q1", "chunk_id": "c1", "relevance": 3}]},
+        json={"labels": [{"test_id": "q1", "chunk_id": "c1", "relevance": 2}]},
     )
-    assert save.status_code == 200
-    assert save.json()["saved"] == 1
+    assert save.status_code == 200 and save.json()["saved"] == 1
 
-    # Label now shows up, and label-based metrics are measurable.
-    resp2 = await client.get(f"/api/pipeline/labeling?run_id={run.id}", headers=auth_headers)
-    c1 = next(c for c in resp2.json()["cases"][0]["chunks"] if c["chunk_id"] == "c1")
-    assert c1["relevance"] == 3
+    resp2 = await client.get("/api/pipeline/labeling", headers=auth_headers)
+    case2 = resp2.json()["cases"][0]
+    assert case2["labeled_count"] == 1 and case2["relevant_count"] == 1
+    assert "test" in case2["labelers"]
 
-    # The labeler's display name is surfaced (local part of their email).
-    assert c1["labeled_by"] == "test"
-    case = resp2.json()["cases"][0]
-    assert "test" in case["labelers"]
-    assert case["complete"] is False
-
-    metrics = await client.get(
-        f"/api/pipeline/retrieval-metrics?run_id={run.id}&source=labels", headers=auth_headers
+    # Mark complete; it persists into the labeling view.
+    await client.put(
+        "/api/pipeline/labeling/status", headers=auth_headers, json={"test_id": "q1", "complete": True}
     )
-    assert metrics.status_code == 200
-    assert metrics.json()["available"] is True
-    assert metrics.json()["mrr"] == 1.0
-
-    # Mark the case complete; it persists into the labeling view.
-    status = await client.put(
-        "/api/pipeline/labeling/status",
-        headers=auth_headers,
-        json={"test_id": "q1", "complete": True},
-    )
-    assert status.status_code == 200
-    resp3 = await client.get(f"/api/pipeline/labeling?run_id={run.id}", headers=auth_headers)
+    resp3 = await client.get("/api/pipeline/labeling", headers=auth_headers)
     assert resp3.json()["cases"][0]["complete"] is True
 
-    # Removing the label clears the grade; the view shows it unlabeled again.
+    # Removing the label clears the count again (idempotent on repeat).
     deleted = await client.request(
-        "DELETE",
-        "/api/pipeline/labels?test_id=q1&chunk_id=c1",
-        headers=auth_headers,
+        "DELETE", "/api/pipeline/labels?test_id=q1&chunk_id=c1", headers=auth_headers
     )
-    assert deleted.status_code == 200
-    assert deleted.json()["deleted"] is True
-
-    resp4 = await client.get(f"/api/pipeline/labeling?run_id={run.id}", headers=auth_headers)
-    c1_after = next(c for c in resp4.json()["cases"][0]["chunks"] if c["chunk_id"] == "c1")
-    assert c1_after["relevance"] is None
-
-    # Deleting a label that no longer exists is idempotent.
-    again = await client.request(
-        "DELETE",
-        "/api/pipeline/labels?test_id=q1&chunk_id=c1",
-        headers=auth_headers,
-    )
-    assert again.status_code == 200
-    assert again.json()["deleted"] is False
+    assert deleted.status_code == 200 and deleted.json()["deleted"] is True
+    resp4 = await client.get("/api/pipeline/labeling", headers=auth_headers)
+    assert resp4.json()["cases"][0]["labeled_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -243,18 +168,9 @@ async def test_ai_judge_stores_labels_under_ai_annotator(
     import app.routers.chunk_labels.operations as ops
     from app.services.analysis_llm import LlmUsageInfo
 
-    run = EvalRun(id=uuid4(), project_id=test_project.id, name="seeded")
-    db_session.add(run)
-    db_session.add(
-        EvalResult(
-            id=uuid4(), run_id=run.id, test_id="q1",
-            pass_=True, input="how to X", graders={},
-            result_metadata={"retrieved_chunks": CHUNKS},
-        )
-    )
-    await db_session.commit()
+    await _seed_dataset(db_session, test_project)
 
-    # A human grades c1; the AI judge will grade both chunks.
+    # A human grades c1; the AI judge will grade both pooled chunks.
     await client.post(
         "/api/pipeline/labels",
         headers=auth_headers,
@@ -268,37 +184,78 @@ async def test_ai_judge_stores_labels_under_ai_annotator(
         def __init__(self, *a, **k):
             pass
 
+    async def _fake_pool(db, project, test_id, query, **kwargs):
+        pool = PoolResult(
+            chunks=[PooledChunk(chunk_id="c1"), PooledChunk(chunk_id="c2")],
+            heads_ran=["keyword"],
+            heads_failed={},
+        )
+        return pool, None, True
+
     async def _fake_judge(llm, query, chunks, *, instructions=None):
-        usage = LlmUsageInfo(0, 0, 0, None, 0, 0, 0)
-        return {"c1": 3, "c2": 0}, usage
+        return {"c1": 3, "c2": 0}, LlmUsageInfo(0, 0, 0, None, 0, 0, 0)
 
     monkeypatch.setattr(ops, "AnalysisLlmService", _FakeLlm)
+    monkeypatch.setattr(ops, "assemble_case_pool", _fake_pool)
     monkeypatch.setattr(ops, "ai_judge_chunks", _fake_judge)
 
     judged = await client.post(
         "/api/pipeline/labeling/ai-judge", headers=auth_headers, json={"test_id": "q1"}
     )
     assert judged.status_code == 200
-    assert judged.json()["judged"] == 2
-    assert judged.json()["grades"] == {"c1": 3, "c2": 0}
+    assert judged.json()["judged"] == 2 and judged.json()["grades"] == {"c1": 3, "c2": 0}
 
-    # The view keeps the human's own grade as `relevance` and surfaces the AI grade separately.
+    # The case lists the AI as an annotator; one human + the AI judge is enough for agreement.
     view = await client.get("/api/pipeline/labeling", headers=auth_headers)
-    chunks = {c["chunk_id"]: c for c in view.json()["cases"][0]["chunks"]}
-    assert chunks["c1"]["relevance"] == 2 and chunks["c1"]["ai_relevance"] == 3
-    assert chunks["c2"]["relevance"] is None and chunks["c2"]["ai_relevance"] == 0
     assert "AI" in view.json()["cases"][0]["labelers"]
-
-    # One human + the AI judge is enough for agreement (they overlap on c1).
     agreement = await client.get("/api/pipeline/labeling/agreement", headers=auth_headers)
     assert agreement.json()["available"] is True
     assert {a["name"] for a in agreement.json()["annotators"]} == {"test", "AI"}
 
-    # Label-based metrics ignore the AI vote: c2 stays unlabeled ground-truth.
+
+@pytest.mark.asyncio
+async def test_labels_metrics_use_live_probe(
+    client: AsyncClient, auth_headers, db_session, test_project, monkeypatch
+):
+    import app.routers.retrieval as retrieval_router
+
+    await _seed_dataset(db_session, test_project)
+    await client.post(
+        "/api/pipeline/labels",
+        headers=auth_headers,
+        json={"labels": [{"test_id": "q1", "chunk_id": "c1", "relevance": 2}]},
+    )
+    # An index provider must exist for the probe path to run.
+    db_session.add(
+        IndexProvider(
+            id=uuid4(),
+            project_id=test_project.id,
+            type=IndexProviderType.azure_search,
+            name="idx",
+            config={"index_name": "i"},
+            api_key=b"x",
+            base_url="https://example.net",
+        )
+    )
+    await db_session.commit()
+
+    class _FakeProvider:
+        async def aclose(self):
+            pass
+
+    async def _fake_probe(provider, project_id, test_id, query, k, *, refresh=False):
+        return ["c1", "c2"]  # the system retrieves the relevant chunk at rank 1
+
+    monkeypatch.setattr(retrieval_router, "build_index_provider", lambda row: _FakeProvider())
+    monkeypatch.setattr(retrieval_router, "cached_probe_chunk_ids", _fake_probe)
+
     metrics = await client.get(
-        f"/api/pipeline/retrieval-metrics?run_id={run.id}&source=labels", headers=auth_headers
+        "/api/pipeline/retrieval-metrics?source=labels", headers=auth_headers
     )
     assert metrics.status_code == 200
+    body = metrics.json()
+    assert body["available"] is True
+    assert body["recall_at_k"]["10"] == 1.0 and body["mrr"] == 1.0
 
 
 @pytest.mark.asyncio
@@ -307,4 +264,3 @@ async def test_chunk_metadata_without_provider(client: AsyncClient, auth_headers
     resp = await client.get("/api/pipeline/chunk-metadata?chunk_id=c1", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["provider_connected"] is False
-    assert resp.json()["available"] is False

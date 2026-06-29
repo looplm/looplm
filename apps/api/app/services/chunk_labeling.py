@@ -1,17 +1,17 @@
-"""Build the chunk-labeling view for an eval run from its captured retrieved chunks.
+"""Build the chunk-labeling view for a dataset's test cases.
 
-Each eval result stores the ranked chunks it retrieved (``result_metadata["retrieved_chunks"]``,
-populated by the eval executor). This module pairs those with any existing human labels so
-the UI can show what was retrieved and which chunks have already been judged.
+Labeling operates on a :class:`TestDataset`'s test cases (a query + ``test_id``). The chunks
+to judge are pooled live from the connected index per case (see :mod:`app.services.chunk_pool`),
+so the per-case skeleton here carries only the query; this module layers in any existing human
+labels, status and AI judgments, keyed by ``test_id``.
 """
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Iterable
 
-from app.models.evaluations import EvalResult
+from app.models.datasets import TestCase
 from app.schemas.retrieval import (
-    ChunkForLabeling,
     LabelingCase,
     LabelingPoolResponse,
     LabelingRunResponse,
@@ -20,58 +20,25 @@ from app.schemas.retrieval import (
 from app.services.chunk_pool import PoolResult
 
 
-def build_labeling_cases(results: Iterable[EvalResult]) -> tuple[list[LabelingCase], int]:
-    """Build the per-case retrieved-chunk skeleton (no labels merged) plus the total case count.
+def build_labeling_cases(test_cases: Iterable[TestCase]) -> tuple[list[LabelingCase], int]:
+    """Build the per-case skeleton (query only, no chunks) from a dataset's test cases.
 
-    This is the heavy, *user-independent* half of the labeling view: it dedupes results by
-    ``test_id`` (so each query yields one case; pass results newest-run-first so the most recent
-    capture wins) and reads each result's ``retrieved_chunks`` JSON into ranked
-    :class:`ChunkForLabeling` rows. It touches no per-user state, so the result is identical for
-    every annotator and safe to cache per project. Labels and status are layered on later by
+    Dedupes by ``test_id`` (first wins) and carries just the query — the chunks to judge are
+    pooled live per case, not stored on the case. User-independent and cheap, so it's safe to
+    rebuild on every request. Labels, status and the labeler list are layered on by
     :func:`merge_labeling_view`.
     """
-    result_list = list(results)
     cases: list[LabelingCase] = []
-    seen_tests: set[str] = set()
-
-    for r in result_list:
-        if r.test_id in seen_tests:
+    seen: set[str] = set()
+    for tc in test_cases:
+        tid = tc.test_id
+        if not tid or tid in seen:
             continue
-        meta = r.result_metadata if isinstance(r.result_metadata, dict) else {}
-        raw_chunks = meta.get("retrieved_chunks")
-        if not isinstance(raw_chunks, list) or not raw_chunks:
-            continue
-
-        chunks: list[ChunkForLabeling] = []
-        for i, c in enumerate(raw_chunks, start=1):
-            if not isinstance(c, dict):
-                continue
-            pdf_page = c.get("pdf_page_number")
-            chunks.append(
-                ChunkForLabeling(
-                    chunk_id=c.get("chunk_id"),
-                    title=c.get("title"),
-                    url=c.get("url"),
-                    content=c.get("content") or c.get("content_preview"),
-                    content_preview=c.get("content_preview"),
-                    heading_context=c.get("heading_context"),
-                    pdf_page_number=pdf_page if isinstance(pdf_page, int) else None,
-                    score=c.get("score") if isinstance(c.get("score"), (int, float)) else None,
-                    rank=i,
-                )
-            )
-        if not chunks:
-            continue
-        seen_tests.add(r.test_id)
+        seen.add(tid)
         cases.append(
-            LabelingCase(
-                test_id=r.test_id,
-                input=(r.input or None) and str(r.input)[:300],
-                chunks=chunks,
-            )
+            LabelingCase(test_id=tid, input=(tc.prompt or None) and str(tc.prompt)[:300])
         )
-
-    return cases, len({r.test_id for r in result_list})
+    return cases, len(seen)
 
 
 def merge_labeling_view(
@@ -79,63 +46,42 @@ def merge_labeling_view(
     total_cases: int,
     labels_by_key: dict[tuple[str, str], int],
     *,
-    run_id: str | None = None,
-    run_name: str | None = None,
-    labeler_by_key: dict[tuple[str, str], str] | None = None,
+    dataset_id: str | None = None,
+    dataset_name: str | None = None,
+    datasets: list | None = None,
     complete_by_test: dict[str, bool] | None = None,
     slice_by_test: dict[str, str] | None = None,
     labelers_by_test: dict[str, list[str]] | None = None,
-    ai_labels_by_key: dict[tuple[str, str], int] | None = None,
 ) -> LabelingRunResponse:
-    """Layer per-user labels and per-case status onto a :func:`build_labeling_cases` skeleton.
+    """Layer per-user label counts and per-case status onto a case skeleton.
 
-    This is the cheap, *per-request* half: it never touches the (large) result rows, only the
-    small label/status maps, so it's fine to run on every request even when ``cases`` came from
-    a cache. ``labels_by_key`` maps ``(test_id, chunk_id) -> graded relevance 0..3`` (scoped to
-    the viewing user, so each annotator sees and edits their own judgments). ``labeler_by_key``
-    maps the same
-    key to the display name of who made the shown label; ``complete_by_test`` is the manual
-    "labeling complete" flag; ``slice_by_test`` is the risk slice. ``labelers_by_test`` lists
-    *every* annotator who has judged any chunk in a case; when omitted it falls back to the
-    labelers of the shown labels.
+    The chunks themselves are loaded per case from the pool endpoint, so here we only derive
+    the per-case summary. ``labels_by_key`` maps ``(test_id, chunk_id) -> graded relevance``
+    scoped to the viewing user; ``labeled_count`` is how many distinct chunks that user has
+    graded for the case and ``relevant_count`` how many of those are relevant (grade >= 1).
+    ``labelers_by_test`` lists every annotator (humans + the AI judge) who has judged any chunk
+    in the case; ``complete_by_test`` / ``slice_by_test`` carry the per-case status.
     """
-    labeler_by_key = labeler_by_key or {}
     complete_by_test = complete_by_test or {}
     slice_by_test = slice_by_test or {}
     labelers_by_test = labelers_by_test or {}
-    ai_labels_by_key = ai_labels_by_key or {}
-    out: list[LabelingCase] = []
 
+    # Per-case label tallies from the viewer's own labels (test_id -> [grades]).
+    grades_by_test: dict[str, list[int]] = {}
+    for (tid, _chunk_id), grade in labels_by_key.items():
+        grades_by_test.setdefault(tid, []).append(grade)
+
+    out: list[LabelingCase] = []
     for c in cases:
-        labeled = 0
-        relevant = 0
-        labelers: list[str] = []
-        merged_chunks: list[ChunkForLabeling] = []
-        for ch in c.chunks:
-            key = (c.test_id, ch.chunk_id) if ch.chunk_id else None
-            label = labels_by_key.get(key) if key else None
-            labeler = labeler_by_key.get(key) if key else None
-            ai_label = ai_labels_by_key.get(key) if key else None
-            if label is not None:
-                labeled += 1
-                if label >= 1:  # graded: any non-zero grade counts as relevant
-                    relevant += 1
-                if labeler and labeler not in labelers:
-                    labelers.append(labeler)
-            merged_chunks.append(
-                ch.model_copy(
-                    update={"relevance": label, "labeled_by": labeler, "ai_relevance": ai_label}
-                )
-            )
+        grades = grades_by_test.get(c.test_id, [])
         out.append(
             c.model_copy(
                 update={
-                    "chunks": merged_chunks,
-                    "labeled_count": labeled,
-                    "relevant_count": relevant,
+                    "labeled_count": len(grades),
+                    "relevant_count": sum(1 for g in grades if g >= 1),
                     "complete": bool(complete_by_test.get(c.test_id)),
                     "slice": slice_by_test.get(c.test_id),
-                    "labelers": labelers_by_test.get(c.test_id, labelers),
+                    "labelers": labelers_by_test.get(c.test_id, []),
                 }
             )
         )
@@ -145,8 +91,9 @@ def merge_labeling_view(
 
     return LabelingRunResponse(
         available=bool(out),
-        run_id=run_id,
-        run_name=run_name,
+        dataset_id=dataset_id,
+        dataset_name=dataset_name,
+        datasets=datasets or [],
         total_cases=total_cases,
         labelable_cases=len(out),
         cases=out,
@@ -154,29 +101,25 @@ def merge_labeling_view(
 
 
 def build_labeling_view(
-    results: Iterable[EvalResult],
-    labels_by_key: dict[tuple[str, str], bool],
+    test_cases: Iterable[TestCase],
+    labels_by_key: dict[tuple[str, str], int],
     *,
-    run_id: str | None = None,
-    run_name: str | None = None,
-    labeler_by_key: dict[tuple[str, str], str] | None = None,
+    dataset_id: str | None = None,
+    dataset_name: str | None = None,
+    datasets: list | None = None,
     complete_by_test: dict[str, bool] | None = None,
     slice_by_test: dict[str, str] | None = None,
     labelers_by_test: dict[str, list[str]] | None = None,
 ) -> LabelingRunResponse:
-    """Build the labeling view straight from results (uncached): cases skeleton + label merge.
-
-    Convenience for the run-scoped path and tests. The cached project-wide path instead calls
-    :func:`build_labeling_cases` (cacheable) and :func:`merge_labeling_view` separately.
-    """
-    cases, total_cases = build_labeling_cases(results)
+    """Build the labeling view straight from a dataset's test cases: skeleton + label merge."""
+    cases, total_cases = build_labeling_cases(test_cases)
     return merge_labeling_view(
         cases,
         total_cases,
         labels_by_key,
-        run_id=run_id,
-        run_name=run_name,
-        labeler_by_key=labeler_by_key,
+        dataset_id=dataset_id,
+        dataset_name=dataset_name,
+        datasets=datasets,
         complete_by_test=complete_by_test,
         slice_by_test=slice_by_test,
         labelers_by_test=labelers_by_test,
@@ -229,16 +172,3 @@ def build_pool_view(
         chunks=chunks,
         computed_at=computed_at,
     )
-
-
-def retrieved_chunk_ids(result: EvalResult) -> list[str]:
-    """Ranked list of chunk ids a result retrieved (order = retrieval rank)."""
-    meta = result.result_metadata if isinstance(result.result_metadata, dict) else {}
-    raw: Any = meta.get("retrieved_chunks")
-    if not isinstance(raw, list):
-        return []
-    out: list[str] = []
-    for c in raw:
-        if isinstance(c, dict) and isinstance(c.get("chunk_id"), str):
-            out.append(c["chunk_id"])
-    return out

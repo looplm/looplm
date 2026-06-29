@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.chunk_labels import ChunkRelevanceLabel
-from app.models.evaluations import EvalResult, EvalRun
+from app.cache import cache_get_json, cache_set_json
+from app.index_providers.registry import build_index_provider
+from app.models.chunk_labels import ChunkRelevanceLabel, TestCaseLabelingStatus
+from app.models.datasets import TestCase, TestDataset
+from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.models.user import User
-from app.services.chunk_pool import PooledChunk, PoolResult
+from app.schemas.retrieval import LabelingDatasetOption
+from app.services.chunk_pool import (
+    DEFAULT_POOL_DEPTH,
+    SLICE_POOL_DEPTH,
+    PooledChunk,
+    PoolResult,
+    assemble_pool,
+)
 
 
 def _display_name(email: str | None) -> str | None:
@@ -22,50 +33,67 @@ def _display_name(email: str | None) -> str | None:
     return email.split("@", 1)[0]
 
 
-# Safety bound on the cached labeling skeleton — freshness is enforced by the fingerprint, so
-# this just keeps abandoned project keys from living forever (1 day).
-_LABELING_CACHE_TTL = 86_400
+def _as_uuid(value: str | None) -> UUID | None:
+    """Parse a UUID string, or None for empty/invalid input (caller treats as 'unspecified')."""
+    if not value:
+        return None
+    try:
+        return UUID(value)
+    except (ValueError, TypeError):
+        return None
 
 
-def _labeling_cache_key(project_id: UUID) -> str:
-    return f"labeling:cases:{project_id}"
-
-
-async def _results_fingerprint(db: AsyncSession, project: Project) -> str:
-    """Cheap content fingerprint of the project's eval results.
-
-    Changes whenever a result is added or removed (new run, streamed result, deleted run), so a
-    cached labeling skeleton built under a different fingerprint is recomputed on the next read.
-    Counting + max(created_at) avoids loading the (large) ``result_metadata`` JSONB the skeleton
-    is built from.
-    """
-    count, latest = (
+async def _list_dataset_options(
+    db: AsyncSession, project: Project
+) -> list[LabelingDatasetOption]:
+    """Every dataset in the project with its test-case count, newest first (for the picker)."""
+    rows = (
         await db.execute(
-            select(func.count(EvalResult.id), func.max(EvalResult.created_at))
-            .join(EvalRun, EvalResult.run_id == EvalRun.id)
-            .where(EvalRun.project_id == project.id)
+            select(TestDataset, func.count(TestCase.id))
+            .outerjoin(TestCase, TestCase.dataset_id == TestDataset.id)
+            .where(TestDataset.project_id == project.id)
+            .group_by(TestDataset.id)
+            .order_by(TestDataset.updated_at.desc())
         )
-    ).one()
-    return f"{count or 0}:{latest.isoformat() if latest else '0'}"
+    ).all()
+    return [
+        LabelingDatasetOption(id=str(ds.id), name=ds.name, test_count=count or 0)
+        for ds, count in rows
+    ]
 
 
-async def _latest_or_named_run(
-    db: AsyncSession, project: Project, run_id: UUID | None
-) -> EvalRun:
-    run_filter = [EvalRun.project_id == project.id]
-    if run_id is not None:
-        run_filter.append(EvalRun.id == run_id)
-    run = (
+async def _resolve_dataset(
+    db: AsyncSession, project: Project, dataset_id: UUID | None
+) -> TestDataset | None:
+    """The requested dataset, or the most recently updated one when unspecified.
+
+    Returns ``None`` when the project has no datasets at all (the labeling view is then empty).
+    """
+    ds_filter = [TestDataset.project_id == project.id]
+    if dataset_id is not None:
+        ds_filter.append(TestDataset.id == dataset_id)
+    dataset = (
         await db.execute(
-            select(EvalRun).where(*run_filter).order_by(EvalRun.created_at.desc()).limit(1)
+            select(TestDataset).where(*ds_filter).order_by(TestDataset.updated_at.desc()).limit(1)
         )
     ).scalar_one_or_none()
-    if run is None:
+    if dataset is None and dataset_id is not None:
         raise HTTPException(
             status_code=404,
-            detail={"error": {"code": "NOT_FOUND", "message": "Eval run not found"}},
+            detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found"}},
         )
-    return run
+    return dataset
+
+
+async def _dataset_case_query(db: AsyncSession, dataset_id: UUID, test_id: str) -> str | None:
+    """The query text (prompt) for one test case in a dataset, or None if absent."""
+    return (
+        await db.execute(
+            select(TestCase.prompt).where(
+                TestCase.dataset_id == dataset_id, TestCase.test_id == test_id
+            )
+        )
+    ).scalar_one_or_none()
 
 
 async def _project_labels(
@@ -180,3 +208,68 @@ def _deserialize_pool(data: dict) -> PoolResult:
         heads_ran=list(data.get("heads_ran") or []),
         heads_failed=dict(data.get("heads_failed") or {}),
     )
+
+
+async def _case_pool_depth(
+    db: AsyncSession, project: Project, test_id: str, depth: int | None
+) -> int:
+    """Per-head pool depth for a case: explicit ``depth`` wins, else the case's slice depth."""
+    if depth:
+        return max(1, min(depth, _MAX_POOL_DEPTH))
+    slice_value = (
+        await db.execute(
+            select(TestCaseLabelingStatus.slice).where(
+                TestCaseLabelingStatus.project_id == project.id,
+                TestCaseLabelingStatus.test_id == test_id,
+            )
+        )
+    ).scalar_one_or_none()
+    return SLICE_POOL_DEPTH.get(slice_value or "", DEFAULT_POOL_DEPTH)
+
+
+async def assemble_case_pool(
+    db: AsyncSession,
+    project: Project,
+    test_id: str,
+    query: str,
+    *,
+    depth: int | None = None,
+    manual: bool = False,
+    refresh: bool = False,
+) -> tuple[PoolResult, str | None, bool]:
+    """Assemble (or load from cache) the candidate pool for a case's query.
+
+    Shared by the labeling-pool view and the AI judge so both judge the *same* chunks. Resolves
+    the per-head depth from the case's slice, runs the connected index's heads via
+    :func:`assemble_pool`, and caches the auto-pool in Redis (a manual ``q`` is always fresh and
+    never cached; ``refresh`` bypasses the cache). Returns ``(pool, computed_at, provider_connected)``.
+    """
+    per_head = await _case_pool_depth(db, project, test_id, depth)
+
+    provider_row = (
+        await db.execute(
+            select(IndexProvider)
+            .where(IndexProvider.project_id == project.id)
+            .order_by(IndexProvider.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    cache_key = None if manual else _pool_cache_key(project.id, test_id, per_head)
+    if cache_key and not refresh:
+        cached = await cache_get_json(cache_key)
+        if cached is not None:
+            return _deserialize_pool(cached), cached.get("computed_at"), provider_row is not None
+
+    provider = build_index_provider(provider_row) if provider_row is not None else None
+    try:
+        pool = await assemble_pool(provider, query, per_head_depth=per_head)
+    finally:
+        if provider is not None:
+            await provider.aclose()
+    computed_at = datetime.now(timezone.utc).isoformat()
+    if cache_key:
+        await cache_set_json(
+            cache_key, _serialize_pool(pool, computed_at), ttl_seconds=_POOL_CACHE_TTL
+        )
+    return pool, computed_at, provider_row is not None
