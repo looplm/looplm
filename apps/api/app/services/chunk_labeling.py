@@ -85,6 +85,7 @@ def merge_labeling_view(
     complete_by_test: dict[str, bool] | None = None,
     slice_by_test: dict[str, str] | None = None,
     labelers_by_test: dict[str, list[str]] | None = None,
+    ai_labels_by_key: dict[tuple[str, str], int] | None = None,
 ) -> LabelingRunResponse:
     """Layer per-user labels and per-case status onto a :func:`build_labeling_cases` skeleton.
 
@@ -102,6 +103,7 @@ def merge_labeling_view(
     complete_by_test = complete_by_test or {}
     slice_by_test = slice_by_test or {}
     labelers_by_test = labelers_by_test or {}
+    ai_labels_by_key = ai_labels_by_key or {}
     out: list[LabelingCase] = []
 
     for c in cases:
@@ -113,13 +115,18 @@ def merge_labeling_view(
             key = (c.test_id, ch.chunk_id) if ch.chunk_id else None
             label = labels_by_key.get(key) if key else None
             labeler = labeler_by_key.get(key) if key else None
+            ai_label = ai_labels_by_key.get(key) if key else None
             if label is not None:
                 labeled += 1
                 if label >= 1:  # graded: any non-zero grade counts as relevant
                     relevant += 1
                 if labeler and labeler not in labelers:
                     labelers.append(labeler)
-            merged_chunks.append(ch.model_copy(update={"relevance": label, "labeled_by": labeler}))
+            merged_chunks.append(
+                ch.model_copy(
+                    update={"relevance": label, "labeled_by": labeler, "ai_relevance": ai_label}
+                )
+            )
         out.append(
             c.model_copy(
                 update={
@@ -184,6 +191,7 @@ def build_pool_view(
     provider_connected: bool,
     labels_by_key: dict[tuple[str, str], int],
     labeler_by_key: dict[tuple[str, str], str] | None = None,
+    ai_labels_by_key: dict[tuple[str, str], int] | None = None,
     computed_at: str | None = None,
 ) -> LabelingPoolResponse:
     """Shape an assembled :class:`PoolResult` into the labeling-pool API response.
@@ -193,6 +201,7 @@ def build_pool_view(
     order is preserved (trace-seeded chunks first, then index-discovered).
     """
     labeler_by_key = labeler_by_key or {}
+    ai_labels_by_key = ai_labels_by_key or {}
     chunks: list[PooledChunkForLabeling] = []
     for pc in pool.chunks:
         key = (test_id, pc.chunk_id)
@@ -207,6 +216,7 @@ def build_pool_view(
                 ranks=pc.ranks,
                 relevance=labels_by_key.get(key),
                 labeled_by=labeler_by_key.get(key),
+                ai_relevance=ai_labels_by_key.get(key),
             )
         )
     return LabelingPoolResponse(

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_project, get_current_user, require_write
 from app.db import get_db
 from app.models.chunk_labels import (
+    AI_ANNOTATOR,
     GRADE_MAX,
     GRADE_MIN,
     SLICE_VALUES,
@@ -17,16 +18,22 @@ from app.models.chunk_labels import (
     TestCaseLabelingStatus,
     is_valid_grade,
 )
+from app.models.evaluations import EvalResult, EvalRun
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import (
     AgreementReport,
+    AiJudgeRequest,
+    AiJudgeResponse,
     ChunkLabelBatch,
     GoldUpdate,
     LabelingSliceUpdate,
     LabelingStatusUpdate,
 )
+from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
 from app.services.chunk_agreement import Vote, build_agreement_report
+from app.services.chunk_ai_judge import AiJudgeChunk, ai_judge_chunks
+from app.services.llm_usage_tracker import record_llm_usage
 
 from ._helpers import _display_name
 
@@ -211,6 +218,138 @@ async def delete_label(
     return {"deleted": label is not None}
 
 
+@router.post(
+    "/labeling/ai-judge",
+    response_model=AiJudgeResponse,
+    dependencies=[require_write("evaluate", "labeling")],
+)
+async def ai_judge_case(
+    body: AiJudgeRequest,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """Grade a test case's retrieved chunks with the LLM, stored under the ``AI`` annotator.
+
+    A one-click second opinion: the model judges each chunk's relevance to the query on the same
+    0..3 scale a human uses. The grades become labels attributed to the AI annotator — a distinct
+    annotator in the agreement panel (so a lone human reviewer gets a Cohen's kappa against the
+    model) but excluded from the gold that feeds the retrieval metrics. Re-running re-grades the
+    same chunks (the AI annotator owns one label per chunk).
+    """
+    try:
+        llm = AnalysisLlmService(user_settings=user.settings, project_settings=project.settings)
+    except AnalysisLlmConfigError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "LLM_NOT_CONFIGURED", "message": str(exc)}},
+        ) from exc
+
+    # Most recent capture of the case (optionally pinned to a run), for its retrieved chunks.
+    result_filter = [EvalResult.test_id == body.test_id, EvalRun.project_id == project.id]
+    if body.run_id:
+        result_filter.append(EvalRun.id == body.run_id)
+    result = (
+        await db.execute(
+            select(EvalResult)
+            .join(EvalRun, EvalResult.run_id == EvalRun.id)
+            .where(*result_filter)
+            .order_by(EvalRun.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Test case not found"}},
+        )
+
+    meta = result.result_metadata if isinstance(result.result_metadata, dict) else {}
+    raw_chunks = meta.get("retrieved_chunks")
+    raw_chunks = raw_chunks if isinstance(raw_chunks, list) else []
+    # Only judgeable (chunk_id-bearing) chunks; keep their snapshot fields for the stored label.
+    judgeable = [
+        c
+        for c in raw_chunks
+        if isinstance(c, dict) and isinstance(c.get("chunk_id"), str)
+    ]
+    if not judgeable:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "NO_CHUNKS",
+                    "message": "This case has no chunks with ids to judge.",
+                }
+            },
+        )
+
+    chunks = [
+        AiJudgeChunk(chunk_id=c["chunk_id"], text=str(c.get("content") or c.get("content_preview") or ""))
+        for c in judgeable
+    ]
+    try:
+        grades, usage = await ai_judge_chunks(llm, str(result.input or ""), chunks)
+    except AnalysisLlmConfigError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "LLM_NOT_CONFIGURED", "message": str(exc)}},
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail={"error": {"code": "AI_JUDGE_FAILED", "message": "The AI judge is unavailable. Try again."}},
+        ) from exc
+
+    await record_llm_usage(
+        db,
+        project_id=project.id,
+        service_name="chunk_labeling",
+        function_name="ai_judge",
+        provider=llm.provider,
+        model=llm.model,
+        usage=usage,
+        request_metadata={"test_id": body.test_id, "chunks": len(chunks)},
+    )
+
+    # Upsert the AI annotator's own labels (one per chunk). AI rows carry annotator=AI and no
+    # user, so they never collide with a human's label for the same chunk.
+    existing = (
+        await db.execute(
+            select(ChunkRelevanceLabel).where(
+                ChunkRelevanceLabel.project_id == project.id,
+                ChunkRelevanceLabel.test_id == body.test_id,
+                ChunkRelevanceLabel.annotator == AI_ANNOTATOR,
+            )
+        )
+    ).scalars().all()
+    by_chunk = {lbl.chunk_id: lbl for lbl in existing}
+    snapshots = {c["chunk_id"]: c for c in judgeable}
+
+    for chunk_id, grade in grades.items():
+        snap = snapshots.get(chunk_id, {})
+        current = by_chunk.get(chunk_id)
+        if current is None:
+            db.add(
+                ChunkRelevanceLabel(
+                    project_id=project.id,
+                    test_id=body.test_id,
+                    chunk_id=chunk_id,
+                    relevance=grade,
+                    content_preview=snap.get("content_preview"),
+                    url=snap.get("url"),
+                    title=snap.get("title"),
+                    annotator=AI_ANNOTATOR,
+                    labeled_by=None,
+                )
+            )
+        else:
+            current.relevance = grade
+
+    await db.flush()
+    return AiJudgeResponse(test_id=body.test_id, grades=grades, judged=len(grades))
+
+
 @router.get("/labeling/agreement", response_model=AgreementReport)
 async def get_agreement(
     db: AsyncSession = Depends(get_db),
@@ -228,19 +367,22 @@ async def get_agreement(
         )
     ).scalars().all()
 
-    labeler_ids = {lbl.labeled_by for lbl in labels if lbl.labeled_by}
+    labeler_ids = {lbl.labeled_by for lbl in labels if lbl.labeled_by and not lbl.annotator}
     names: dict = {}
     if labeler_ids:
         users = (await db.execute(select(User).where(User.id.in_(labeler_ids)))).scalars().all()
         names = {u.id: (_display_name(u.email) or str(u.id)) for u in users}
 
+    # A label's annotator identity is its ``annotator`` value (the AI judge) when set, else the
+    # human who authored it. Both become distinct annotators in the agreement computation, so a
+    # single human reviewer plus the AI judge already produces a Cohen's kappa.
     votes = [
         Vote(
             test_id=lbl.test_id,
             chunk_id=lbl.chunk_id,
             relevance=lbl.relevance,
-            annotator_id=lbl.labeled_by,
-            annotator_name=names.get(lbl.labeled_by, "unknown"),
+            annotator_id=f"ai:{lbl.annotator}" if lbl.annotator else lbl.labeled_by,
+            annotator_name=lbl.annotator or names.get(lbl.labeled_by, "unknown"),
             title=lbl.title,
         )
         for lbl in labels

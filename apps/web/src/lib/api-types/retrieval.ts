@@ -62,6 +62,8 @@ export interface ChunkForLabeling {
   // Graded relevance 0..3, or null when not yet judged.
   relevance?: number | null;
   labeled_by?: string | null;
+  // The AI judge's graded relevance 0..3 for this chunk (read-only second opinion).
+  ai_relevance?: number | null;
 }
 
 export interface LabelingCase {
@@ -142,6 +144,13 @@ export interface ChunkLabelUpsert {
   title?: string | null;
 }
 
+export interface AiJudgeResponse {
+  test_id: string;
+  // chunk_id -> AI-assigned graded relevance 0..3.
+  grades: Record<string, number>;
+  judged: number;
+}
+
 // --- Multi-head candidate pool (trace captures ∪ index search heads) ---
 
 export interface PooledChunkForLabeling {
@@ -157,6 +166,8 @@ export interface PooledChunkForLabeling {
   // Graded relevance 0..3, or null when not yet judged.
   relevance?: number | null;
   labeled_by?: string | null;
+  // The AI judge's graded relevance 0..3 for this chunk (read-only second opinion).
+  ai_relevance?: number | null;
 }
 
 export interface LabelingPoolResponse {

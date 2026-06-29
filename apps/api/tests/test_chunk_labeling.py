@@ -237,6 +237,71 @@ async def test_labeling_endpoints_roundtrip(client: AsyncClient, auth_headers, d
 
 
 @pytest.mark.asyncio
+async def test_ai_judge_stores_labels_under_ai_annotator(
+    client: AsyncClient, auth_headers, db_session, test_project, monkeypatch
+):
+    import app.routers.chunk_labels.operations as ops
+    from app.services.analysis_llm import LlmUsageInfo
+
+    run = EvalRun(id=uuid4(), project_id=test_project.id, name="seeded")
+    db_session.add(run)
+    db_session.add(
+        EvalResult(
+            id=uuid4(), run_id=run.id, test_id="q1",
+            pass_=True, input="how to X", graders={},
+            result_metadata={"retrieved_chunks": CHUNKS},
+        )
+    )
+    await db_session.commit()
+
+    # A human grades c1; the AI judge will grade both chunks.
+    await client.post(
+        "/api/pipeline/labels",
+        headers=auth_headers,
+        json={"labels": [{"test_id": "q1", "chunk_id": "c1", "relevance": 2}]},
+    )
+
+    class _FakeLlm:
+        provider = "openai"
+        model = "gpt-test"
+
+        def __init__(self, *a, **k):
+            pass
+
+    async def _fake_judge(llm, query, chunks, *, instructions=None):
+        usage = LlmUsageInfo(0, 0, 0, None, 0, 0, 0)
+        return {"c1": 3, "c2": 0}, usage
+
+    monkeypatch.setattr(ops, "AnalysisLlmService", _FakeLlm)
+    monkeypatch.setattr(ops, "ai_judge_chunks", _fake_judge)
+
+    judged = await client.post(
+        "/api/pipeline/labeling/ai-judge", headers=auth_headers, json={"test_id": "q1"}
+    )
+    assert judged.status_code == 200
+    assert judged.json()["judged"] == 2
+    assert judged.json()["grades"] == {"c1": 3, "c2": 0}
+
+    # The view keeps the human's own grade as `relevance` and surfaces the AI grade separately.
+    view = await client.get("/api/pipeline/labeling", headers=auth_headers)
+    chunks = {c["chunk_id"]: c for c in view.json()["cases"][0]["chunks"]}
+    assert chunks["c1"]["relevance"] == 2 and chunks["c1"]["ai_relevance"] == 3
+    assert chunks["c2"]["relevance"] is None and chunks["c2"]["ai_relevance"] == 0
+    assert "AI" in view.json()["cases"][0]["labelers"]
+
+    # One human + the AI judge is enough for agreement (they overlap on c1).
+    agreement = await client.get("/api/pipeline/labeling/agreement", headers=auth_headers)
+    assert agreement.json()["available"] is True
+    assert {a["name"] for a in agreement.json()["annotators"]} == {"test", "AI"}
+
+    # Label-based metrics ignore the AI vote: c2 stays unlabeled ground-truth.
+    metrics = await client.get(
+        f"/api/pipeline/retrieval-metrics?run_id={run.id}&source=labels", headers=auth_headers
+    )
+    assert metrics.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_chunk_metadata_without_provider(client: AsyncClient, auth_headers):
     # No index provider connected → graceful, no error.
     resp = await client.get("/api/pipeline/chunk-metadata?chunk_id=c1", headers=auth_headers)

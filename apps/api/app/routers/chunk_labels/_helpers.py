@@ -70,14 +70,21 @@ async def _latest_or_named_run(
 
 async def _project_labels(
     db: AsyncSession, project: Project, *, user_id: UUID | None = None
-) -> tuple[dict[tuple[str, str], int], dict[tuple[str, str], str], dict[str, list[str]]]:
+) -> tuple[
+    dict[tuple[str, str], int],
+    dict[tuple[str, str], str],
+    dict[str, list[str]],
+    dict[tuple[str, str], int],
+]:
     """Load chunk labels for the labeling view, scoped to one annotator's own judgments.
 
-    Returns ``(labels_by_key, labeler_by_key, labelers_by_test)``. The first two are scoped to
-    ``user_id`` (so each annotator sees and edits their *own* graded relevance verdicts), keyed
-    by ``(test_id, chunk_id)`` — ``labels_by_key`` maps to the 0..3 grade. ``labelers_by_test``
-    lists every annotator (across all annotators) who has judged any chunk in a test case, for
-    the per-case "who labeled" display.
+    Returns ``(labels_by_key, labeler_by_key, labelers_by_test, ai_labels_by_key)``. The first
+    two are scoped to the human ``user_id`` (so each annotator sees and edits their *own* graded
+    verdicts), keyed by ``(test_id, chunk_id)`` — ``labels_by_key`` maps to the 0..3 grade. AI
+    judge labels (``annotator`` set) are never the viewer's own; they are returned separately in
+    ``ai_labels_by_key`` so the UI can show the model's grade as a read-only second opinion.
+    ``labelers_by_test`` lists every annotator (humans by name + the AI judge) who has judged any
+    chunk in a test case, for the per-case "who labeled" display.
     """
     labels = (
         await db.execute(
@@ -85,7 +92,7 @@ async def _project_labels(
         )
     ).scalars().all()
 
-    labeler_ids = {lbl.labeled_by for lbl in labels if lbl.labeled_by}
+    labeler_ids = {lbl.labeled_by for lbl in labels if lbl.labeled_by and not lbl.annotator}
     names: dict = {}
     if labeler_ids:
         users = (
@@ -93,7 +100,12 @@ async def _project_labels(
         ).scalars().all()
         names = {u.id: _display_name(u.email) for u in users}
 
-    scoped = [lbl for lbl in labels if user_id is None or lbl.labeled_by == user_id]
+    # The viewer's own labels are human rows (annotator NULL) authored by user_id.
+    scoped = [
+        lbl
+        for lbl in labels
+        if not lbl.annotator and (user_id is None or lbl.labeled_by == user_id)
+    ]
     labels_by_key = {(lbl.test_id, lbl.chunk_id): lbl.relevance for lbl in scoped}
     labeler_by_key = {
         (lbl.test_id, lbl.chunk_id): names.get(lbl.labeled_by)
@@ -101,12 +113,18 @@ async def _project_labels(
         if lbl.labeled_by and names.get(lbl.labeled_by)
     }
 
+    ai_labels_by_key = {
+        (lbl.test_id, lbl.chunk_id): lbl.relevance for lbl in labels if lbl.annotator
+    }
+
     labelers_by_test: dict[str, list[str]] = {}
     for lbl in labels:
-        name = names.get(lbl.labeled_by)
+        # A non-human label is attributed to its annotator name (e.g. "AI"); a human label to
+        # the display name of the user who made it.
+        name = lbl.annotator or names.get(lbl.labeled_by)
         if name and name not in labelers_by_test.setdefault(lbl.test_id, []):
             labelers_by_test[lbl.test_id].append(name)
-    return labels_by_key, labeler_by_key, labelers_by_test
+    return labels_by_key, labeler_by_key, labelers_by_test, ai_labels_by_key
 
 
 # Hard cap on per-head pool depth so a "load deeper pool" request can't hammer the index.

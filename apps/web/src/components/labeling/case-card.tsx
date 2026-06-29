@@ -30,6 +30,8 @@ export function CaseCard({
   onSetSlice,
   onGrade,
   onClearGrade,
+  onAiJudge,
+  aiJudging,
 }: {
   c: LabelingCase;
   canEdit: boolean;
@@ -44,6 +46,9 @@ export function CaseCard({
   onSetSlice: (slice: string | null) => void;
   onGrade: (testId: string, chunk: ChunkForLabeling, grade: number) => void;
   onClearGrade: (testId: string, chunk: ChunkForLabeling) => void;
+  // Run the LLM "AI judge" over this case's chunks (a one-click second annotator).
+  onAiJudge: () => void;
+  aiJudging: boolean;
 }) {
   // chunk_id -> the heads that surfaced it and the rank it held in each, from the pool.
   const ranksByChunk = useMemo(() => {
@@ -102,6 +107,15 @@ export function CaseCard({
               </option>
             ))}
           </select>
+          <button
+            disabled={!canEdit || aiJudging || !c.chunks.some((ch) => ch.chunk_id)}
+            onClick={onAiJudge}
+            title="Grade this case's chunks with the LLM — a second opinion that shows up in annotator agreement"
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border border-violet-300 dark:border-violet-700/60 text-violet-600 dark:text-violet-300 hover:border-violet-400 disabled:opacity-40"
+          >
+            <span aria-hidden className={aiJudging ? "animate-pulse" : ""}>✦</span>
+            {aiJudging ? "Judging…" : "AI judge"}
+          </button>
           <button
             disabled={!canEdit}
             onClick={() => onToggleComplete(!c.complete)}

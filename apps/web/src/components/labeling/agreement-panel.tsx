@@ -77,7 +77,7 @@ export function AgreementPanel({ canEdit }: { canEdit: boolean }) {
         )}
         {report && !report.available && (
           <span className="ml-1 font-normal text-gray-400 dark:text-slate-500">
-            needs a second annotator
+            optional · single annotator
           </span>
         )}
       </button>
@@ -90,8 +90,10 @@ export function AgreementPanel({ canEdit }: { canEdit: boolean }) {
             <p className="text-[12px] text-red-500 py-3">Failed to load agreement.</p>
           ) : !report || !report.available ? (
             <p className="text-[12px] text-gray-400 dark:text-slate-500 py-3">
-              Cohen&apos;s κ needs at least two annotators judging the same chunks. Have a second
-              reviewer label a 10–15% overlap sample, then κ and disagreements show up here.
+              Agreement is optional. A single annotator is enough to label, and those labels are
+              the ground truth on their own. To check consistency, run the AI judge on a case (or
+              have a second reviewer judge a 10–15% overlap sample) and Cohen&apos;s κ plus any
+              disagreements show up here.
             </p>
           ) : (
             <div className="pt-3 space-y-4">

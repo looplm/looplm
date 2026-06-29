@@ -39,6 +39,13 @@ GRADE_MAX = 3
 RELEVANT_GRADE = 1
 GRADE_LABELS = {0: "Irrelevant", 1: "Marginally relevant", 2: "Relevant", 3: "Highly relevant"}
 
+# Display name (and stored ``annotator`` value) of the built-in LLM annotator. A label whose
+# ``annotator`` is set is a non-human judgment: it is a distinct annotator in inter-annotator
+# agreement (so a single human + the AI judge already yields Cohen's kappa), but it is excluded
+# from the gold resolution that feeds the retrieval metrics — the human labels stay the ground
+# truth, the AI judge is a second opinion.
+AI_ANNOTATOR = "AI"
+
 
 def is_valid_grade(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and GRADE_MIN <= value <= GRADE_MAX
@@ -80,6 +87,11 @@ class ChunkRelevanceLabel(Base):
     content_preview = Column(Text, nullable=True)
     url = Column(Text, nullable=True)
     title = Column(Text, nullable=True)
+
+    # Non-human annotator identity (e.g. ``AI``); NULL for human labels, where the annotator is
+    # ``labeled_by``. A non-NULL annotator means ``labeled_by`` is NULL — the judgment isn't a
+    # user's. The agreement panel treats this as a distinct annotator.
+    annotator = Column(String(64), nullable=True)
 
     labeled_by = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True

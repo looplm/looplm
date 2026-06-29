@@ -4,7 +4,7 @@ import { useState } from "react";
 import { getChunkMetadata, type PooledChunkForLabeling } from "@/lib/api";
 import { gradeTint } from "./types";
 import { GradeSelector } from "./grade-selector";
-import { ProvenanceBadges, pickIndexText } from "./chunk-row";
+import { AiGradeBadge, ProvenanceBadges, pickIndexText } from "./chunk-row";
 
 // A pooled candidate chunk (from an index search head). Lighter than ChunkRow — no rank or
 // document locators — but judgeable the same way, with provenance badges and full-text fetch.
@@ -102,7 +102,10 @@ export function PoolChunkRow({
         </div>
       </div>
 
-      <GradeSelector value={relevance} disabled={disabled} onSelect={onGrade} onClear={onClear} />
+      <div className="shrink-0 flex items-center gap-2">
+        {chunk.ai_relevance != null && <AiGradeBadge grade={chunk.ai_relevance} />}
+        <GradeSelector value={relevance} disabled={disabled} onSelect={onGrade} onClear={onClear} />
+      </div>
     </div>
   );
 }

@@ -153,8 +153,14 @@ async def get_retrieval_metrics(
             )
         ).scalars().all()
         overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
+        # AI judge labels (annotator set) are a second opinion only — excluded from the gold the
+        # metrics score against, so the human labels stay the ground truth.
         relevant_by_test, nonrelevant_by_test, grade_by_test = resolve_gold(
-            ((lbl.test_id, lbl.chunk_id, lbl.relevance, lbl.labeled_by) for lbl in labels),
+            (
+                (lbl.test_id, lbl.chunk_id, lbl.relevance, lbl.labeled_by)
+                for lbl in labels
+                if lbl.annotator is None
+            ),
             overrides,
         )
         return aggregate_run_retrieval_metrics_from_labels(

@@ -135,6 +135,9 @@ class ChunkForLabeling(BaseModel):
     relevance: int | None = None
     # Display name of who made the current label, when known.
     labeled_by: str | None = None
+    # The AI judge's graded relevance 0..3 for this chunk, when it has judged it. Read-only;
+    # shown alongside the human grade as a second opinion, not merged into ``relevance``.
+    ai_relevance: int | None = None
 
 
 class LabelingCase(BaseModel):
@@ -187,6 +190,8 @@ class PooledChunkForLabeling(BaseModel):
     # Current graded relevance label 0..3, or None when not yet judged.
     relevance: int | None = None
     labeled_by: str | None = None
+    # The AI judge's graded relevance 0..3 for this chunk, when it has judged it (read-only).
+    ai_relevance: int | None = None
 
 
 class LabelingPoolResponse(BaseModel):
@@ -222,6 +227,21 @@ class ChunkLabelUpsert(BaseModel):
 
 class ChunkLabelBatch(BaseModel):
     labels: list[ChunkLabelUpsert] = Field(default_factory=list)
+
+
+class AiJudgeRequest(BaseModel):
+    test_id: str
+    # Optionally scope to one run's capture of the case; defaults to the most recent.
+    run_id: str | None = None
+    # Optional override of the default grading rubric (system prompt) for this run.
+    instructions: str | None = None
+
+
+class AiJudgeResponse(BaseModel):
+    test_id: str
+    # chunk_id -> AI-assigned graded relevance 0..3.
+    grades: dict[str, int] = Field(default_factory=dict)
+    judged: int = 0
 
 
 class LabelingStatusUpdate(BaseModel):

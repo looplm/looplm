@@ -10,6 +10,7 @@ import {
   setLabelingSlice,
   saveChunkLabels,
   deleteChunkLabel,
+  aiJudgeCase,
   type LabelingRunResponse,
   type LabelingPoolResponse,
   type ChunkForLabeling,
@@ -273,6 +274,43 @@ export default function LabelingPage() {
     [load],
   );
 
+  // Cases currently being graded by the AI judge (per-case spinner).
+  const [aiJudging, setAiJudging] = useState<Set<string>>(new Set());
+
+  // Run the AI judge over a case's chunks, then fold the returned grades into local state as a
+  // read-only second opinion (the human's own grades are untouched). "AI" joins the labelers.
+  const onAiJudge = useCallback(async (testId: string) => {
+    setAiJudging((prev) => new Set(prev).add(testId));
+    try {
+      const res = await aiJudgeCase(testId);
+      setView((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          cases: prev.cases.map((c) => {
+            if (c.test_id !== testId) return c;
+            const chunks = c.chunks.map((ch) =>
+              ch.chunk_id && ch.chunk_id in res.grades
+                ? { ...ch, ai_relevance: res.grades[ch.chunk_id] }
+                : ch,
+            );
+            const labelers = c.labelers.includes("AI") ? c.labelers : [...c.labelers, "AI"];
+            return { ...c, chunks, labelers };
+          }),
+        };
+      });
+      toast.success(`AI judged ${res.judged} chunk${res.judged === 1 ? "" : "s"}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "AI judge failed");
+    } finally {
+      setAiJudging((prev) => {
+        const next = new Set(prev);
+        next.delete(testId);
+        return next;
+      });
+    }
+  }, []);
+
   const progress = useMemo(() => {
     if (!view) return { labeled: 0, total: 0 };
     let labeled = 0;
@@ -410,6 +448,8 @@ export default function LabelingPage() {
                         onSetSlice={(s) => onSetSlice(c.test_id, s)}
                         onGrade={onGrade}
                         onClearGrade={onClearGrade}
+                        onAiJudge={() => onAiJudge(c.test_id)}
+                        aiJudging={aiJudging.has(c.test_id)}
                       />
                     ))}
                   </div>

@@ -13,6 +13,7 @@ import type {
   ChunkLabelUpsert,
   ChunkMetadataResponse,
   AgreementReport,
+  AiJudgeResponse,
 } from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
@@ -64,6 +65,16 @@ export const deleteChunkLabel = (testId: string, chunkId: string) => {
     method: "DELETE",
   });
 };
+
+export const aiJudgeCase = (testId: string, opts: { runId?: string; instructions?: string } = {}) =>
+  request<AiJudgeResponse>(`/api/pipeline/labeling/ai-judge`, {
+    method: "POST",
+    body: JSON.stringify({
+      test_id: testId,
+      run_id: opts.runId,
+      instructions: opts.instructions,
+    }),
+  });
 
 export const setLabelingComplete = (testId: string, complete: boolean) =>
   request<{ test_id: string; complete: boolean }>(`/api/pipeline/labeling/status`, {

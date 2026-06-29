@@ -2,8 +2,23 @@
 
 import { useState } from "react";
 import { getChunkMetadata, type ChunkForLabeling } from "@/lib/api";
-import { gradeTint } from "./types";
+import { gradeLabel, gradeTint, GRADES } from "./types";
 import { GradeSelector } from "./grade-selector";
+
+// Read-only badge showing the AI judge's grade for a chunk — a second opinion shown next to the
+// human grade buttons, never merged into the human's own label.
+export function AiGradeBadge({ grade }: { grade: number }) {
+  const tone = GRADES.find((g) => g.value === grade)?.selected ?? "bg-slate-500 border-slate-500 text-white";
+  return (
+    <span
+      title={`AI judge: ${grade} — ${gradeLabel(grade)}`}
+      className={`shrink-0 inline-flex items-center gap-1 px-1.5 h-7 rounded-lg text-[10px] font-semibold border ${tone}`}
+    >
+      <span className="opacity-80">AI</span>
+      {grade}
+    </span>
+  );
+}
 
 // Index fields that hold the chunk's full text, in priority order.
 export const INDEX_TEXT_FIELDS = ["chunk_text", "content", "text", "chunkText"];
@@ -252,12 +267,15 @@ export function ChunkRow({
         )}
       </div>
 
-      <GradeSelector
-        value={chunk.relevance ?? null}
-        disabled={disabled || !labelable}
-        onSelect={onGrade}
-        onClear={onClear}
-      />
+      <div className="shrink-0 flex items-center gap-2">
+        {chunk.ai_relevance != null && <AiGradeBadge grade={chunk.ai_relevance} />}
+        <GradeSelector
+          value={chunk.relevance ?? null}
+          disabled={disabled || !labelable}
+          onSelect={onGrade}
+          onClear={onClear}
+        />
+      </div>
     </div>
   );
 }

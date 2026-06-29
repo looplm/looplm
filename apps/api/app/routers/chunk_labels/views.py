@@ -109,7 +109,7 @@ async def get_labeling_view(
                 ttl_seconds=_LABELING_CACHE_TTL,
             )
 
-    labels_by_key, labeler_by_key, labelers_by_test = await _project_labels(
+    labels_by_key, labeler_by_key, labelers_by_test, ai_labels_by_key = await _project_labels(
         db, project, user_id=user.id
     )
 
@@ -131,6 +131,7 @@ async def get_labeling_view(
         complete_by_test=complete_by_test,
         slice_by_test=slice_by_test,
         labelers_by_test=labelers_by_test,
+        ai_labels_by_key=ai_labels_by_key,
     )
 
 
@@ -237,7 +238,9 @@ async def get_labeling_pool(
                 cache_key, _serialize_pool(pool, computed_at), ttl_seconds=_POOL_CACHE_TTL
             )
 
-    labels_by_key, labeler_by_key, _ = await _project_labels(db, project, user_id=user.id)
+    labels_by_key, labeler_by_key, _, ai_labels_by_key = await _project_labels(
+        db, project, user_id=user.id
+    )
     return build_pool_view(
         test_id,
         str(result.input or "") or None,
@@ -245,6 +248,7 @@ async def get_labeling_pool(
         provider_connected=provider_row is not None,
         labels_by_key=labels_by_key,
         labeler_by_key=labeler_by_key,
+        ai_labels_by_key=ai_labels_by_key,
         computed_at=computed_at,
     )
 
