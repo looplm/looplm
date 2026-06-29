@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   getLabelingPool,
   saveChunkLabels,
+  deleteChunkLabel,
   type LabelingPoolResponse,
   type PooledChunkForLabeling,
 } from "@/lib/api";
@@ -37,7 +38,8 @@ export function PoolSection({
   const [q, setQ] = useState("");
   const [searching, setSearching] = useState(false);
   // chunk_id -> graded relevance 0..3 the user assigned to a pooled candidate (optimistic).
-  const [labels, setLabels] = useState<Record<string, number>>({});
+  // ``null`` means the user cleared a previously-persisted label, overriding chunk.relevance.
+  const [labels, setLabels] = useState<Record<string, number | null>>({});
 
   // Adopt the page's pool once it arrives, as long as we haven't run our own (manual) search.
   useEffect(() => {
@@ -69,6 +71,15 @@ export function PoolSection({
     if (next && state === "idle") load();
   };
 
+  // Restore the labels map for a chunk to what it was before an optimistic change failed.
+  const restoreLabel = (chunkId: string, prev: number | null | undefined) =>
+    setLabels((m) => {
+      const next = { ...m };
+      if (prev === undefined) delete next[chunkId];
+      else next[chunkId] = prev;
+      return next;
+    });
+
   const onGradePool = (chunk: PooledChunkForLabeling, relevance: number) => {
     const prev = labels[chunk.chunk_id];
     setLabels((m) => ({ ...m, [chunk.chunk_id]: relevance }));
@@ -83,12 +94,16 @@ export function PoolSection({
       },
     ]).catch(() => {
       toast.error("Failed to save label");
-      setLabels((m) => {
-        const next = { ...m };
-        if (prev == null) delete next[chunk.chunk_id];
-        else next[chunk.chunk_id] = prev;
-        return next;
-      });
+      restoreLabel(chunk.chunk_id, prev);
+    });
+  };
+
+  const onClearPool = (chunk: PooledChunkForLabeling) => {
+    const prev = labels[chunk.chunk_id];
+    setLabels((m) => ({ ...m, [chunk.chunk_id]: null }));
+    deleteChunkLabel(testId, chunk.chunk_id).catch(() => {
+      toast.error("Failed to remove label");
+      restoreLabel(chunk.chunk_id, prev);
     });
   };
 
@@ -169,10 +184,15 @@ export function PoolSection({
                     <PoolChunkRow
                       key={chunk.chunk_id}
                       chunk={chunk}
-                      relevance={labels[chunk.chunk_id] ?? chunk.relevance ?? null}
+                      relevance={
+                        chunk.chunk_id in labels
+                          ? labels[chunk.chunk_id]
+                          : chunk.relevance ?? null
+                      }
                       disabled={!canEdit}
                       indexConnected={indexConnected}
                       onGrade={(grade) => onGradePool(chunk, grade)}
+                      onClear={() => onClearPool(chunk)}
                     />
                   ))}
                 </div>

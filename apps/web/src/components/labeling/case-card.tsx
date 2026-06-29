@@ -29,6 +29,7 @@ export function CaseCard({
   onToggleComplete,
   onSetSlice,
   onGrade,
+  onClearGrade,
 }: {
   c: LabelingCase;
   canEdit: boolean;
@@ -42,6 +43,7 @@ export function CaseCard({
   onToggleComplete: (complete: boolean) => void;
   onSetSlice: (slice: string | null) => void;
   onGrade: (testId: string, chunk: ChunkForLabeling, grade: number) => void;
+  onClearGrade: (testId: string, chunk: ChunkForLabeling) => void;
 }) {
   // chunk_id -> the heads that surfaced it and the rank it held in each, from the pool.
   const ranksByChunk = useMemo(() => {
@@ -127,6 +129,7 @@ export function CaseCard({
                 ranks={pr?.ranks}
                 ranksLoading={poolLoading}
                 onGrade={(grade) => onGrade(c.test_id, chunk, grade)}
+                onClear={() => onClearGrade(c.test_id, chunk)}
               />
             );
           })}

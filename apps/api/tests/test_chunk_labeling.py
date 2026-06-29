@@ -213,6 +213,28 @@ async def test_labeling_endpoints_roundtrip(client: AsyncClient, auth_headers, d
     resp3 = await client.get(f"/api/pipeline/labeling?run_id={run.id}", headers=auth_headers)
     assert resp3.json()["cases"][0]["complete"] is True
 
+    # Removing the label clears the grade; the view shows it unlabeled again.
+    deleted = await client.request(
+        "DELETE",
+        "/api/pipeline/labels?test_id=q1&chunk_id=c1",
+        headers=auth_headers,
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+
+    resp4 = await client.get(f"/api/pipeline/labeling?run_id={run.id}", headers=auth_headers)
+    c1_after = next(c for c in resp4.json()["cases"][0]["chunks"] if c["chunk_id"] == "c1")
+    assert c1_after["relevance"] is None
+
+    # Deleting a label that no longer exists is idempotent.
+    again = await client.request(
+        "DELETE",
+        "/api/pipeline/labels?test_id=q1&chunk_id=c1",
+        headers=auth_headers,
+    )
+    assert again.status_code == 200
+    assert again.json()["deleted"] is False
+
 
 @pytest.mark.asyncio
 async def test_chunk_metadata_without_provider(client: AsyncClient, auth_headers):

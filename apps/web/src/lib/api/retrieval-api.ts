@@ -58,6 +58,13 @@ export const saveChunkLabels = (labels: ChunkLabelUpsert[]) =>
     body: JSON.stringify({ labels }),
   });
 
+export const deleteChunkLabel = (testId: string, chunkId: string) => {
+  const params = new URLSearchParams({ test_id: testId, chunk_id: chunkId });
+  return request<{ deleted: boolean }>(`/api/pipeline/labels?${params.toString()}`, {
+    method: "DELETE",
+  });
+};
+
 export const setLabelingComplete = (testId: string, complete: boolean) =>
   request<{ test_id: string; complete: boolean }>(`/api/pipeline/labeling/status`, {
     method: "PUT",

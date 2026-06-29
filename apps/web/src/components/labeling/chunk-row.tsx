@@ -65,6 +65,7 @@ export function ChunkRow({
   ranks,
   ranksLoading,
   onGrade,
+  onClear,
 }: {
   chunk: ChunkForLabeling;
   disabled: boolean;
@@ -76,6 +77,7 @@ export function ChunkRow({
   ranks?: Record<string, number>;
   ranksLoading?: boolean;
   onGrade: (grade: number) => void;
+  onClear: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
@@ -254,6 +256,7 @@ export function ChunkRow({
         value={chunk.relevance ?? null}
         disabled={disabled || !labelable}
         onSelect={onGrade}
+        onClear={onClear}
       />
     </div>
   );

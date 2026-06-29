@@ -14,12 +14,14 @@ export function PoolChunkRow({
   disabled,
   indexConnected,
   onGrade,
+  onClear,
 }: {
   chunk: PooledChunkForLabeling;
   relevance: number | null;
   disabled: boolean;
   indexConnected: boolean;
   onGrade: (grade: number) => void;
+  onClear: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [doc, setDoc] = useState<Record<string, unknown> | null>(null);
@@ -100,7 +102,7 @@ export function PoolChunkRow({
         </div>
       </div>
 
-      <GradeSelector value={relevance} disabled={disabled} onSelect={onGrade} />
+      <GradeSelector value={relevance} disabled={disabled} onSelect={onGrade} onClear={onClear} />
     </div>
   );
 }

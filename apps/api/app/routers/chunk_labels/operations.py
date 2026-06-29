@@ -178,6 +178,39 @@ async def upsert_labels(
     return {"saved": saved}
 
 
+@router.delete(
+    "/labels",
+    dependencies=[require_write("evaluate", "labeling")],
+)
+async def delete_label(
+    test_id: str,
+    chunk_id: str,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """Remove the calling user's relevance label for a (test_id, chunk_id) pair.
+
+    Lets an annotator un-judge a chunk (clear its 0..3 grade). Only the caller's own label is
+    deleted; other annotators' rows and any gold override are untouched. Idempotent: deleting a
+    label that doesn't exist still succeeds, with ``deleted=False``.
+    """
+    label = (
+        await db.execute(
+            select(ChunkRelevanceLabel).where(
+                ChunkRelevanceLabel.project_id == project.id,
+                ChunkRelevanceLabel.labeled_by == user.id,
+                ChunkRelevanceLabel.test_id == test_id,
+                ChunkRelevanceLabel.chunk_id == chunk_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if label is not None:
+        await db.delete(label)
+        await db.flush()
+    return {"deleted": label is not None}
+
+
 @router.get("/labeling/agreement", response_model=AgreementReport)
 async def get_agreement(
     db: AsyncSession = Depends(get_db),

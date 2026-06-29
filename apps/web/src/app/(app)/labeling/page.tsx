@@ -9,6 +9,7 @@ import {
   setLabelingComplete,
   setLabelingSlice,
   saveChunkLabels,
+  deleteChunkLabel,
   type LabelingRunResponse,
   type LabelingPoolResponse,
   type ChunkForLabeling,
@@ -243,6 +244,35 @@ export default function LabelingPage() {
     [load],
   );
 
+  // Optimistic label removal: clear the grade locally, persist the delete, roll back on error.
+  const onClearGrade = useCallback(
+    async (testId: string, chunk: ChunkForLabeling) => {
+      if (!chunk.chunk_id) return;
+      setView((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          cases: prev.cases.map((c) => {
+            if (c.test_id !== testId) return c;
+            const chunks = c.chunks.map((ch) =>
+              ch.chunk_id === chunk.chunk_id ? { ...ch, relevance: null, labeled_by: null } : ch,
+            );
+            const labeled_count = chunks.filter((ch) => ch.relevance != null).length;
+            const relevant_count = chunks.filter((ch) => (ch.relevance ?? 0) >= 1).length;
+            return { ...c, chunks, labeled_count, relevant_count };
+          }),
+        };
+      });
+      try {
+        await deleteChunkLabel(testId, chunk.chunk_id);
+      } catch {
+        toast.error("Failed to remove label");
+        load();
+      }
+    },
+    [load],
+  );
+
   const progress = useMemo(() => {
     if (!view) return { labeled: 0, total: 0 };
     let labeled = 0;
@@ -379,6 +409,7 @@ export default function LabelingPage() {
                         onToggleComplete={(v) => onToggleComplete(c.test_id, v)}
                         onSetSlice={(s) => onSetSlice(c.test_id, s)}
                         onGrade={onGrade}
+                        onClearGrade={onClearGrade}
                       />
                     ))}
                   </div>
