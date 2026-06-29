@@ -15,7 +15,7 @@ class FakeProvider:
         self._by_mode = by_mode
         self._unsupported = unsupported or set()
 
-    async def search_documents(self, query, n, filters=None, *, mode="keyword"):
+    async def search_documents(self, query, n, filters=None, *, mode="keyword", query_vector=None):
         if mode in self._unsupported:
             raise NotImplementedError(f"no {mode}")
         return self._by_mode.get(mode, [])[:n]

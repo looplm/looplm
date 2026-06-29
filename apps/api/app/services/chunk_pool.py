@@ -122,6 +122,7 @@ async def assemble_pool(
     modes: Iterable[str] = SEARCH_MODES,
     per_head_depth: int = DEFAULT_POOL_DEPTH,
     filters: dict[str, str] | None = None,
+    query_vector: list[float] | None = None,
 ) -> PoolResult:
     """Build the deduped candidate pool for one query.
 
@@ -145,7 +146,7 @@ async def assemble_pool(
         for mode in modes:
             try:
                 docs = await provider.search_documents(
-                    query, per_head_depth, filters, mode=mode
+                    query, per_head_depth, filters, mode=mode, query_vector=query_vector
                 )
             except NotImplementedError as exc:
                 heads_failed[mode] = str(exc) or "not supported by this index provider"

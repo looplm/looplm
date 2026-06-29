@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2024-10-21"
     azure_openai_deployment: str = ""
 
+    # Query embeddings (for vector/hybrid retrieval probing) — reuse the analysis-LLM creds
+    # above, with a dedicated embedding deployment/model. Must match the model that built the
+    # index's vector field, or ANN results are meaningless. Empty deployment => embedding off.
+    azure_openai_embedding_deployment: str = ""
+    openai_embedding_model: str = "text-embedding-3-large"
+    embedding_dimensions: int = 3072
+
     # Eval runner
     eval_target_endpoint: str = ""
     eval_default_concurrency: int = 2

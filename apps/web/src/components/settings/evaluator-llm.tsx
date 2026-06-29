@@ -21,6 +21,10 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
   const [azureEndpoint, setAzureEndpoint] = useState("");
   const [azureDeployment, setAzureDeployment] = useState("");
   const [azureApiVersion, setAzureApiVersion] = useState("");
+  // Query embeddings (vector/hybrid retrieval) — reuse the creds above, dedicated model.
+  const [azureEmbeddingDeployment, setAzureEmbeddingDeployment] = useState("");
+  const [openaiEmbeddingModel, setOpenaiEmbeddingModel] = useState("");
+  const [embeddingDimensions, setEmbeddingDimensions] = useState("");
   // Masked secret values from the projects API (shown as placeholders)
   const [openaiKeyMask, setOpenaiKeyMask] = useState("");
   const [azureKeyMask, setAzureKeyMask] = useState("");
@@ -39,6 +43,9 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
       setAzureEndpoint((s.azure_openai_endpoint as string) || "");
       setAzureDeployment((s.azure_openai_deployment as string) || "");
       setAzureApiVersion((s.azure_openai_api_version as string) || "");
+      setAzureEmbeddingDeployment((s.azure_openai_embedding_deployment as string) || "");
+      setOpenaiEmbeddingModel((s.openai_embedding_model as string) || "");
+      setEmbeddingDimensions(s.embedding_dimensions != null ? String(s.embedding_dimensions) : "");
       setError("");
       setSaved(false);
     }
@@ -54,12 +61,16 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
       const settings: Record<string, unknown> = { llm_provider: provider };
       if (provider === "openai") {
         if (openaiKey.trim()) settings.openai_api_key = openaiKey.trim();
+        settings.openai_embedding_model = openaiEmbeddingModel.trim();
       } else {
         if (azureKey.trim()) settings.azure_openai_api_key = azureKey.trim();
         settings.azure_openai_endpoint = azureEndpoint.trim();
         settings.azure_openai_deployment = azureDeployment.trim();
         settings.azure_openai_api_version = azureApiVersion.trim();
+        settings.azure_openai_embedding_deployment = azureEmbeddingDeployment.trim();
       }
+      const dims = parseInt(embeddingDimensions.trim(), 10);
+      settings.embedding_dimensions = Number.isFinite(dims) && dims > 0 ? dims : null;
       const updated = await updateProject(currentProjectId, { settings });
       const s = updated.settings || {};
       setOpenaiKeyMask((s.openai_api_key as string) || "");
@@ -100,16 +111,42 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
         </div>
 
         {provider === "openai" && (
-          <div>
-            <label className={labelClass}>OpenAI API Key</label>
-            <input
-              type="password"
-              value={openaiKey}
-              onChange={(e) => setOpenaiKey(e.target.value)}
-              placeholder={openaiKeyMask || "sk-..."}
-              className={inputClass}
-            />
-          </div>
+          <>
+            <div>
+              <label className={labelClass}>OpenAI API Key</label>
+              <input
+                type="password"
+                value={openaiKey}
+                onChange={(e) => setOpenaiKey(e.target.value)}
+                placeholder={openaiKeyMask || "sk-..."}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Embedding Model</label>
+              <input
+                type="text"
+                value={openaiEmbeddingModel}
+                onChange={(e) => setOpenaiEmbeddingModel(e.target.value)}
+                placeholder="text-embedding-3-large"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+                Used to embed queries for vector/hybrid retrieval. Must match the model that built
+                your index&apos;s vector field, or results are meaningless.
+              </p>
+            </div>
+            <div>
+              <label className={labelClass}>Embedding Dimensions</label>
+              <input
+                type="number"
+                value={embeddingDimensions}
+                onChange={(e) => setEmbeddingDimensions(e.target.value)}
+                placeholder="3072"
+                className={inputClass}
+              />
+            </div>
+          </>
         )}
 
         {provider === "azure_openai" && (
@@ -151,6 +188,31 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
                 value={azureApiVersion}
                 onChange={(e) => setAzureApiVersion(e.target.value)}
                 placeholder="2024-10-21"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Embedding Deployment</label>
+              <input
+                type="text"
+                value={azureEmbeddingDeployment}
+                onChange={(e) => setAzureEmbeddingDeployment(e.target.value)}
+                placeholder="text-embedding-3-large"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+                Used to embed queries for vector/hybrid retrieval (reuses the key/endpoint above).
+                Must match the model that built your index&apos;s vector field, or results are
+                meaningless. Leave blank to disable vector search.
+              </p>
+            </div>
+            <div>
+              <label className={labelClass}>Embedding Dimensions</label>
+              <input
+                type="number"
+                value={embeddingDimensions}
+                onChange={(e) => setEmbeddingDimensions(e.target.value)}
+                placeholder="3072"
                 className={inputClass}
               />
             </div>

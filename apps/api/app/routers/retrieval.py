@@ -35,7 +35,9 @@ from app.schemas.retrieval import (
     RetrievalRunMetrics,
     RetrievalTargets,
 )
+from app.services.analysis_llm import merge_llm_settings
 from app.services.chunk_agreement import resolve_gold
+from app.services.query_embedding import embed_query
 from app.services.retrieval_config import get_rag_span_names
 from app.services.retrieval_metrics_aggregate import (
     AGG_KS,
@@ -220,11 +222,16 @@ async def _labels_metrics(
     k = max(AGG_KS)
     provider = build_index_provider(provider_row)
     sem = asyncio.Semaphore(_PROBE_CONCURRENCY)
+    embed_settings = merge_llm_settings(project.settings, None)
 
     async def _probe(test_id: str, query: str) -> tuple[str, list[str]]:
         async with sem:
+            # Embed the query so the probe can run vector/hybrid even without a server-side
+            # vectorizer; None falls back to text-based vector search.
+            query_vector = await embed_query(embed_settings, str(query or ""))
             ids = await cached_probe_chunk_ids(
-                provider, project.id, test_id, str(query or ""), k, refresh=refresh
+                provider, project.id, test_id, str(query or ""), k,
+                query_vector=query_vector, refresh=refresh,
             )
             return test_id, ids
 

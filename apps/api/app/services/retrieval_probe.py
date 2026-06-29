@@ -31,18 +31,21 @@ def _probe_cache_key(project_id: UUID, test_id: str, k: int) -> str:
 
 
 async def probe_retrieved_chunk_ids(
-    provider: BaseIndexProvider, query: str, k: int
+    provider: BaseIndexProvider, query: str, k: int, *, query_vector: list[float] | None = None
 ) -> tuple[list[str], str | None]:
     """Ranked chunk ids the system retrieves for ``query`` (top-k), plus the head used.
 
-    Tries :data:`PROBE_MODES` in order and returns the first head that runs. Returns
-    ``([], None)`` when the query is empty or no head is available.
+    Tries :data:`PROBE_MODES` in order and returns the first head that runs. ``query_vector`` is
+    an optional precomputed embedding so vector/hybrid work without a server-side vectorizer.
+    Returns ``([], None)`` when the query is empty or no head is available.
     """
     if not query.strip():
         return [], None
     for mode in PROBE_MODES:
         try:
-            docs = await provider.search_documents(query, k, None, mode=mode)
+            docs = await provider.search_documents(
+                query, k, None, mode=mode, query_vector=query_vector
+            )
         except NotImplementedError:
             continue
         except Exception:  # vectorizer missing, transient backend error, etc.
@@ -58,6 +61,7 @@ async def cached_probe_chunk_ids(
     query: str,
     k: int,
     *,
+    query_vector: list[float] | None = None,
     refresh: bool = False,
 ) -> list[str]:
     """``probe_retrieved_chunk_ids`` with a Redis cache keyed by (project, test_id, k)."""
@@ -66,6 +70,8 @@ async def cached_probe_chunk_ids(
         cached = await cache_get_json(cache_key)
         if cached is not None and isinstance(cached.get("chunk_ids"), list):
             return [c for c in cached["chunk_ids"] if isinstance(c, str)]
-    chunk_ids, _mode = await probe_retrieved_chunk_ids(provider, query, k)
+    chunk_ids, _mode = await probe_retrieved_chunk_ids(
+        provider, query, k, query_vector=query_vector
+    )
     await cache_set_json(cache_key, {"chunk_ids": chunk_ids}, ttl_seconds=_PROBE_CACHE_TTL)
     return chunk_ids

@@ -125,12 +125,15 @@ class BaseIndexProvider(ABC):
         filters: dict[str, str] | None = None,
         *,
         mode: str = "keyword",
+        query_vector: list[float] | None = None,
     ) -> list[CorpusDoc]:
         """Search returning up to ``n`` best-matching documents, scored, in rank order.
 
         ``mode`` selects the retrieval strategy (see :data:`SEARCH_MODES`): ``keyword``
-        (BM25/full-text), ``vector`` (dense ANN), or ``hybrid`` (both, fused). Used both as a
-        fallback matching strategy when an expected source has no checkable ID, and to build
+        (BM25/full-text), ``vector`` (dense ANN), or ``hybrid`` (both, fused). ``query_vector``
+        is an optional precomputed embedding of ``query``; when given, vector/hybrid modes search
+        with the raw vector (so an index without a server-side vectorizer still works). Used both
+        as a fallback matching strategy when an expected source has no checkable ID, and to build
         the multi-head candidate pool for chunk labeling. Optional capability — backends
         without text search keep the default; a backend that has keyword but not vector
         should raise ``NotImplementedError`` for the modes it can't serve so the pool builder

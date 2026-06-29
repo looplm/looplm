@@ -234,6 +234,7 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         filters: dict[str, str] | None = None,
         *,
         mode: str = "keyword",
+        query_vector: list[float] | None = None,
     ) -> list[CorpusDoc]:
         fields = await self._get_fields()
         select = [f for f in _PREFERRED_SAMPLE_FIELDS if f in fields]
@@ -253,13 +254,23 @@ class AzureSearchIndexProvider(BaseIndexProvider):
                 raise NotImplementedError(
                     f"index '{self._index_name}' has no vector field for {mode} search"
                 )
-            from azure.search.documents.models import VectorizableTextQuery
+            if query_vector is not None:
+                # We embedded the query ourselves — send the raw vector. Works whether or not the
+                # index declares a server-side vectorizer on this field's profile.
+                from azure.search.documents.models import VectorizedQuery
 
-            kwargs["vector_queries"] = [
-                VectorizableTextQuery(
+                vq = VectorizedQuery(
+                    vector=query_vector, k_nearest_neighbors=top, fields=vector_field
+                )
+            else:
+                # No precomputed vector: ask Azure to embed the text, which requires the index to
+                # have a vectorizer on this field's profile (else Azure rejects the query).
+                from azure.search.documents.models import VectorizableTextQuery
+
+                vq = VectorizableTextQuery(
                     text=query, k_nearest_neighbors=top, fields=vector_field
                 )
-            ]
+            kwargs["vector_queries"] = [vq]
             # hybrid = keyword + vector fused (Azure applies RRF automatically); vector-only
             # omits search_text so ranking is purely the ANN score.
             kwargs["search_text"] = query if mode == "hybrid" else None

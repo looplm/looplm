@@ -17,6 +17,7 @@ from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import LabelingDatasetOption
+from app.services.analysis_llm import merge_llm_settings
 from app.services.chunk_pool import (
     DEFAULT_POOL_DEPTH,
     SLICE_POOL_DEPTH,
@@ -24,6 +25,7 @@ from app.services.chunk_pool import (
     PoolResult,
     assemble_pool,
 )
+from app.services.query_embedding import embed_query
 
 
 def _display_name(email: str | None) -> str | None:
@@ -261,9 +263,15 @@ async def assemble_case_pool(
         if cached is not None:
             return _deserialize_pool(cached), cached.get("computed_at"), provider_row is not None
 
+    # Embed the query ourselves so vector/hybrid heads work even when the index has no
+    # server-side vectorizer. None (unconfigured or failed) → text-based vector search fallback.
+    query_vector = await embed_query(merge_llm_settings(project.settings, None), query)
+
     provider = build_index_provider(provider_row) if provider_row is not None else None
     try:
-        pool = await assemble_pool(provider, query, per_head_depth=per_head)
+        pool = await assemble_pool(
+            provider, query, per_head_depth=per_head, query_vector=query_vector
+        )
     finally:
         if provider is not None:
             await provider.aclose()
