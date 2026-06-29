@@ -1,39 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { toast } from "sonner";
-import {
-  getFeedback,
-  getFeedbackStats,
-  importFeedback,
-  generateSuggestions,
-  getLatestSuggestions,
-  acceptSuggestion,
-  deleteTestCase,
-  getDatasets,
-  type FeedbackScoreItem,
-  type FeedbackStatsResponse,
-  type FeedbackListResponse,
-  type FeedbackEvaluateResponse,
-  type FeedbackEvaluatorConfig,
-  type TestCaseSuggestion,
-  type TestDatasetItem,
-  type TestCaseCreateBody,
-} from "@/lib/api";
-import { evaluateFeedback, getFeedbackEvaluation, stopFeedbackEvaluation, getFeedbackEvaluatorConfig, updateFeedbackEvaluatorConfig } from "@/lib/api/feedback-api";
-import { analyzeTopQuestions, getTopQuestionsAnalysis, getLatestTopQuestions, stopTopQuestionsAnalysis, analyzeFeedbackThemes, getFeedbackThemesAnalysis, getLatestFeedbackThemes, stopFeedbackThemesAnalysis, getSuggestionRun, stopSuggestionRun } from "@/lib/api/evals-api";
-import type { TopQuestionsResponse, FeedbackThemesResponse, SuggestionRunResponse } from "@/lib/api";
-import { useGlobalFilters } from "@/components/global-filters-context";
-import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useFeedbackList, MAX_SELECTABLE, type Tab } from "./use-feedback-list";
+import { useFeedbackEvaluation } from "./use-feedback-evaluation";
+import { useFeedbackSuggestions } from "./use-feedback-suggestions";
+import { useFeedbackDerived } from "./use-feedback-derived";
 
-type Tab = "feedback" | "suggestions" | "top-questions" | "themes";
 type DerivedView = "picker" | "results";
 type GenerateOutput = "suggestions" | "top-questions" | "themes";
-
-// Backend caps a hand-picked selection at 200 ids (see generate_suggestions),
-// and the list endpoint allows per_page up to 200 — so one request covers the
-// whole selectable range.
-const MAX_SELECTABLE = 200;
 
 export function useFeedbackPage() {
   const [tab, setTab] = useState<Tab>(() => {
@@ -49,550 +23,30 @@ export function useFeedbackPage() {
   // start at the picker), except when a generate action jumps straight to
   // "results" — those set the view explicitly without going through selectTab.
   const [derivedView, setDerivedView] = useState<DerivedView>("picker");
-  const [stats, setStats] = useState<FeedbackStatsResponse | null>(null);
-  const [feedbackResp, setFeedbackResp] = useState<FeedbackListResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [filterValue, setFilterValue] = useState<string>("all");
-  const [filterVerdict, setFilterVerdict] = useState<string>("all");
-  const [selectedFeedbackIds, setSelectedFeedbackIds] = useState<Set<string>>(new Set());
-  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // When we programmatically switch to a derived tab to start a run from a
   // selection, the tab-change effect must NOT also load that tab's latest run —
   // that would race with and clobber the freshly-kicked-off run. Holds the tab
   // whose latest-load should be skipped exactly once.
   const skipLatestForTabRef = useRef<Tab | null>(null);
-  const globalFilters = useGlobalFilters();
 
-  // Suggestions state
-  const [suggestions, setSuggestions] = useState<TestCaseSuggestion[]>([]);
-  const [sugLoading, setSugLoading] = useState(false);
-  const [sugGenerated, setSugGenerated] = useState(false);
-  const [sugFilter, setSugFilter] = useState<"all" | "positive" | "negative">("all");
-  const [datasets, setDatasets] = useState<TestDatasetItem[]>([]);
-  const [selectedSuggestion, setSelectedSuggestion] = useState<TestCaseSuggestion | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [suggestionRun, setSuggestionRun] = useState<SuggestionRunResponse | null>(null);
+  // Evaluation owns the eval-completed counter, which feeds the list hook's
+  // loadFeedback deps; declare it before the list hook to avoid a TDZ ref.
+  const evaluation = useFeedbackEvaluation(loadFeedbackProxy);
+  const list = useFeedbackList(tab, evaluation.evalCompleted);
+  const suggestions = useFeedbackSuggestions(setDerivedView);
+  const derived = useFeedbackDerived(setDerivedView);
 
-  // Feedback evaluation state
-  const [evalResult, setEvalResult] = useState<FeedbackEvaluateResponse | null>(null);
-  const [evalId, setEvalId] = useState<string | null>(null);
-  const [evalTriggering, setEvalTriggering] = useState(false);
-
-  // Feedback evaluator config state
-  const [evalConfig, setEvalConfig] = useState<FeedbackEvaluatorConfig | null>(null);
-  const [showConfigModal, setShowConfigModal] = useState(false);
-  const [configSaving, setConfigSaving] = useState(false);
-
-  // Detail modal state
-  const [selectedFeedback, setSelectedFeedback] = useState<FeedbackScoreItem | null>(null);
-
-  // Reevaluate toggle
-  const [reevaluate, setReevaluate] = useState(false);
-
-  // Top questions state
-  const [topQuestionsResult, setTopQuestionsResult] = useState<TopQuestionsResponse | null>(null);
-  const [topQuestionsId, setTopQuestionsId] = useState<string | null>(null);
-  const [topQuestionsTriggering, setTopQuestionsTriggering] = useState(false);
-  const [topQuestionsLoading, setTopQuestionsLoading] = useState(false);
-
-  // Feedback themes state
-  const [feedbackThemesResult, setFeedbackThemesResult] = useState<FeedbackThemesResponse | null>(null);
-  const [feedbackThemesId, setFeedbackThemesId] = useState<string | null>(null);
-  const [feedbackThemesTriggering, setFeedbackThemesTriggering] = useState(false);
-  const [feedbackThemesLoading, setFeedbackThemesLoading] = useState(false);
-
-  const evalRunning = evalResult ? ["pending", "running"].includes(evalResult.status) : false;
-  const configuredVerdicts = evalConfig?.verdicts ?? ["suspicious", "helpful", "unhelpful"];
-
-  // Load feedback evaluator config
+  // The evaluation hook needs to refresh the feedback table on stop/completion,
+  // but the list hook (which owns loadFeedback) is declared after it. Bridge the
+  // call through a ref-backed proxy that always points at the latest loader.
+  const loadFeedbackRef = useRef(list.loadFeedback);
   useEffect(() => {
-    getFeedbackEvaluatorConfig()
-      .then(setEvalConfig)
-      .catch(() => {});
-  }, []);
-
-  async function handleSaveConfig(data: { prompt: string; verdicts: string[]; default_verdict: string; model: string | null }) {
-    setConfigSaving(true);
-    try {
-      const updated = await updateFeedbackEvaluatorConfig(data);
-      setEvalConfig(updated);
-      setShowConfigModal(false);
-      toast.success("Evaluator config saved");
-    } catch (err: any) {
-      toast.error("Failed to save config", { description: err.message });
-    } finally {
-      setConfigSaving(false);
-    }
+    loadFeedbackRef.current = list.loadFeedback;
+  }, [list.loadFeedback]);
+  function loadFeedbackProxy() {
+    loadFeedbackRef.current();
   }
-
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const json = JSON.parse(text);
-      const scores = Array.isArray(json) ? json : json.scores || [];
-      await importFeedback({ scores, filename: file.name });
-      toast.success("Feedback imported successfully");
-      loadFeedback();
-    } catch (err: any) {
-      toast.error("Import failed", { description: err.message });
-    }
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
-
-  async function handleStop() {
-    if (!evalId) return;
-    try {
-      await stopFeedbackEvaluation(evalId);
-      setEvalResult(null);
-      setEvalId(null);
-      toast.success("Evaluation stopped");
-      loadFeedback();
-    } catch (err: any) {
-      toast.error("Failed to stop", { description: err.message });
-    }
-  }
-
-  async function handleEvaluate() {
-    setEvalTriggering(true);
-    try {
-      const body: Record<string, unknown> = { limit: 50, reevaluate };
-      if (globalFilters.startDate) body.from_date = new Date(globalFilters.startDate).toISOString();
-      if (globalFilters.endDate) body.to_date = new Date(globalFilters.endDate).toISOString();
-      if (globalFilters.environment && globalFilters.environment !== "all") {
-        body.environment = globalFilters.environment;
-      }
-      const { evaluation_id } = await evaluateFeedback(body as any);
-      setEvalId(evaluation_id);
-      const data = await getFeedbackEvaluation(evaluation_id);
-      setEvalResult(data);
-    } catch (err: any) {
-      toast.error("Evaluation failed", { description: err.message });
-    } finally {
-      setEvalTriggering(false);
-    }
-  }
-
-  const topQuestionsRunning = topQuestionsResult ? ["pending", "running"].includes(topQuestionsResult.status) : false;
-
-  async function handleAnalyzeTopQuestions(ids?: string[]) {
-    setTopQuestionsTriggering(true);
-    try {
-      const body: Record<string, unknown> = { limit: 200 };
-      if (ids && ids.length > 0) {
-        // Hand-picked feedback: the selection IS the filter, so the
-        // date/environment params are intentionally omitted.
-        body.selected_feedback_ids = ids;
-      } else {
-        if (globalFilters.startDate) body.from_date = new Date(globalFilters.startDate).toISOString();
-        if (globalFilters.endDate) body.to_date = new Date(globalFilters.endDate).toISOString();
-        if (globalFilters.environment && globalFilters.environment !== "all") {
-          body.environment = globalFilters.environment;
-        }
-      }
-      const { analysis_id } = await analyzeTopQuestions(body as any);
-      setTopQuestionsId(analysis_id);
-      const data = await getTopQuestionsAnalysis(analysis_id);
-      setTopQuestionsResult(data);
-    } catch (err: any) {
-      toast.error("Analysis failed", { description: err.message });
-    } finally {
-      setTopQuestionsTriggering(false);
-    }
-  }
-
-  async function handleStopTopQuestions() {
-    if (!topQuestionsId || !topQuestionsRunning) return;
-    try {
-      await stopTopQuestionsAnalysis(topQuestionsId);
-      setTopQuestionsResult((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
-      toast.success("Analysis stopped");
-    } catch (err: any) {
-      toast.error("Failed to stop analysis", { description: err.message });
-    }
-  }
-
-  // Polling loop for top questions analysis progress
-  useEffect(() => {
-    if (!topQuestionsId || !topQuestionsResult || !["pending", "running"].includes(topQuestionsResult.status)) return;
-    const interval = setInterval(async () => {
-      try {
-        const updated = await getTopQuestionsAnalysis(topQuestionsId);
-        setTopQuestionsResult(updated);
-        if (updated.status === "completed") {
-          clearInterval(interval);
-          toast.success(`Identified ${updated.themes.length} question themes from ${updated.total_questions} questions`);
-        } else if (updated.status === "failed") {
-          clearInterval(interval);
-          toast.error("Analysis failed", { description: updated.error || "Unknown error" });
-        } else if (updated.status === "cancelled") {
-          clearInterval(interval);
-        }
-      } catch {
-        clearInterval(interval);
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [topQuestionsId, topQuestionsResult?.status]);
-
-  const feedbackThemesRunning = feedbackThemesResult ? ["pending", "running"].includes(feedbackThemesResult.status) : false;
-
-  async function handleAnalyzeFeedbackThemes(ids?: string[]) {
-    setFeedbackThemesTriggering(true);
-    try {
-      const body: Record<string, unknown> = { limit: 200 };
-      if (ids && ids.length > 0) {
-        // Hand-picked feedback: the selection IS the filter, so the
-        // date/environment params are intentionally omitted.
-        body.selected_feedback_ids = ids;
-      } else {
-        if (globalFilters.startDate) body.from_date = new Date(globalFilters.startDate).toISOString();
-        if (globalFilters.endDate) body.to_date = new Date(globalFilters.endDate).toISOString();
-        if (globalFilters.environment && globalFilters.environment !== "all") {
-          body.environment = globalFilters.environment;
-        }
-      }
-      const { analysis_id } = await analyzeFeedbackThemes(body as any);
-      setFeedbackThemesId(analysis_id);
-      const data = await getFeedbackThemesAnalysis(analysis_id);
-      setFeedbackThemesResult(data);
-    } catch (err: any) {
-      toast.error("Analysis failed", { description: err.message });
-    } finally {
-      setFeedbackThemesTriggering(false);
-    }
-  }
-
-  async function handleStopFeedbackThemes() {
-    if (!feedbackThemesId || !feedbackThemesRunning) return;
-    try {
-      await stopFeedbackThemesAnalysis(feedbackThemesId);
-      setFeedbackThemesResult((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
-      toast.success("Analysis stopped");
-    } catch (err: any) {
-      toast.error("Failed to stop analysis", { description: err.message });
-    }
-  }
-
-  // Polling loop for feedback themes analysis progress
-  useEffect(() => {
-    if (!feedbackThemesId || !feedbackThemesResult || !["pending", "running"].includes(feedbackThemesResult.status)) return;
-    const interval = setInterval(async () => {
-      try {
-        const updated = await getFeedbackThemesAnalysis(feedbackThemesId);
-        setFeedbackThemesResult(updated);
-        if (updated.status === "completed") {
-          clearInterval(interval);
-          toast.success(`Identified ${updated.themes.length} themes from ${updated.total_comments} comments`);
-        } else if (updated.status === "failed") {
-          clearInterval(interval);
-          toast.error("Analysis failed", { description: updated.error || "Unknown error" });
-        } else if (updated.status === "cancelled") {
-          clearInterval(interval);
-        }
-      } catch {
-        clearInterval(interval);
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [feedbackThemesId, feedbackThemesResult?.status]);
-
-  // Eval completion flag — triggers feedback list refresh
-  const [evalCompleted, setEvalCompleted] = useState(0);
-
-  // Polling loop for feedback evaluation progress
-  useEffect(() => {
-    if (!evalId || !evalResult || !["pending", "running"].includes(evalResult.status)) return;
-    const interval = setInterval(async () => {
-      try {
-        const updated = await getFeedbackEvaluation(evalId);
-        setEvalResult(updated);
-        if (updated.status === "completed") {
-          clearInterval(interval);
-          const vc = updated.summary.verdict_counts ?? {};
-          const parts = Object.entries(vc).map(([k, v]) => `${v} ${k}`);
-          toast.success(`Evaluated ${updated.summary.evaluated_count} items`, {
-            description: parts.join(", "),
-          });
-          // Trigger feedback list refresh
-          setEvalCompleted((c) => c + 1);
-        } else if (updated.status === "failed") {
-          clearInterval(interval);
-          toast.error("Evaluation failed", { description: updated.error || "Unknown error" });
-        }
-      } catch {
-        clearInterval(interval);
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [evalId, evalResult?.status]);
-
-  const loadFeedback = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: Record<string, string> = {
-        page: String(page),
-        per_page: "30",
-      };
-
-      // The feedback table backs the source picker on every tab, so always
-      // scope to user-feedback and apply the value/verdict filters.
-      params.score_name = "user-feedback";
-      if (filterValue === "positive") params.value = "1";
-      else if (filterValue === "negative") params.value = "0";
-      if (filterVerdict !== "all") params.verdict = filterVerdict;
-
-      if (globalFilters.environment && globalFilters.environment !== "all") {
-        params.environment = globalFilters.environment;
-      }
-      if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
-      if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
-      if (globalFilters.filteredUsers.length > 0) {
-        const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-        params[key] = globalFilters.filteredUsers.join(",");
-      }
-
-      const statsParams: Record<string, string> = {};
-      if (globalFilters.startDate) statsParams.start_date = new Date(globalFilters.startDate).toISOString();
-      if (globalFilters.endDate) statsParams.end_date = new Date(globalFilters.endDate).toISOString();
-      if (!globalFilters.startDate) statsParams.days = "30";
-      if (globalFilters.environment && globalFilters.environment !== "all") statsParams.environment = globalFilters.environment;
-      if (globalFilters.filteredUsers.length > 0) {
-        const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-        statsParams[key] = globalFilters.filteredUsers.join(",");
-      }
-
-      const [feedbackData, statsData] = await Promise.all([
-        getFeedback(params),
-        getFeedbackStats(statsParams),
-      ]);
-      setFeedbackResp(feedbackData);
-      setStats(statsData);
-    } catch (e) {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, [page, filterValue, filterVerdict, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames, tab, evalCompleted]);
-
-  const loadSuggestions = useCallback(async (idsOverride?: string[]) => {
-    setSugLoading(true);
-    try {
-      const params: Record<string, string> = {};
-      if (idsOverride && idsOverride.length > 0) {
-        // Hand-picked feedback: the selection IS the filter, so the
-        // type/date/environment/user params are intentionally omitted.
-        params.selected_feedback_ids = idsOverride.join(",");
-      } else {
-        params.feedback_type = sugFilter;
-        params.limit = "100";
-        if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
-        if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
-        if (globalFilters.environment && globalFilters.environment !== "all") {
-          params.environment = globalFilters.environment;
-        }
-        if (globalFilters.filteredUsers.length > 0) {
-          const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-          params[key] = globalFilters.filteredUsers.join(",");
-        }
-      }
-      const [run, dsData] = await Promise.all([
-        generateSuggestions(params),
-        getDatasets(),
-      ]);
-      setSuggestionRun(run);
-      setDatasets(dsData.data);
-      setSugGenerated(true);
-      setSuggestions([]);
-      if (run.status === "completed") {
-        setSuggestions(run.suggestions as TestCaseSuggestion[]);
-        setSugLoading(false);
-      } else if (run.status === "failed") {
-        setSugLoading(false);
-        toast.error("Failed to generate suggestions", {
-          description: run.error || "Unknown error",
-        });
-      }
-      // pending/running → polling effect takes over.
-    } catch (err: any) {
-      toast.error("Failed to generate suggestions", { description: err.message });
-      setSugLoading(false);
-    }
-  }, [sugFilter, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers]);
-
-  const loadTopQuestions = useCallback(async () => {
-    setTopQuestionsLoading(true);
-    try {
-      const data = await getLatestTopQuestions();
-      setTopQuestionsResult(data);
-      // Resume polling if the latest analysis is still in progress, and surface
-      // the live progress by jumping straight to the results view.
-      if (["pending", "running"].includes(data.status)) {
-        setTopQuestionsId(data.id);
-        setDerivedView("results");
-      }
-    } catch {
-      // No previous analysis found — that's fine
-      setTopQuestionsResult(null);
-    } finally {
-      setTopQuestionsLoading(false);
-    }
-  }, []);
-
-  const loadFeedbackThemes = useCallback(async () => {
-    setFeedbackThemesLoading(true);
-    try {
-      const data = await getLatestFeedbackThemes();
-      setFeedbackThemesResult(data);
-      // Resume polling if the latest analysis is still in progress, and surface
-      // the live progress by jumping straight to the results view.
-      if (["pending", "running"].includes(data.status)) {
-        setFeedbackThemesId(data.id);
-        setDerivedView("results");
-      }
-    } catch {
-      // No previous analysis found — that's fine
-      setFeedbackThemesResult(null);
-    } finally {
-      setFeedbackThemesLoading(false);
-    }
-  }, []);
-
-  const loadLatestSuggestions = useCallback(async () => {
-    setSugLoading(true);
-    try {
-      const [run, dsData] = await Promise.all([
-        getLatestSuggestions().catch(() => null),
-        getDatasets().catch(() => null),
-      ]);
-      if (dsData) setDatasets(dsData.data);
-      if (!run) {
-        setSugLoading(false);
-        return;
-      }
-      setSuggestionRun(run);
-      if (run.status === "completed") {
-        setSuggestions(run.suggestions as TestCaseSuggestion[]);
-        setSugGenerated(run.count > 0);
-        setSugLoading(false);
-      } else if (run.status === "failed" || run.status === "cancelled") {
-        setSuggestions([]);
-        setSugLoading(false);
-      } else {
-        // pending/running: the polling effect picks it up and clears loading.
-        // Surface live progress by jumping straight to the results view.
-        setDerivedView("results");
-      }
-    } catch {
-      setSugLoading(false);
-    }
-  }, []);
-
-  // Polling loop for suggestion run progress
-  useEffect(() => {
-    if (!suggestionRun || !["pending", "running"].includes(suggestionRun.status)) return;
-    const runId = suggestionRun.id;
-    const interval = setInterval(async () => {
-      try {
-        const updated = await getSuggestionRun(runId);
-        setSuggestionRun(updated);
-        if (updated.status === "completed") {
-          clearInterval(interval);
-          setSuggestions(updated.suggestions as TestCaseSuggestion[]);
-          setSugGenerated(updated.count > 0);
-          setSugLoading(false);
-        } else if (updated.status === "failed") {
-          clearInterval(interval);
-          setSugLoading(false);
-          toast.error("Failed to generate suggestions", {
-            description: updated.error || "Unknown error",
-          });
-        } else if (updated.status === "cancelled") {
-          clearInterval(interval);
-          setSugLoading(false);
-        }
-      } catch {
-        clearInterval(interval);
-        setSugLoading(false);
-      }
-    }, 1500);
-    return () => clearInterval(interval);
-  }, [suggestionRun?.id, suggestionRun?.status]);
-
-  async function handleStopSuggestionRun() {
-    if (!suggestionRun || !["pending", "running"].includes(suggestionRun.status)) return;
-    try {
-      const updated = await stopSuggestionRun(suggestionRun.id);
-      setSuggestionRun(updated);
-      setSugLoading(false);
-      toast.success("Generation stopped");
-    } catch (err: any) {
-      toast.error("Failed to stop generation", { description: err.message });
-    }
-  }
-
-  const toggleFeedbackId = useCallback((id: string, checked: boolean) => {
-    setSelectedFeedbackIds((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }, []);
-
-  const setPageSelection = useCallback((ids: string[], checked: boolean) => {
-    setSelectedFeedbackIds((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) {
-        if (checked) next.add(id);
-        else next.delete(id);
-      }
-      return next;
-    });
-  }, []);
-
-  const clearSelectedFeedback = useCallback(() => setSelectedFeedbackIds(new Set()), []);
-
-  // Select every feedback row matching the current filters across all pages,
-  // not just the page in view. Capped at MAX_SELECTABLE to match the backend.
-  const [selectingAll, setSelectingAll] = useState(false);
-  const selectAllMatching = useCallback(async () => {
-    setSelectingAll(true);
-    try {
-      const params: Record<string, string> = {
-        page: "1",
-        per_page: String(MAX_SELECTABLE),
-        score_name: "user-feedback",
-      };
-      if (filterValue === "positive") params.value = "1";
-      else if (filterValue === "negative") params.value = "0";
-      if (filterVerdict !== "all") params.verdict = filterVerdict;
-      if (globalFilters.environment && globalFilters.environment !== "all") {
-        params.environment = globalFilters.environment;
-      }
-      if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
-      if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
-      if (globalFilters.filteredUsers.length > 0) {
-        const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-        params[key] = globalFilters.filteredUsers.join(",");
-      }
-      const resp = await getFeedback(params);
-      const ids = resp.data.map((i) => String(i.id));
-      setSelectedFeedbackIds(new Set(ids));
-      if (resp.pagination.total > ids.length) {
-        toast.info(
-          `Selected the first ${ids.length} of ${resp.pagination.total} matching items (max ${MAX_SELECTABLE}).`,
-        );
-      }
-    } catch (err: any) {
-      toast.error("Failed to select all matching", { description: err.message });
-    } finally {
-      setSelectingAll(false);
-    }
-  }, [filterValue, filterVerdict, globalFilters.environment, globalFilters.startDate, globalFilters.endDate, globalFilters.filteredUsers, globalFilters.userFilterMode]);
 
   // Switch tabs from the nav. Always returns derived tabs to their picker step.
   const selectTab = useCallback((t: Tab) => {
@@ -605,24 +59,18 @@ export function useFeedbackPage() {
   // tab's results view and kicks off the run. Plain function (not memoized) so
   // it always closes over the latest filter-aware analyze handlers.
   function handleGenerateFrom(output: GenerateOutput, idsOverride?: string[]) {
-    const ids = idsOverride ?? (selectedFeedbackIds.size > 0 ? Array.from(selectedFeedbackIds) : undefined);
+    const ids = idsOverride ?? (list.selectedFeedbackIds.size > 0 ? Array.from(list.selectedFeedbackIds) : undefined);
     skipLatestForTabRef.current = output;
     setTab(output);
     setDerivedView("results");
     if (output === "suggestions") {
-      loadSuggestions(ids);
+      suggestions.loadSuggestions(ids);
     } else if (output === "top-questions") {
-      handleAnalyzeTopQuestions(ids);
+      derived.handleAnalyzeTopQuestions(ids);
     } else {
-      handleAnalyzeFeedbackThemes(ids);
+      derived.handleAnalyzeFeedbackThemes(ids);
     }
   }
-
-  // The feedback table backs the source picker on every tab, so load it
-  // regardless of which tab is active.
-  useEffect(() => {
-    loadFeedback();
-  }, [loadFeedback]);
 
   // Load the latest saved run for the active derived tab — unless a generate
   // action just kicked off a fresh run for it (skipLatestForTabRef), which
@@ -633,10 +81,10 @@ export function useFeedbackPage() {
       skipLatestForTabRef.current = null;
       return;
     }
-    if (tab === "suggestions") loadLatestSuggestions();
-    else if (tab === "top-questions") loadTopQuestions();
-    else if (tab === "themes") loadFeedbackThemes();
-  }, [tab, loadTopQuestions, loadFeedbackThemes, loadLatestSuggestions]);
+    if (tab === "suggestions") suggestions.loadLatestSuggestions();
+    else if (tab === "top-questions") derived.loadTopQuestions();
+    else if (tab === "themes") derived.loadFeedbackThemes();
+  }, [tab, derived.loadTopQuestions, derived.loadFeedbackThemes, suggestions.loadLatestSuggestions]);
 
   // Saved suggestion runs persist across filter changes — wiping them on every
   // filter tweak would defeat the persistence the user expects, and racing
@@ -644,73 +92,8 @@ export function useFeedbackPage() {
   // Users regenerate explicitly when they want fresh data for new filters.
 
   useEffect(() => {
-    setPage(1);
-  }, [tab, filterValue, filterVerdict, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
-
-  useEffect(() => {
     localStorage.setItem("feedback-tab", tab);
   }, [tab]);
-
-  async function handleAcceptSuggestion(datasetId: string, form: TestCaseFormData) {
-    if (!selectedSuggestion) return;
-    setSaving(true);
-    try {
-      const config = form.config_json.trim()
-        ? JSON.parse(form.config_json) as Record<string, unknown>
-        : {};
-
-      const {
-        team_filter, tag_filter, expected_sources,
-        expected_page_urls, expected_source_types,
-        max_answer_length, context_filters,
-        ...extraMetadata
-      } = config;
-
-      const body: TestCaseCreateBody = {
-        test_id: form.test_id,
-        prompt: form.prompt,
-        expected_answer: form.expected_answer || undefined,
-        team_filter: (team_filter as string[]) || [],
-        tag_filter: (tag_filter as string[]) || [],
-        expected_sources: (expected_sources as string[]) || [],
-        expected_page_urls: (expected_page_urls as string[]) || [],
-        expected_source_types: (expected_source_types as string[]) || [],
-        max_answer_length: (max_answer_length as number) ?? null,
-        context_filters: (context_filters as Record<string, string>) || selectedSuggestion.context_filters,
-        metadata: Object.keys(extraMetadata).length > 0 ? extraMetadata : {},
-        source_feedback_id: selectedSuggestion.feedback_id,
-        source_trace_id: selectedSuggestion.trace_id || undefined,
-        message_count: selectedSuggestion.message_count ?? undefined,
-        has_summary: selectedSuggestion.has_summary,
-      };
-      const created = await acceptSuggestion(datasetId, body);
-      const removedSuggestion = selectedSuggestion;
-      setSuggestions((prev) => prev.filter((s) => s.feedback_id !== removedSuggestion.feedback_id));
-      setSelectedSuggestion(null);
-      toast.success("Test case added to dataset", {
-        action: {
-          label: "Undo",
-          onClick: async () => {
-            try {
-              await deleteTestCase(datasetId, created.id);
-              setSuggestions((prev) =>
-                prev.some((s) => s.feedback_id === removedSuggestion.feedback_id)
-                  ? prev
-                  : [removedSuggestion, ...prev],
-              );
-              toast.success("Test case removed");
-            } catch (err: any) {
-              toast.error("Failed to undo", { description: err.message });
-            }
-          },
-        },
-      });
-    } catch (err: any) {
-      toast.error("Failed to add test case", { description: err.message });
-    } finally {
-      setSaving(false);
-    }
-  }
 
   const tabClass = (t: Tab) =>
     `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -723,59 +106,59 @@ export function useFeedbackPage() {
     // State
     tab, setTab, selectTab,
     derivedView, setDerivedView,
-    stats,
-    feedbackResp, setFeedbackResp,
-    loading,
-    page, setPage,
-    filterValue, setFilterValue,
-    filterVerdict, setFilterVerdict,
-    selectedFeedbackIds,
-    hoveredBar, setHoveredBar,
-    fileInputRef,
-    suggestions,
-    sugLoading,
-    sugGenerated,
-    sugFilter, setSugFilter,
-    suggestionRun,
-    datasets,
-    selectedSuggestion, setSelectedSuggestion,
-    saving,
-    evalResult,
-    evalTriggering,
-    evalConfig,
-    showConfigModal, setShowConfigModal,
-    configSaving,
-    selectedFeedback, setSelectedFeedback,
-    reevaluate, setReevaluate,
-    topQuestionsResult,
-    topQuestionsLoading,
-    topQuestionsTriggering,
-    topQuestionsRunning,
-    feedbackThemesResult,
-    feedbackThemesLoading,
-    feedbackThemesTriggering,
-    feedbackThemesRunning,
+    stats: list.stats,
+    feedbackResp: list.feedbackResp, setFeedbackResp: list.setFeedbackResp,
+    loading: list.loading,
+    page: list.page, setPage: list.setPage,
+    filterValue: list.filterValue, setFilterValue: list.setFilterValue,
+    filterVerdict: list.filterVerdict, setFilterVerdict: list.setFilterVerdict,
+    selectedFeedbackIds: list.selectedFeedbackIds,
+    hoveredBar: list.hoveredBar, setHoveredBar: list.setHoveredBar,
+    fileInputRef: list.fileInputRef,
+    suggestions: suggestions.suggestions,
+    sugLoading: suggestions.sugLoading,
+    sugGenerated: suggestions.sugGenerated,
+    sugFilter: suggestions.sugFilter, setSugFilter: suggestions.setSugFilter,
+    suggestionRun: suggestions.suggestionRun,
+    datasets: suggestions.datasets,
+    selectedSuggestion: suggestions.selectedSuggestion, setSelectedSuggestion: suggestions.setSelectedSuggestion,
+    saving: suggestions.saving,
+    evalResult: evaluation.evalResult,
+    evalTriggering: evaluation.evalTriggering,
+    evalConfig: evaluation.evalConfig,
+    showConfigModal: evaluation.showConfigModal, setShowConfigModal: evaluation.setShowConfigModal,
+    configSaving: evaluation.configSaving,
+    selectedFeedback: evaluation.selectedFeedback, setSelectedFeedback: evaluation.setSelectedFeedback,
+    reevaluate: evaluation.reevaluate, setReevaluate: evaluation.setReevaluate,
+    topQuestionsResult: derived.topQuestionsResult,
+    topQuestionsLoading: derived.topQuestionsLoading,
+    topQuestionsTriggering: derived.topQuestionsTriggering,
+    topQuestionsRunning: derived.topQuestionsRunning,
+    feedbackThemesResult: derived.feedbackThemesResult,
+    feedbackThemesLoading: derived.feedbackThemesLoading,
+    feedbackThemesTriggering: derived.feedbackThemesTriggering,
+    feedbackThemesRunning: derived.feedbackThemesRunning,
     // Computed
-    evalRunning,
-    configuredVerdicts,
+    evalRunning: evaluation.evalRunning,
+    configuredVerdicts: evaluation.configuredVerdicts,
     tabClass,
     // Handlers
-    handleSaveConfig,
-    handleImport,
-    handleStop,
-    handleEvaluate,
-    handleAcceptSuggestion,
-    handleAnalyzeTopQuestions,
-    handleStopTopQuestions,
-    handleAnalyzeFeedbackThemes,
-    handleStopFeedbackThemes,
-    handleGenerateSuggestions: loadSuggestions,
-    handleStopSuggestionRun,
-    toggleFeedbackId,
-    setPageSelection,
-    clearSelectedFeedback,
-    selectAllMatching,
-    selectingAll,
+    handleSaveConfig: evaluation.handleSaveConfig,
+    handleImport: list.handleImport,
+    handleStop: evaluation.handleStop,
+    handleEvaluate: evaluation.handleEvaluate,
+    handleAcceptSuggestion: suggestions.handleAcceptSuggestion,
+    handleAnalyzeTopQuestions: derived.handleAnalyzeTopQuestions,
+    handleStopTopQuestions: derived.handleStopTopQuestions,
+    handleAnalyzeFeedbackThemes: derived.handleAnalyzeFeedbackThemes,
+    handleStopFeedbackThemes: derived.handleStopFeedbackThemes,
+    handleGenerateSuggestions: suggestions.loadSuggestions,
+    handleStopSuggestionRun: suggestions.handleStopSuggestionRun,
+    toggleFeedbackId: list.toggleFeedbackId,
+    setPageSelection: list.setPageSelection,
+    clearSelectedFeedback: list.clearSelectedFeedback,
+    selectAllMatching: list.selectAllMatching,
+    selectingAll: list.selectingAll,
     maxSelectable: MAX_SELECTABLE,
     handleGenerateFrom,
   };

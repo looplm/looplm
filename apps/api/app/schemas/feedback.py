@@ -246,3 +246,7 @@ class SuggestionRunResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+
+
+class RegenerateExpectedAnswerResponse(BaseModel):
+    expected_answer: Optional[str] = None

@@ -1,16 +1,9 @@
-"""Tests for the GitHub App service + OAuth router + code-agent wiring.
-
-Credentials are per project: each function takes a resolved `GithubAppCreds`,
-and `resolve_creds` prefers a project's own `ProjectGithubApp` row, falling back
-to the instance-wide env App.
-"""
+"""GitHub App: OAuth router endpoints, per-project App config CRUD, and
+code-agent wiring tests."""
 
 from __future__ import annotations
 
 import shutil
-import subprocess
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -18,18 +11,11 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from app.config import settings
-from app.encryption import encrypt_api_key
 from app.models.evaluations import EvalRun
 from app.models.github import GithubInstallation, ProjectGithubApp
 from app.models.project import Project
 from app.services import github_app
-from app.services.github_app import (
-    GithubAppCreds,
-    GithubAppError,
-    InstallationToken,
-    _INSTALLATION_TOKEN_CACHE,
-    fetch_installation_token,
-)
+from app.services.github_app import GithubAppCreds
 
 
 def _fake_creds(app_id: str = "123") -> GithubAppCreds:
@@ -44,11 +30,7 @@ def _fake_creds(app_id: str = "123") -> GithubAppCreds:
 
 @pytest.fixture(autouse=True)
 def _no_env_app(monkeypatch) -> None:
-    """Neutralize any instance-wide GITHUB_APP_* from a local .env.
-
-    Tests here exercise the per-project path; CI has no .env so env_creds() is
-    already None there. This makes the suite deterministic on dev machines too.
-    """
+    """Neutralize any instance-wide GITHUB_APP_* from a local .env."""
     for name in (
         "github_app_id",
         "github_app_name",
@@ -58,275 +40,6 @@ def _no_env_app(monkeypatch) -> None:
         "github_app_private_key_path",
     ):
         monkeypatch.setattr(settings, name, "")
-
-
-# ── Feature flag ─────────────────────────────────────────────────
-
-
-def test_is_enabled_false_when_unconfigured() -> None:
-    # The test environment leaves all github_app_* settings empty.
-    assert github_app.env_creds() is None
-    assert github_app.is_enabled(None) is False
-    assert github_app.is_enabled(_fake_creds()) is True
-
-
-# ── State token ──────────────────────────────────────────────────
-
-
-def test_state_token_round_trip() -> None:
-    from app.routers import github_oauth
-
-    pid = uuid4()
-    state = github_oauth._issue_state("user-123", pid)
-    assert github_oauth._decode_state(state, expected_user_id="user-123") == pid
-
-
-def test_state_token_rejects_wrong_user() -> None:
-    from fastapi import HTTPException
-
-    from app.routers import github_oauth
-
-    state = github_oauth._issue_state("user-123", uuid4())
-    with pytest.raises(HTTPException):
-        github_oauth._decode_state(state, expected_user_id="user-456")
-
-
-def test_state_token_rejects_garbage() -> None:
-    from fastapi import HTTPException
-
-    from app.routers import github_oauth
-
-    with pytest.raises(HTTPException):
-        github_oauth._decode_state("not-a-jwt", expected_user_id="user-123")
-
-
-# ── Installation token cache ─────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_installation_token_uses_cache_within_ttl(monkeypatch) -> None:
-    _INSTALLATION_TOKEN_CACHE.clear()
-    creds = _fake_creds()
-    fake = InstallationToken(
-        token="ghs_fake",
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-    )
-    _INSTALLATION_TOKEN_CACHE[(creds.app_id, 42)] = fake
-
-    # No httpx mock needed: cache short-circuit fires first.
-    out = await fetch_installation_token(creds, 42)
-    assert out.token == "ghs_fake"
-
-
-@pytest.mark.asyncio
-async def test_installation_token_cache_keyed_by_app(monkeypatch) -> None:
-    """Two Apps minting the same installation_id must not collide in cache."""
-    _INSTALLATION_TOKEN_CACHE.clear()
-    creds_a = _fake_creds("app-A")
-    _INSTALLATION_TOKEN_CACHE[(creds_a.app_id, 42)] = InstallationToken(
-        token="for-A",
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-    )
-
-    class _FakeResp:
-        status_code = 200
-        text = ""
-
-        def json(self):
-            return {
-                "token": "for-B",
-                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1))
-                .isoformat()
-                .replace("+00:00", "Z"),
-            }
-
-    class _FakeClient:
-        def __init__(self, *a, **kw): ...
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-        async def post(self, *a, **kw):
-            return _FakeResp()
-
-    monkeypatch.setattr(github_app, "_app_jwt", lambda creds: "jwt-test")
-    monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeClient)
-
-    creds_b = _fake_creds("app-B")
-    out = await fetch_installation_token(creds_b, 42)
-    assert out.token == "for-B"
-    # App A's cached token is untouched.
-    assert _INSTALLATION_TOKEN_CACHE[(creds_a.app_id, 42)].token == "for-A"
-
-
-@pytest.mark.asyncio
-async def test_installation_token_refreshes_when_expired(monkeypatch) -> None:
-    _INSTALLATION_TOKEN_CACHE.clear()
-    creds = _fake_creds()
-    _INSTALLATION_TOKEN_CACHE[(creds.app_id, 42)] = InstallationToken(
-        token="old",
-        expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
-    )
-
-    class _FakeResp:
-        status_code = 200
-        text = ""
-
-        def json(self):
-            return {
-                "token": "ghs_new",
-                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
-            }
-
-    class _FakeClient:
-        def __init__(self, *a, **kw): ...
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
-        async def post(self, *a, **kw):
-            return _FakeResp()
-
-    monkeypatch.setattr(github_app, "_app_jwt", lambda creds: "jwt-test")
-    monkeypatch.setattr(github_app.httpx, "AsyncClient", _FakeClient)
-
-    out = await fetch_installation_token(creds, 42)
-    assert out.token == "ghs_new"
-
-
-def test_invalidate_caches_drops_app_entries() -> None:
-    _INSTALLATION_TOKEN_CACHE.clear()
-    github_app._APP_JWT_CACHE.clear()
-    github_app._APP_JWT_CACHE["app-A"] = ("tok", 9999999999.0)
-    github_app._APP_JWT_CACHE["app-B"] = ("tok", 9999999999.0)
-    _INSTALLATION_TOKEN_CACHE[("app-A", 1)] = InstallationToken(
-        token="x", expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
-    )
-    _INSTALLATION_TOKEN_CACHE[("app-B", 1)] = InstallationToken(
-        token="y", expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
-    )
-
-    github_app.invalidate_caches("app-A")
-
-    assert "app-A" not in github_app._APP_JWT_CACHE
-    assert "app-B" in github_app._APP_JWT_CACHE
-    assert ("app-A", 1) not in _INSTALLATION_TOKEN_CACHE
-    assert ("app-B", 1) in _INSTALLATION_TOKEN_CACHE
-
-
-# ── Credential resolution ────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_resolve_creds_none_when_unconfigured(db_session, test_project: Project) -> None:
-    creds = await github_app.resolve_creds(db_session, test_project.id)
-    assert creds is None  # no project row, env empty in tests
-
-
-@pytest.mark.asyncio
-async def test_resolve_creds_prefers_project_row(db_session, test_project: Project) -> None:
-    db_session.add(
-        ProjectGithubApp(
-            project_id=test_project.id,
-            app_id="999",
-            app_name="proj-app",
-            client_id="Iv1.proj",
-            client_secret=encrypt_api_key("topsecret"),
-            # Stored with escaped newlines — resolve_creds should normalize them.
-            private_key=encrypt_api_key("-----BEGIN-----\\nKEY\\n-----END-----"),
-        )
-    )
-    await db_session.commit()
-
-    creds = await github_app.resolve_creds(db_session, test_project.id)
-    assert creds is not None
-    assert creds.app_id == "999"
-    assert creds.client_secret == "topsecret"
-    assert creds.private_key == "-----BEGIN-----\nKEY\n-----END-----"
-    assert github_app.is_enabled(creds) is True
-
-
-# ── ensure_repo_clone against a local bare upstream ──────────────
-
-
-def _make_bare_upstream(tmp_path: Path) -> Path:
-    """Create a local bare repo with one initial commit on `main`."""
-    work = tmp_path / "work"
-    work.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.email", "t@e.com"], check=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.name", "t"], check=True)
-    (work / "hello.txt").write_text("hello\n")
-    subprocess.run(["git", "-C", str(work), "add", "."], check=True)
-    subprocess.run(
-        ["git", "-C", str(work), "commit", "-q", "-m", "initial"], check=True
-    )
-    bare = tmp_path / "upstream.git"
-    subprocess.run(["git", "clone", "-q", "--bare", str(work), str(bare)], check=True)
-    return bare
-
-
-@pytest.mark.asyncio
-async def test_ensure_repo_clone_creates_and_then_fetches(tmp_path, monkeypatch) -> None:
-    bare = _make_bare_upstream(tmp_path)
-    clone_root = tmp_path / "clones"
-    clone_root.mkdir()
-
-    monkeypatch.setattr(settings, "github_clone_dir", str(clone_root))
-    monkeypatch.setattr(github_app, "_clone_url", lambda _name: f"file://{bare}")
-
-    async def fake_token(_creds, _id):
-        return InstallationToken(
-            token="x",
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-        )
-
-    monkeypatch.setattr(github_app, "fetch_installation_token", fake_token)
-
-    creds = _fake_creds()
-    project_id = uuid4()
-    target = await github_app.ensure_repo_clone(
-        creds,
-        project_id=project_id,
-        installation_id=1,
-        repo_full_name="acme/widgets",
-        default_branch="main",
-    )
-    assert (target / "hello.txt").exists()
-    assert (target / "hello.txt").read_text() == "hello\n"
-
-    # Mutate upstream, then call again — should fetch + reset, not re-clone.
-    work = tmp_path / "upstream-work"
-    subprocess.run(["git", "clone", "-q", str(bare), str(work)], check=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.email", "t@e.com"], check=True)
-    subprocess.run(["git", "-C", str(work), "config", "user.name", "t"], check=True)
-    (work / "hello.txt").write_text("hi v2\n")
-    subprocess.run(["git", "-C", str(work), "add", "."], check=True)
-    subprocess.run(
-        ["git", "-C", str(work), "commit", "-q", "-m", "update"], check=True
-    )
-    subprocess.run(["git", "-C", str(work), "push", "-q", "origin", "main"], check=True)
-
-    target_again = await github_app.ensure_repo_clone(
-        creds,
-        project_id=project_id,
-        installation_id=1,
-        repo_full_name="acme/widgets",
-        default_branch="main",
-    )
-    assert target_again == target
-    assert (target / "hello.txt").read_text() == "hi v2\n"
-
-
-@pytest.mark.asyncio
-async def test_ensure_repo_clone_rejects_traversal_in_name() -> None:
-    with pytest.raises(GithubAppError):
-        await github_app.ensure_repo_clone(
-            _fake_creds(),
-            project_id=uuid4(),
-            installation_id=1,
-            repo_full_name="../etc/passwd",
-        )
 
 
 # ── Router endpoints ─────────────────────────────────────────────

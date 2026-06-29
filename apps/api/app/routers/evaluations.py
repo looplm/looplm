@@ -1,11 +1,8 @@
 """Evaluation run endpoints."""
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from math import ceil
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -14,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
-from app.models.models import EvalResult, EvalRun, Evaluator
+from app.models.models import EvalResult, EvalRun
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.evaluations import (
@@ -26,40 +23,13 @@ from app.schemas.evaluations import (
     EvalRunListItem,
     EvalRunListResponse,
     EvalRunStats,
-    GraderResultSummary,
     GraderSummaryItem,
     PaginationInfo,
     RerunLinkItem,
     ScoreSummaryItem,
 )
-from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
-from app.services.failure_pattern import aggregate_run_patterns, compute_failure_pattern
-from app.services.retrieval_config import (
-    extract_retrieval_context_from_payload,
-    get_retrieval_payload_key,
-)
-
-def _enrich_result_metadata(
-    meta: dict[str, Any] | None, *, payload_key: str | None = None
-) -> dict[str, Any]:
-    """Enrich eval result metadata with retrieval_context extracted from raw_response."""
-    meta = meta or {}
-    if "retrieval_context" in meta:
-        return meta
-    raw = meta.get("raw_response")
-    if not raw:
-        return meta
-    try:
-        parsed = json.loads(raw) if isinstance(raw, str) else raw
-    except (json.JSONDecodeError, TypeError):
-        return meta
-    ctx = extract_retrieval_context_from_payload(parsed, payload_key=payload_key)
-    if ctx:
-        enriched = dict(meta)
-        enriched["retrieval_context"] = ctx
-        return enriched
-    return meta
-
+from app.services.eval_failure_classifier import classify_run_failures
+from app.services.retrieval_config import get_retrieval_payload_key
 
 from .eval_helpers import (
     _compute_summaries,
@@ -67,6 +37,14 @@ from .eval_helpers import (
     _is_legacy_eval_import_format,
     _recompute_stats_excluding,
     _transform_legacy_eval_import,
+)
+from .eval_result_helpers import (
+    _enrich_result_metadata,
+    _failure_pattern,
+    _grader_pattern,
+    _root_cause_category,
+    _summarize_graders,
+    _turn_count,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,47 +164,6 @@ router.include_router(eval_sessions_router)
 
 
 # ── Parameterized routes (/{run_id}) — must come last ────────
-
-
-def _summarize_graders(graders: dict[str, Any] | None) -> dict[str, GraderResultSummary]:
-    """Trim each grader to (pass, reason, skipped) for the list payload."""
-    out: dict[str, GraderResultSummary] = {}
-    for name, g in (graders or {}).items():
-        if not isinstance(g, dict):
-            continue
-        out[name] = GraderResultSummary(
-            **{"pass": bool(g.get("pass", False))},
-            reason=g.get("reason"),
-            skipped=bool(g.get("skipped", False)),
-        )
-    return out
-
-
-def _turn_count(metadata: dict[str, Any] | None) -> int | None:
-    history = (metadata or {}).get("conversation_history")
-    if isinstance(history, list):
-        return len(history)
-    return None
-
-
-def _grader_pattern(metadata: dict[str, Any] | None) -> list[str]:
-    val = (metadata or {}).get("grader_pattern")
-    if isinstance(val, list):
-        return [str(x) for x in val]
-    return []
-
-
-def _failure_pattern(metadata: dict[str, Any] | None) -> str | None:
-    val = (metadata or {}).get("failure_pattern")
-    return str(val) if val else None
-
-
-def _root_cause_category(metadata: dict[str, Any] | None) -> str | None:
-    rc = (metadata or {}).get("root_cause")
-    if isinstance(rc, dict):
-        cat = rc.get("category")
-        return str(cat) if cat else None
-    return None
 
 
 @router.get("/{run_id}", response_model=EvalRunDetail)
@@ -440,74 +377,7 @@ async def classify_eval_failures(
             detail={"error": {"code": "NOT_FOUND", "message": "Eval run not found"}},
         )
 
-    failed_results = list((await db.execute(
-        select(EvalResult).where(EvalResult.run_id == run.id, EvalResult.pass_ == False)  # noqa: E712
-    )).scalars().all())
-
-    if not failed_results:
-        run.run_metadata = {
-            **(run.run_metadata or {}),
-            "failure_pattern_summary": {},
-        }
-        await db.commit()
-        pass_rate = run.passed / run.total if run.total > 0 else 0.0
-        return ClassifyFailuresResponse(
-            total=run.total,
-            passed=run.passed,
-            failed=run.failed,
-            pass_rate=pass_rate,
-            classified=0,
-            failure_pattern_summary={},
-        )
-
-    evaluators = list((await db.execute(
-        select(Evaluator).where(Evaluator.project_id == project.id)
-    )).scalars().all())
-    affects_pass_map = {e.name: e.affects_pass for e in evaluators}
-
-    llm: AnalysisLlmService | None
-    try:
-        llm = AnalysisLlmService(
-            user_settings=dict(_user.settings or {}), project_settings=project.settings
-        )
-    except AnalysisLlmConfigError as exc:
-        logger.info("Classifying failures without LLM (config error: %s)", exc)
-        llm = None
-
-    sem = asyncio.Semaphore(8)
-
-    async def _classify_one(result: EvalResult) -> str | None:
-        async with sem:
-            patch, _usage = await compute_failure_pattern(
-                pass_=result.pass_,
-                graders=result.graders,
-                output=result.output,
-                affects_pass_map=affects_pass_map,
-                llm=llm,
-            )
-        if patch:
-            result.result_metadata = {**(result.result_metadata or {}), **patch}
-        return patch.get("failure_pattern")
-
-    patterns = await asyncio.gather(*(_classify_one(r) for r in failed_results))
-
-    summary = aggregate_run_patterns(patterns)
-    run.run_metadata = {
-        **(run.run_metadata or {}),
-        "failure_pattern_summary": summary,
-    }
-
-    await db.commit()
-
-    pass_rate = run.passed / run.total if run.total > 0 else 0.0
-    return ClassifyFailuresResponse(
-        total=run.total,
-        passed=run.passed,
-        failed=run.failed,
-        pass_rate=pass_rate,
-        classified=len(failed_results),
-        failure_pattern_summary=summary,
-    )
+    return await classify_run_failures(run, project=project, user=_user, db=db)
 
 
 @router.delete("/{run_id}", status_code=204, dependencies=[require_write("evaluate", "evaluations")])

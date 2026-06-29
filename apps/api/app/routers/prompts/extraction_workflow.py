@@ -1,37 +1,31 @@
-"""Prompt import & analysis endpoints."""
+"""GitHub extraction endpoints and single-prompt CRUD.
+
+Specific /extract/github* paths are declared before the /{prompt_id} catch-alls
+so FastAPI route matching resolves them correctly.
+"""
 
 import asyncio
-import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user, require_section, require_write
+from app.auth import get_current_project, get_current_user, require_write
 from app.db import async_session, get_db
 from app.models.github import GithubInstallation
-from app.models.models import JsonImport
 from app.models.project import Project
 from app.models.prompts import PromptExtraction
 from app.models.user import User
 from app.schemas.prompts import (
-    ClusterMoveRequest,
-    ClusterMoveResult,
     ClusterUpdateRequest,
     ConfirmExtractionRequest,
-    ExclusionItem,
-    ExclusionListResponse,
-    PlannedLocation,
     PromptExtractionResponse,
-    PromptImportRequest,
     PromptListResponse,
     PromptOut,
     PromptRecheckResult,
     PromptReviewListResponse,
     PromptReviewResult,
-    PromptSyncResponse,
-    RemoveExclusionRequest,
 )
 from app.services import github_app
 from app.services.analysis_llm import merge_llm_settings
@@ -39,226 +33,28 @@ from app.services.code_agent_service import CodeAgentConfigError
 from app.services.prompt_analysis import (
     add_exclusion,
     delete_prompt,
-    get_excluded_ids,
-    get_or_create_github_integration,
     get_prompt,
-    import_prompts_from_json,
-    list_prompts,
     list_reviews,
     list_versions,
-    remove_exclusion,
     review_prompt,
-    sync_prompts,
 )
-from app.services.prompt_clustering import cluster_project_prompts, move_cluster
+from app.services.prompt_extraction_confirm import confirm_extraction
+from app.services.prompt_extraction_maintenance import recheck_prompt
 from app.services.prompt_extraction_service import (
-    confirm_extraction,
     discover_repo_prompts,
     extract_prompts_from_repo,
-    recheck_prompt,
 )
 from app.services.repo_resolver import RepoPathError, resolve_project_repo
 
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/api/prompts", tags=["prompts"], dependencies=[require_section("improve", "prompts")])
-
-_SUPPORTED_PROVIDERS = {"openai", "anthropic", "azure_openai"}
-_extraction_tasks: dict[UUID, asyncio.Task] = {}
-
-
-def _code_agent_params(project: Project) -> dict:
-    """Resolve the Code Agent provider/model/credentials from project settings.
-
-    Shared by GitHub extraction and per-prompt recheck — both read the repo with
-    the same agent infra. Unsupported provider values fall back to 'anthropic',
-    matching the Settings UI.
-    """
-    ps = dict(project.settings or {})
-    stored = ps.get("code_agent_provider", "anthropic")
-    provider = stored if stored in _SUPPORTED_PROVIDERS else "anthropic"
-    if provider != stored:
-        logger.warning(
-            "Project %s has unsupported code_agent_provider %r; falling back to 'anthropic'",
-            project.id, stored,
-        )
-    return {
-        "provider": provider,
-        "model": ps.get("code_agent_model"),
-        "api_key": ps.get("code_agent_api_key"),
-        "azure_endpoint": ps.get("code_agent_azure_endpoint"),
-        "azure_api_version": ps.get("code_agent_azure_api_version"),
-    }
-
-
-def _extraction_to_out(e: PromptExtraction) -> PromptExtractionResponse:
-    return PromptExtractionResponse(
-        id=str(e.id),
-        status=e.status,
-        error=e.error,
-        summary=e.summary,
-        files_analyzed=e.files_analyzed or [],
-        extracted_count=e.extracted_count or 0,
-        total_cost_usd=e.total_cost_usd,
-        num_turns=e.num_turns,
-        progress_message=e.progress_message,
-        progress_log=e.progress_log or [],
-        planned_locations=[PlannedLocation(**loc) for loc in (e.planned_locations or [])],
-        started_at=e.started_at,
-        completed_at=e.completed_at,
-    )
-
-
-def _prompt_to_out(p) -> PromptOut:
-    return PromptOut(
-        id=str(p.id),
-        integration_id=str(p.integration_id),
-        external_id=p.external_id,
-        name=p.name,
-        template=p.template,
-        version=p.version,
-        variables=p.variables or [],
-        metadata=p.prompt_metadata or {},
-        source=p.integration.type.value if p.integration else "",
-        cluster_path=p.cluster_path or [],
-        created_at=p.created_at,
-        updated_at=p.updated_at,
-    )
-
-
-@router.get("", response_model=PromptListResponse)
-async def list_all_prompts(
-    integration_id: UUID | None = Query(None),
-    db: AsyncSession = Depends(get_db),
-    project: Project = Depends(get_current_project),
-):
-    """List imported prompts."""
-    prompts = await list_prompts(project.id, db, integration_id=integration_id)
-    items = [_prompt_to_out(p) for p in prompts]
-    return PromptListResponse(data=items, total=len(items))
-
-
-@router.post(
-    "/import",
-    response_model=PromptSyncResponse,
-    dependencies=[require_write("improve", "prompts")],
+from ._helpers import (
+    _code_agent_params,
+    _extraction_tasks,
+    _extraction_to_out,
+    _prompt_to_out,
+    _resolve_repo_or_400,
 )
-async def import_json_prompts(
-    body: PromptImportRequest,
-    db: AsyncSession = Depends(get_db),
-    project: Project = Depends(get_current_project),
-):
-    """Import prompts from a JSON file upload."""
-    if not body.prompts:
-        raise HTTPException(status_code=400, detail="No prompts provided")
-    count = await import_prompts_from_json(body.prompts, project.id, db)
 
-    # Record import history
-    db.add(JsonImport(
-        project_id=project.id,
-        entity_type="prompts",
-        filename=body.filename,
-        record_count=count,
-    ))
-    await db.commit()
-
-    return PromptSyncResponse(synced=count, message=f"Imported {count} prompts")
-
-
-@router.post(
-    "/sync/{integration_id}",
-    response_model=PromptSyncResponse,
-    dependencies=[require_write("improve", "prompts")],
-)
-async def sync_integration_prompts(
-    integration_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    project: Project = Depends(get_current_project),
-):
-    """Import/sync prompts from a connected platform."""
-    try:
-        count = await sync_prompts(integration_id, project.id, db)
-        return PromptSyncResponse(synced=count, message=f"Synced {count} prompts")
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-# ── Clustering & exclusions (collection-level; declared before /{prompt_id}) ──
-
-@router.post(
-    "/cluster",
-    response_model=PromptSyncResponse,
-    dependencies=[require_write("improve", "prompts")],
-)
-async def recluster_prompts(
-    db: AsyncSession = Depends(get_db),
-    project: Project = Depends(get_current_project),
-    user: User = Depends(get_current_user),
-):
-    """Re-run the LLM grouping over the project's GitHub prompts."""
-    try:
-        count = await cluster_project_prompts(
-            db, project.id, user_settings=merge_llm_settings(project.settings, user.settings)
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Clustering failed: {exc}") from exc
-    return PromptSyncResponse(synced=count, message=f"Organized {count} prompts")
-
-
-@router.post(
-    "/clusters/move",
-    response_model=ClusterMoveResult,
-    dependencies=[require_write("improve", "prompts")],
-)
-async def move_prompt_cluster(
-    body: ClusterMoveRequest,
-    db: AsyncSession = Depends(get_db),
-    project: Project = Depends(get_current_project),
-):
-    """Bulk rename/move a cluster node (rewrite the path prefix)."""
-    moved = await move_cluster(db, project.id, body.from_path, body.to_path)
-    return ClusterMoveResult(moved=moved)
-
-
-@router.get("/exclusions", response_model=ExclusionListResponse)
-async def list_exclusions(
-    db: AsyncSession = Depends(get_db),
-    project: Project = Depends(get_current_project),
-):
-    """List source locations excluded from GitHub sync."""
-    integration = await get_or_create_github_integration(project.id, db)
-    items = [
-        ExclusionItem(external_id=ext, name=ext.split("::", 1)[-1])
-        for ext in sorted(get_excluded_ids(integration))
-    ]
-    await db.commit()
-    return ExclusionListResponse(data=items, total=len(items))
-
-
-@router.delete("/exclusions", dependencies=[require_write("improve", "prompts")])
-async def delete_exclusion(
-    body: RemoveExclusionRequest,
-    db: AsyncSession = Depends(get_db),
-    project: Project = Depends(get_current_project),
-):
-    """Lift an exclusion so the location can be imported again."""
-    integration = await get_or_create_github_integration(project.id, db)
-    await remove_exclusion(integration, body.external_id, db)
-    await db.commit()
-    return {"status": "ok"}
-
-
-@router.get("/{prompt_id}", response_model=PromptOut)
-async def get_single_prompt(
-    prompt_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    project: Project = Depends(get_current_project),
-):
-    """Get a prompt by ID."""
-    prompt = await get_prompt(prompt_id, project.id, db)
-    if not prompt:
-        raise HTTPException(status_code=404, detail="Prompt not found")
-    return _prompt_to_out(prompt)
+router = APIRouter()
 
 
 @router.get("/{prompt_id}/reviews", response_model=PromptReviewListResponse)
@@ -390,28 +186,6 @@ async def trigger_github_extraction(
     _extraction_tasks[extraction.id] = task
 
     return {"extraction_id": str(extraction.id), "status": "pending"}
-
-
-async def _resolve_repo_or_400(project: Project, db: AsyncSession) -> tuple[str, str | None]:
-    """Resolve the local repo path + repo_full_name, raising HTTP errors as the
-    extraction endpoints expect."""
-    try:
-        repo_path = await resolve_project_repo(project, db)
-    except RepoPathError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except (github_app.GithubAppDisabledError, github_app.GithubAppError) as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    if not repo_path:
-        raise HTTPException(
-            status_code=400,
-            detail="No code repository is connected for this project. Connect one in Settings → GitHub.",
-        )
-    installation = (
-        await db.execute(
-            select(GithubInstallation).where(GithubInstallation.project_id == project.id)
-        )
-    ).scalar_one_or_none()
-    return repo_path, (installation.repo_full_name if installation else None)
 
 
 @router.post(
@@ -586,6 +360,19 @@ async def recheck_github_prompt(
         raise HTTPException(status_code=500, detail=f"Re-check failed: {exc}") from exc
 
     return PromptRecheckResult(prompt=_prompt_to_out(prompt), changed=changed)
+
+
+@router.get("/{prompt_id}", response_model=PromptOut)
+async def get_single_prompt(
+    prompt_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Get a prompt by ID."""
+    prompt = await get_prompt(prompt_id, project.id, db)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return _prompt_to_out(prompt)
 
 
 @router.patch(
