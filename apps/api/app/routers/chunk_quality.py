@@ -1,0 +1,155 @@
+"""Chunk/metadata quality endpoints.
+
+The read-side counterpart to the index explorer and source registry: samples a
+provider's index and scores the quality of the indexed chunks themselves
+(size/consistency, duplication/overlap, metadata completeness, parser quality).
+
+Lives under the same permission page as those views ("data-sources").
+"""
+
+import asyncio
+import logging
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth import get_current_project, require_section, require_write
+from app.db import async_session, get_db
+from app.models.chunk_quality import ChunkQualityRun
+from app.models.index_providers import IndexProvider
+from app.models.project import Project
+from app.routers.chunk_quality_worker import run_chunk_quality_analysis
+from app.schemas.chunk_quality import (
+    ChunkQualityRunCreateResponse,
+    ChunkQualityRunRequest,
+    ChunkQualityRunResponse,
+    ChunkQualityRunSummary,
+    ChunkQualityRunSummaryListResponse,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/api/chunk-quality",
+    tags=["chunk-quality"],
+    dependencies=[require_section("observe", "data-sources")],
+)
+
+# Keep background tasks referenced so they aren't garbage-collected mid-run.
+_tasks: dict[UUID, asyncio.Task] = {}
+
+
+def _not_found(what: str) -> HTTPException:
+    return HTTPException(
+        status_code=404, detail={"error": {"code": "NOT_FOUND", "message": f"{what} not found"}}
+    )
+
+
+async def _provider_or_404(db: AsyncSession, provider_id: UUID, project: Project) -> IndexProvider:
+    provider = (
+        await db.execute(
+            select(IndexProvider).where(
+                IndexProvider.id == provider_id, IndexProvider.project_id == project.id
+            )
+        )
+    ).scalar_one_or_none()
+    if provider is None:
+        raise _not_found("Index provider")
+    return provider
+
+
+@router.post(
+    "/runs",
+    response_model=ChunkQualityRunCreateResponse,
+    status_code=202,
+    dependencies=[require_write("observe", "data-sources")],
+)
+async def create_run(
+    body: ChunkQualityRunRequest,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    await _provider_or_404(db, body.provider_id, project)
+    run = ChunkQualityRun(
+        project_id=project.id,
+        provider_id=body.provider_id,
+        status="pending",
+        sample_size=body.sample_size,
+    )
+    db.add(run)
+    await db.flush()
+    await db.refresh(run)
+    run_id = run.id
+    # Commit before spawning: the worker opens its own session and must see the row.
+    await db.commit()
+
+    task = asyncio.create_task(
+        run_chunk_quality_analysis(
+            run_id=run_id,
+            project_id=project.id,
+            provider_id=body.provider_id,
+            sample_size=body.sample_size,
+            db_factory=async_session,
+        )
+    )
+    _tasks[run_id] = task
+    task.add_done_callback(lambda _t, rid=run_id: _tasks.pop(rid, None))
+    return ChunkQualityRunCreateResponse(run_id=run_id, status="pending")
+
+
+def _summary_from_run(run: ChunkQualityRun) -> ChunkQualityRunSummary:
+    summary = (run.results or {}).get("summary", {})
+    return ChunkQualityRunSummary(
+        id=run.id,
+        provider_id=run.provider_id,
+        status=run.status,
+        sample_size=run.sample_size,
+        total_docs=run.total_docs,
+        processed=run.processed,
+        score=summary.get("score"),
+        critical=int(summary.get("critical") or 0),
+        warn=int(summary.get("warn") or 0),
+        info=int(summary.get("info") or 0),
+        error=run.error,
+        created_at=run.created_at,
+        completed_at=run.completed_at,
+    )
+
+
+@router.get("/runs", response_model=ChunkQualityRunSummaryListResponse)
+async def list_runs(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    result = await db.execute(
+        select(ChunkQualityRun)
+        .where(
+            ChunkQualityRun.project_id == project.id,
+            ChunkQualityRun.provider_id == provider_id,
+        )
+        .order_by(ChunkQualityRun.created_at.desc())
+    )
+    return ChunkQualityRunSummaryListResponse(
+        data=[_summary_from_run(r) for r in result.scalars().all()]
+    )
+
+
+@router.get("/runs/{run_id}", response_model=ChunkQualityRunResponse)
+async def get_run(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    run = (
+        await db.execute(
+            select(ChunkQualityRun).where(
+                ChunkQualityRun.id == run_id, ChunkQualityRun.project_id == project.id
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise _not_found("Chunk quality run")
+    return run

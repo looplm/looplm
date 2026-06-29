@@ -342,6 +342,97 @@ class AzureSearchIndexProvider(BaseIndexProvider):
                 continue
         return out
 
+    # Stratifying across more buckets than this would cost one search call each,
+    # so beyond it we fall back to a flat paged sample.
+    _MAX_STRATA = 40
+    _SCAN_PAGE = 1000  # Azure's per-request `top` ceiling.
+
+    @staticmethod
+    def _strip_internal(doc: dict) -> dict:
+        return {k: v for k, v in doc.items() if not k.startswith("@")}
+
+    async def _default_stratify_field(self) -> str | None:
+        """A facetable scalar string field to spread the sample across.
+
+        Prefers common corpus-partitioning names, else the first facetable scalar
+        string field. ``None`` when the index exposes no suitable field.
+        """
+        fields = await self._get_fields()
+        facetable = [
+            f for f in fields.values()
+            if f.facetable and not f.is_collection and f.type == "Edm.String"
+        ]
+        if not facetable:
+            return None
+        preferred = ("source_type", "content_type", "doc_type", "type", "sparte")
+        by_name = {f.name: f for f in facetable}
+        for name in preferred:
+            if name in by_name:
+                return name
+        facetable.sort(key=lambda f: f.name)
+        return facetable[0].name
+
+    async def _fetch_full(self, *, filter_expr: str | None, top: int) -> list[dict]:
+        """Up to ``top`` documents with every field, internal keys stripped."""
+        results = await self._search_client.search(
+            search_text="*", filter=filter_expr, top=max(1, top)
+        )
+        out: list[dict] = []
+        async for doc in results:
+            out.append(self._strip_internal(dict(doc)))
+        return out
+
+    async def sample_corpus(self, n: int, *, stratify_by: str | None = None) -> list[dict]:
+        if n <= 0:
+            return []
+
+        field_name = stratify_by or await self._default_stratify_field()
+        if field_name is not None:
+            info = (await self._get_fields()).get(field_name)
+            if info is None or not info.facetable:
+                field_name = None
+
+        # Stratified path: allocate the budget across the field's buckets so the
+        # sample mirrors the corpus' composition rather than its insertion order.
+        if field_name is not None:
+            buckets = await self.get_partition_distribution(field_name)
+            total = sum(b.doc_count for b in buckets)
+            if buckets and total > 0 and len(buckets) <= self._MAX_STRATA:
+                out: list[dict] = []
+                for b in buckets:
+                    alloc = max(1, round(n * b.doc_count / total))
+                    alloc = min(alloc, b.doc_count)
+                    esc = _odata_escape(b.value)
+                    clause = (
+                        f"{field_name}/any(t: t eq '{esc}')"
+                        if info and info.is_collection
+                        else f"{field_name} eq '{esc}'"
+                    )
+                    out.extend(await self._fetch_full(filter_expr=clause, top=alloc))
+                    if len(out) >= n:
+                        break
+                return out[:n]
+
+        # Flat fallback (no facetable field to stratify on): page the corpus in
+        # index order until we have n. Less representative than the stratified
+        # path, but the only option when the index exposes no facets.
+        return await self._paged_scan(n)
+
+    async def _paged_scan(self, n: int) -> list[dict]:
+        """Collect ~n full docs by paging `top`+`$skip` (Azure caps $skip at 100k)."""
+        out: list[dict] = []
+        skip = 0
+        while len(out) < n and skip < 100_000:
+            results = await self._search_client.search(
+                search_text="*", top=self._SCAN_PAGE, skip=skip
+            )
+            page = [self._strip_internal(dict(doc)) async for doc in results]
+            if not page:
+                break
+            out.extend(page)
+            skip += self._SCAN_PAGE
+        return out[:n]
+
     async def aclose(self) -> None:
         await self._search_client.close()
         await self._index_client.close()

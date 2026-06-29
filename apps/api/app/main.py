@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.config import settings
 from app.routers import (
-    admin, analysis, analytics, advisor, auth_router, costs_overview, dashboard, datasets, evaluations,
+    admin, analysis, analytics, advisor, auth_router, chunk_quality, costs_overview, dashboard, datasets, evaluations,
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
     index_explorer, ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent,
     permissions, project_members, projects, prompts, rag_coverage, retrieval, route_analysis, source_registry, trace_detail,
@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         ChunkRelevanceLabel,
         TestCaseLabelingStatus,
     )
+    from app.models.chunk_quality import ChunkQualityRun  # noqa: F401 — ensure table is created
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -219,6 +220,7 @@ app.include_router(retrieval.router)
 app.include_router(chunk_labels.router)
 app.include_router(index_explorer.router)
 app.include_router(source_registry.router)
+app.include_router(chunk_quality.router)
 app.include_router(imports.router)
 app.include_router(code_agent.router)
 app.include_router(github_oauth.router)

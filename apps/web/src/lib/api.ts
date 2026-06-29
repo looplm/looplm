@@ -186,6 +186,7 @@ export * from "./api/rag-coverage-api";
 export * from "./api/retrieval-api";
 export * from "./api/index-explorer-api";
 export * from "./api/source-registry-api";
+export * from "./api/chunk-quality-api";
 export * from "./api/issues-api";
 export * from "./api/version";
 export * from "./api/admin";

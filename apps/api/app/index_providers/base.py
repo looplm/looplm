@@ -146,6 +146,22 @@ class BaseIndexProvider(ABC):
         """
         return {}
 
+    async def sample_corpus(self, n: int, *, stratify_by: str | None = None) -> list[dict]:
+        """Up to ``n`` full-field chunk documents, sampled across the whole corpus.
+
+        Powers chunk/metadata quality analysis: the bodies and metadata of a
+        representative sample are read once and analysed offline. Each item is a
+        plain ``{field: value}`` dict with all retrievable fields (internal
+        ``@``-prefixed keys stripped).
+
+        ``stratify_by`` is an optional facetable field to draw the sample evenly
+        across (so the sample isn't biased toward index/insertion order); when
+        ``None`` the provider picks a sensible default or falls back to a flat
+        even-spaced sample. Optional capability — backends without an efficient
+        scan keep the default.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support sample_corpus")
+
     async def aclose(self) -> None:
         """Release any underlying clients. Override if needed; safe no-op default."""
         return None
