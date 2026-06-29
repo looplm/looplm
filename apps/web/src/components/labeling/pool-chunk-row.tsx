@@ -50,12 +50,10 @@ export function PoolChunkRow({
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap mb-1.5">
+          {/* Per-head rank badges are the honest signal; the raw backend score isn't shown
+              because each head scores on a different, incomparable scale (BM25 unbounded vs
+              RRF ~1 vs reranker 0-4). */}
           <ProvenanceBadges provenance={chunk.provenance} ranks={chunk.ranks} />
-          {chunk.score != null && (
-            <span className="text-[10px] font-mono text-gray-400 dark:text-slate-500">
-              score {chunk.score.toFixed(2)}
-            </span>
-          )}
         </div>
 
         {expanded && docState === "loading" ? (

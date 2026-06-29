@@ -52,6 +52,22 @@ def test_build_pool_view_overlays_labels_and_provenance():
     assert v1.relevance is None and v1.ai_relevance == 1
 
 
+def test_build_pool_view_orders_reranked_first():
+    # Reranked first (by reranked rank), then hybrid, then vector, then keyword.
+    pool = PoolResult(
+        chunks=[
+            PooledChunk(chunk_id="kw", provenance=["keyword"], ranks={"keyword": 1}),
+            PooledChunk(chunk_id="rerank3", provenance=["hybrid", "semantic"], ranks={"hybrid": 2, "semantic": 3}),
+            PooledChunk(chunk_id="hyb1", provenance=["hybrid", "vector"], ranks={"hybrid": 1, "vector": 5}),
+            PooledChunk(chunk_id="rerank1", provenance=["semantic"], ranks={"semantic": 1}),
+        ],
+        heads_ran=["keyword", "vector", "hybrid", "semantic"],
+        heads_failed={},
+    )
+    out = build_pool_view("t", "q", pool, provider_connected=True, labels_by_key={})
+    assert [c.chunk_id for c in out.chunks] == ["rerank1", "rerank3", "hyb1", "kw"]
+
+
 def test_build_labeling_cases_from_test_cases():
     cases, total = build_labeling_cases([_tc("a", "query a"), _tc("b", "query b")])
     assert total == 2

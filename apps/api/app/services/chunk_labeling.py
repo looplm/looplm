@@ -126,6 +126,19 @@ def build_labeling_view(
     )
 
 
+# Head priority for ordering the pool: the semantic reranker is the system's final ranking, then
+# hybrid (RRF), then vector, then keyword. A chunk sorts by the best (highest-priority) head that
+# returned it, at that head's rank — so reranked chunks lead, in reranked order.
+_POOL_ORDER_HEADS = ("semantic", "hybrid", "vector", "keyword")
+
+
+def _pool_order_key(ranks: dict[str, int]) -> tuple[int, int]:
+    for priority, head in enumerate(_POOL_ORDER_HEADS):
+        if head in ranks:
+            return (priority, ranks[head])
+    return (len(_POOL_ORDER_HEADS), 0)  # heads we don't rank on (e.g. trace) sort last
+
+
 def build_pool_view(
     test_id: str,
     input_text: str | None,
@@ -140,13 +153,15 @@ def build_pool_view(
     """Shape an assembled :class:`PoolResult` into the labeling-pool API response.
 
     Overlays any existing human label (and labeler) onto each pooled chunk, keyed by
-    ``(test_id, chunk_id)`` — so a chunk already judged in any run shows its verdict. Pool
-    order is preserved (trace-seeded chunks first, then index-discovered).
+    ``(test_id, chunk_id)``. Chunks are ordered reranked-first: by the rank the semantic reranker
+    gave them, falling back to hybrid → vector → keyword for chunks a higher-priority head didn't
+    return — so the list mirrors the system's true final ranking, with judged-relevant candidates
+    near the top.
     """
     labeler_by_key = labeler_by_key or {}
     ai_labels_by_key = ai_labels_by_key or {}
     chunks: list[PooledChunkForLabeling] = []
-    for pc in pool.chunks:
+    for pc in sorted(pool.chunks, key=lambda c: _pool_order_key(c.ranks)):
         key = (test_id, pc.chunk_id)
         chunks.append(
             PooledChunkForLabeling(
