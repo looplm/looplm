@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { updateProject, type Project } from "@/lib/api";
+import { updateProject, testEmbedding, type EmbeddingTestResult, type Project } from "@/lib/api";
 import { inputClass, labelClass, type Provider } from "./llm-shared";
 
 interface EvaluatorLlmProps {
@@ -13,6 +13,8 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<EmbeddingTestResult | null>(null);
 
   // Evaluator LLM (project-level — shared by all project members)
   const [provider, setProvider] = useState<Provider>("openai");
@@ -48,9 +50,27 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
       setEmbeddingDimensions(s.embedding_dimensions != null ? String(s.embedding_dimensions) : "");
       setError("");
       setSaved(false);
+      setTestResult(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId]);
+
+  async function handleTestEmbedding() {
+    if (!currentProjectId) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(await testEmbedding(currentProjectId));
+    } catch (e: unknown) {
+      setTestResult({
+        ok: false,
+        configured: true,
+        error: e instanceof Error ? e.message : "Test failed",
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   async function handleSave() {
     if (!currentProjectId) return;
@@ -79,6 +99,7 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
       setOpenaiKey("");
       setAzureKey("");
       setSaved(true);
+      setTestResult(null);
       setTimeout(() => setSaved(false), 3000);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save settings");
@@ -223,13 +244,39 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
           <p className="text-sm text-red-500">{error}</p>
         )}
 
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          {saving ? "Saving..." : saved ? "Saved!" : "Save"}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {saving ? "Saving..." : saved ? "Saved!" : "Save"}
+          </button>
+          <button
+            onClick={handleTestEmbedding}
+            disabled={testing}
+            title="Embed a probe string with the saved embedding config and report the result. Save first."
+            className="px-4 py-2 border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-50 text-sm font-medium rounded-lg transition-colors"
+          >
+            {testing ? "Testing..." : "Test embedding"}
+          </button>
+        </div>
+
+        {testResult && (
+          <p
+            className={`text-sm ${
+              testResult.ok
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-red-500 dark:text-red-400"
+            }`}
+          >
+            {testResult.ok
+              ? `✓ Embedding works — ${testResult.dimensions} dimensions${
+                  testResult.model ? ` (${testResult.model})` : ""
+                }.`
+              : `✗ ${testResult.error || "Embedding test failed."}`}
+          </p>
+        )}
       </div>
       ) : (
         <p className="text-sm text-gray-400 dark:text-slate-500 italic">

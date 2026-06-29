@@ -30,6 +30,10 @@ class QueryEmbedder:
         self._model = model
         self._dimensions = dimensions
 
+    @property
+    def model(self) -> str:
+        return self._model
+
     async def embed(self, text: str) -> list[float]:
         kwargs: dict = {"model": self._model, "input": text}
         # `dimensions` is only honoured by text-embedding-3* models; pass it when set.

@@ -55,3 +55,13 @@ class RetrievalSourceCandidates(BaseModel):
 class RetrievalSourceDetection(BaseModel):
     suggestion: RetrievalSourceSuggestion | None = None
     candidates: RetrievalSourceCandidates
+
+
+class EmbeddingTestResult(BaseModel):
+    """Result of a live embedding-config test (does the embedding endpoint work?)."""
+
+    ok: bool
+    configured: bool
+    model: str | None = None
+    dimensions: int | None = None
+    error: str | None = None

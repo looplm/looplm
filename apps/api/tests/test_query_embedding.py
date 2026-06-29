@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from httpx import AsyncClient
 
 from app.services import query_embedding
 from app.services.query_embedding import build_query_embedder, embed_query
@@ -128,3 +129,62 @@ async def test_vector_search_uses_vectorized_query_when_vector_given(monkeypatch
     # Without a vector → text query (the path that needs a server-side vectorizer).
     await p.search_documents("q", 5, None, mode="vector")
     assert isinstance(captured["vector_queries"][0], VectorizableTextQuery)
+
+
+# --- test-embedding endpoint ---
+
+
+class _StubEmbedder:
+    def __init__(self, *, model="text-embedding-3-large", fail=False):
+        self._model = model
+        self._fail = fail
+
+    @property
+    def model(self):
+        return self._model
+
+    async def embed(self, text):
+        if self._fail:
+            raise RuntimeError("401 Unauthorized")
+        return [0.0, 0.1, 0.2]
+
+    async def aclose(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_test_embedding_endpoint_unconfigured(client: AsyncClient, auth_headers, test_project):
+    resp = await client.post(
+        f"/api/projects/{test_project.id}/test-embedding", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False and body["configured"] is False
+
+
+@pytest.mark.asyncio
+async def test_test_embedding_endpoint_ok(client: AsyncClient, auth_headers, test_project, monkeypatch):
+    import app.routers.projects as projects_router
+
+    monkeypatch.setattr(projects_router, "build_query_embedder", lambda s: _StubEmbedder())
+    resp = await client.post(
+        f"/api/projects/{test_project.id}/test-embedding", headers=auth_headers
+    )
+    body = resp.json()
+    assert body["ok"] is True and body["dimensions"] == 3
+    assert body["model"] == "text-embedding-3-large"
+
+
+@pytest.mark.asyncio
+async def test_test_embedding_endpoint_reports_provider_error(
+    client: AsyncClient, auth_headers, test_project, monkeypatch
+):
+    import app.routers.projects as projects_router
+
+    monkeypatch.setattr(projects_router, "build_query_embedder", lambda s: _StubEmbedder(fail=True))
+    resp = await client.post(
+        f"/api/projects/{test_project.id}/test-embedding", headers=auth_headers
+    )
+    body = resp.json()
+    assert body["ok"] is False and body["configured"] is True
+    assert "401" in body["error"]

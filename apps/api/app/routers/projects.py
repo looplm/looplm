@@ -14,6 +14,7 @@ from app.models.project import Project
 from app.models.project_member import ALL_SECTIONS, ProjectMember
 from app.models.user import User
 from app.schemas.projects import (
+    EmbeddingTestResult,
     ProjectCreate,
     ProjectListResponse,
     ProjectResponse,
@@ -21,8 +22,9 @@ from app.schemas.projects import (
     RetrievalSourceDetection,
     TransferOwnership,
 )
-from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
+from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService, merge_llm_settings
 from app.services.llm_usage_tracker import record_llm_usage
+from app.services.query_embedding import build_query_embedder
 from app.services.retrieval_detection import detect_retrieval_source
 
 logger = logging.getLogger(__name__)
@@ -208,6 +210,46 @@ async def detect_retrieval_source_endpoint(
         suggestion=result.get("suggestion"),
         candidates=result.get("candidates", {"payload_keys": [], "spans": []}),
     )
+
+
+@router.post("/{project_id}/test-embedding", response_model=EmbeddingTestResult)
+async def test_embedding(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> EmbeddingTestResult:
+    """Embed a tiny probe string with the project's saved embedding config.
+
+    Owner-only. Confirms the embedding deployment/model + credentials actually work and reports
+    the vector dimensions returned (so the user can verify they match their index's vector field).
+    Save settings before testing — this reads the persisted project settings.
+    """
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.owner_id == _user.id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    embedder = build_query_embedder(merge_llm_settings(project.settings, _user.settings))
+    if embedder is None:
+        return EmbeddingTestResult(
+            ok=False,
+            configured=False,
+            error="No embedding model configured. Set the embedding deployment/model and save.",
+        )
+    try:
+        vector = await embedder.embed("connection test")
+        return EmbeddingTestResult(
+            ok=True, configured=True, model=embedder.model, dimensions=len(vector)
+        )
+    except Exception as exc:  # noqa: BLE001 — surface the provider error to the user
+        logger.warning("Embedding test failed for project %s: %s", project_id, exc)
+        return EmbeddingTestResult(
+            ok=False, configured=True, model=embedder.model, error=str(exc)[:500]
+        )
+    finally:
+        await embedder.aclose()
 
 
 @router.post("/{project_id}/transfer-ownership", response_model=ProjectResponse)

@@ -264,6 +264,17 @@ export const detectRetrievalSource = (projectId: string) =>
     { method: "POST" },
   );
 
+export interface EmbeddingTestResult {
+  ok: boolean;
+  configured: boolean;
+  model?: string | null;
+  dimensions?: number | null;
+  error?: string | null;
+}
+
+export const testEmbedding = (projectId: string) =>
+  request<EmbeddingTestResult>(`/api/projects/${projectId}/test-embedding`, { method: "POST" });
+
 // --- User Settings ---
 
 export interface UserSettings {
