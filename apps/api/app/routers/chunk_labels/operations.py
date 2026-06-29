@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +43,8 @@ from ._helpers import (
     _resolve_dataset,
     assemble_case_pool,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -293,9 +297,15 @@ async def ai_judge_case(
             detail={"error": {"code": "LLM_NOT_CONFIGURED", "message": str(exc)}},
         ) from exc
     except Exception as exc:  # noqa: BLE001
+        logger.exception("AI judge failed for test_id=%s", body.test_id)
         raise HTTPException(
             status_code=502,
-            detail={"error": {"code": "AI_JUDGE_FAILED", "message": "The AI judge is unavailable. Try again."}},
+            detail={
+                "error": {
+                    "code": "AI_JUDGE_FAILED",
+                    "message": f"The AI judge call failed: {exc}",
+                }
+            },
         ) from exc
 
     await record_llm_usage(
