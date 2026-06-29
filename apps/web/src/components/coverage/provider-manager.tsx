@@ -23,6 +23,7 @@ interface FormState {
   endpoint: string;
   apiKey: string;
   indexName: string;
+  semanticConfig: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -32,6 +33,7 @@ const EMPTY_FORM: FormState = {
   endpoint: "",
   apiKey: "",
   indexName: "",
+  semanticConfig: "",
 };
 
 export function ProviderManager({
@@ -82,6 +84,9 @@ export function ProviderManager({
       endpoint: p.base_url || "",
       apiKey: "",
       indexName: String((p.config as { index_name?: string })?.index_name || ""),
+      semanticConfig: String(
+        (p.config as { semantic_configuration?: string })?.semantic_configuration || "",
+      ),
       // apiKey left blank on edit — only sent if the user types a new one
     });
   }
@@ -91,7 +96,8 @@ export function ProviderManager({
     if (!form) return;
     setSaving(true);
     try {
-      const config = { index_name: form.indexName.trim() };
+      const config: Record<string, string> = { index_name: form.indexName.trim() };
+      if (form.semanticConfig.trim()) config.semantic_configuration = form.semanticConfig.trim();
       if (form.id) {
         await updateIndexProvider(form.id, {
           name: form.name.trim(),
@@ -282,6 +288,21 @@ export function ProviderManager({
                     required
                     className={inputCls}
                   />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-slate-400 mb-1">
+                    Semantic configuration <span className="text-gray-400">(optional)</span>
+                  </label>
+                  <input
+                    value={form.semanticConfig}
+                    onChange={(e) => setForm({ ...form, semanticConfig: e.target.value })}
+                    placeholder="default-semantic-config"
+                    className={inputCls}
+                  />
+                  <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+                    Enables the semantic reranker (the &quot;Reranked&quot; head) — the index&apos;s
+                    semantic configuration name. Leave blank if your index has none.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 dark:text-slate-400 mb-1">

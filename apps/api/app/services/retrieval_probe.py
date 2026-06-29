@@ -18,9 +18,10 @@ from uuid import UUID
 from app.cache import cache_get_json, cache_set_json
 from app.index_providers.base import BaseIndexProvider
 
-# Preference order for the single "system" head, richest first. The first one the index can
-# serve wins (others raise NotImplementedError / error and are skipped).
-PROBE_MODES = ("hybrid", "vector", "keyword")
+# Preference order for the single "system" head, richest first: semantic rerank (the true final
+# ranking) → hybrid (RRF) → vector → keyword. The first head the index can serve wins (others
+# raise NotImplementedError / error and are skipped).
+PROBE_MODES = ("semantic", "hybrid", "vector", "keyword")
 
 # Probe results are stable until the index is re-indexed; cache for the same window as the pool.
 _PROBE_CACHE_TTL = 21_600  # 6 hours

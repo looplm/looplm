@@ -56,11 +56,20 @@ class _FieldInfo:
 
 
 class AzureSearchIndexProvider(BaseIndexProvider):
-    def __init__(self, *, endpoint: str, api_key: str, index_name: str) -> None:
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        api_key: str,
+        index_name: str,
+        semantic_config: str | None = None,
+    ) -> None:
         if not endpoint or not api_key or not index_name:
             raise ValueError("Azure Search provider requires endpoint, api_key and index_name")
         self._endpoint = endpoint
         self._index_name = index_name
+        # Name of the index's semantic configuration, enabling the ``semantic`` (rerank) head.
+        self._semantic_config = semantic_config or None
         self._credential = AzureKeyCredential(api_key)
         self._search_client = SearchClient(
             endpoint=endpoint, index_name=index_name, credential=self._credential
@@ -248,36 +257,49 @@ class AzureSearchIndexProvider(BaseIndexProvider):
             "select": select or None,
             "top": top,
         }
-        if mode in ("vector", "hybrid"):
+        if mode not in ("keyword", "vector", "hybrid", "semantic"):
+            raise ValueError(f"unknown search mode: {mode!r}")
+
+        # Dense sub-query: required for vector/hybrid; optional for semantic (rerank over hybrid
+        # when a vector is available, else rerank the keyword results).
+        needs_vector = mode in ("vector", "hybrid")
+        if needs_vector or (mode == "semantic" and query_vector is not None):
             vector_field = await self._vector_field()
             if not vector_field:
-                raise NotImplementedError(
-                    f"index '{self._index_name}' has no vector field for {mode} search"
-                )
-            if query_vector is not None:
+                if needs_vector:
+                    raise NotImplementedError(
+                        f"index '{self._index_name}' has no vector field for {mode} search"
+                    )
+            elif query_vector is not None:
                 # We embedded the query ourselves — send the raw vector. Works whether or not the
                 # index declares a server-side vectorizer on this field's profile.
                 from azure.search.documents.models import VectorizedQuery
 
-                vq = VectorizedQuery(
-                    vector=query_vector, k_nearest_neighbors=top, fields=vector_field
-                )
+                kwargs["vector_queries"] = [
+                    VectorizedQuery(vector=query_vector, k_nearest_neighbors=top, fields=vector_field)
+                ]
             else:
                 # No precomputed vector: ask Azure to embed the text, which requires the index to
                 # have a vectorizer on this field's profile (else Azure rejects the query).
                 from azure.search.documents.models import VectorizableTextQuery
 
-                vq = VectorizableTextQuery(
-                    text=query, k_nearest_neighbors=top, fields=vector_field
+                kwargs["vector_queries"] = [
+                    VectorizableTextQuery(text=query, k_nearest_neighbors=top, fields=vector_field)
+                ]
+
+        # Keyword text: present for everything except vector-only (which ranks purely on ANN
+        # score). hybrid/semantic fuse keyword + vector (RRF on Azure).
+        kwargs["search_text"] = None if mode == "vector" else query
+
+        if mode == "semantic":
+            # L2 semantic reranking on top of the (hybrid) result — the system's true final
+            # ranking. Needs the index's semantic configuration name.
+            if not self._semantic_config:
+                raise NotImplementedError(
+                    f"index '{self._index_name}' has no semantic configuration for rerank"
                 )
-            kwargs["vector_queries"] = [vq]
-            # hybrid = keyword + vector fused (Azure applies RRF automatically); vector-only
-            # omits search_text so ranking is purely the ANN score.
-            kwargs["search_text"] = query if mode == "hybrid" else None
-        elif mode == "keyword":
-            kwargs["search_text"] = query
-        else:
-            raise ValueError(f"unknown search mode: {mode!r}")
+            kwargs["query_type"] = "semantic"
+            kwargs["semantic_configuration_name"] = self._semantic_config
 
         results = await self._search_client.search(**kwargs)
         docs: list[CorpusDoc] = []
@@ -285,7 +307,10 @@ class AzureSearchIndexProvider(BaseIndexProvider):
             snippet = doc.get("chunk_text")
             if isinstance(snippet, str) and len(snippet) > 600:
                 snippet = snippet[:600] + "…"
-            score = doc.get("@search.score")
+            # On the semantic head the reranker score is the meaningful one; fall back otherwise.
+            score = doc.get("@search.reranker_score")
+            if score is None:
+                score = doc.get("@search.score")
             docs.append(
                 CorpusDoc(
                     # Key field first: this is the chunk/doc key that dedups against the

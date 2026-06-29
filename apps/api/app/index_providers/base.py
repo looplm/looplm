@@ -64,8 +64,11 @@ class CorpusDoc:
 
 
 # Retrieval strategies a provider can pool candidates from. ``keyword`` is BM25/full-text,
-# ``vector`` is dense ANN over the embedding field, ``hybrid`` fuses both (RRF on Azure).
-SEARCH_MODES = ("keyword", "vector", "hybrid")
+# ``vector`` is dense ANN over the embedding field, ``hybrid`` fuses both (RRF on Azure), and
+# ``semantic`` applies the backend's L2 semantic reranker on top of the hybrid result (the true
+# final ranking when the system reranks). A provider raises ``NotImplementedError`` for modes it
+# can't serve (e.g. no vector field, or no semantic configuration set) so the pool records them.
+SEARCH_MODES = ("keyword", "vector", "hybrid", "semantic")
 
 
 class BaseIndexProvider(ABC):

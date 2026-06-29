@@ -29,6 +29,7 @@ def build_index_provider(provider: IndexProvider) -> BaseIndexProvider:
             endpoint=provider.base_url or config.get("endpoint", ""),
             api_key=api_key,
             index_name=index_name,
+            semantic_config=config.get("semantic_configuration") or None,
         )
 
     raise ValueError(f"Unsupported index provider type: {provider.type}")

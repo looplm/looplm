@@ -131,6 +131,33 @@ async def test_vector_search_uses_vectorized_query_when_vector_given(monkeypatch
     assert isinstance(captured["vector_queries"][0], VectorizableTextQuery)
 
 
+@pytest.mark.asyncio
+async def test_semantic_mode_requires_config_then_sets_query_type():
+    p = _azure_provider()
+    captured: dict = {}
+
+    class _FakeClient:
+        async def search(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeResults([{"id": "c1", "@search.reranker_score": 2.5}])
+
+    p._search_client = _FakeClient()
+
+    # No semantic configuration on the index → the head is unavailable.
+    with pytest.raises(NotImplementedError):
+        await p.search_documents("q", 5, None, mode="semantic")
+
+    # With a semantic configuration → the search sets query_type=semantic + the config name,
+    # and reranks the hybrid result (search_text present; vector added when we have one).
+    p._semantic_config = "default-semantic-config"
+    docs = await p.search_documents("q", 5, None, mode="semantic", query_vector=[0.1, 0.2])
+    assert [d.id for d in docs] == ["c1"]
+    assert captured["query_type"] == "semantic"
+    assert captured["semantic_configuration_name"] == "default-semantic-config"
+    assert captured["search_text"] == "q"  # semantic reranks the keyword/hybrid result
+    assert "vector_queries" in captured  # query_vector supplied → semantic-hybrid
+
+
 # --- test-embedding endpoint ---
 
 
