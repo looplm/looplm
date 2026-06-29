@@ -131,8 +131,8 @@ class ChunkForLabeling(BaseModel):
     pdf_page_number: int | None = None
     score: float | None = None
     rank: int
-    # Current label, or None when this chunk has not been judged yet.
-    relevant: bool | None = None
+    # Current graded relevance label 0..3, or None when this chunk has not been judged yet.
+    relevance: int | None = None
     # Display name of who made the current label, when known.
     labeled_by: str | None = None
 
@@ -184,7 +184,8 @@ class PooledChunkForLabeling(BaseModel):
     provenance: list[str] = Field(default_factory=list)
     # head -> 1-indexed rank in that head's results (e.g. {"vector": 3, "hybrid": 2}).
     ranks: dict[str, int] = Field(default_factory=dict)
-    relevant: bool | None = None
+    # Current graded relevance label 0..3, or None when not yet judged.
+    relevance: int | None = None
     labeled_by: str | None = None
 
 
@@ -204,12 +205,16 @@ class LabelingPoolResponse(BaseModel):
     heads_ran: list[str] = Field(default_factory=list)
     heads_failed: dict[str, str] = Field(default_factory=dict)
     chunks: list[PooledChunkForLabeling] = Field(default_factory=list)
+    # ISO timestamp of when this pool was assembled against the index. Reflects the cached
+    # build time, so the UI can show "pooled 2h ago" and offer an explicit recompute.
+    computed_at: str | None = None
 
 
 class ChunkLabelUpsert(BaseModel):
     test_id: str
     chunk_id: str
-    relevant: bool
+    # Graded relevance 0..3 (validated against the scale in the router).
+    relevance: int
     content_preview: str | None = None
     url: str | None = None
     title: str | None = None
@@ -247,7 +252,8 @@ class PairwiseKappa(BaseModel):
 
 class VoteEntry(BaseModel):
     labeler: str
-    relevant: bool
+    # Graded relevance 0..3 this annotator assigned.
+    relevance: int
 
 
 class Disagreement(BaseModel):
@@ -255,8 +261,8 @@ class Disagreement(BaseModel):
     chunk_id: str
     title: str | None = None
     votes: list[VoteEntry] = Field(default_factory=list)
-    # Current adjudicated gold verdict, or null if not yet resolved.
-    gold: bool | None = None
+    # Current adjudicated gold grade 0..3, or null if not yet resolved.
+    gold: int | None = None
 
 
 class AgreementReport(BaseModel):
@@ -279,7 +285,8 @@ class AgreementReport(BaseModel):
 class GoldUpdate(BaseModel):
     test_id: str
     chunk_id: str
-    relevant: bool
+    # Adjudicated graded relevance 0..3 (validated against the scale in the router).
+    relevance: int
 
 
 class ChunkMetadataResponse(BaseModel):

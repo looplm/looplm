@@ -21,9 +21,13 @@ from typing import Any, Iterable
 
 from app.index_providers.base import SEARCH_MODES, BaseIndexProvider
 
-# Per-head retrieval depth. ~2-3x a typical reported cutoff (recall@5/@10), which after
-# dedup across heads yields the ~20-30 unique chunks/query the pooling methodology targets.
-DEFAULT_POOL_DEPTH = 15
+# Per-head retrieval depth for the broad set. Kept shallow (~10/head): the broad slice feeds
+# aggregate metrics, so pooling deep there just multiplies judging effort for little signal.
+# After dedup across heads this yields ~15-30 unique chunks/query — roughly 2-3x a typical
+# reported cutoff (recall@5/@10), the TREC-style pooling target. Safety/adversarial pool
+# deeper (see SLICE_POOL_DEPTH), where a relevant chunk missed at a low rank is the failure
+# that matters.
+DEFAULT_POOL_DEPTH = 10
 
 # Deeper per-head depth for risk slices where a miss at deep rank is the failure that matters
 # (safety/adversarial). Pools these to ~30-40 unique chunks. Slices not listed use the default.

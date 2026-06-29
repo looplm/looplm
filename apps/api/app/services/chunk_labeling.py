@@ -77,7 +77,7 @@ def build_labeling_cases(results: Iterable[EvalResult]) -> tuple[list[LabelingCa
 def merge_labeling_view(
     cases: list[LabelingCase],
     total_cases: int,
-    labels_by_key: dict[tuple[str, str], bool],
+    labels_by_key: dict[tuple[str, str], int],
     *,
     run_id: str | None = None,
     run_name: str | None = None,
@@ -90,8 +90,9 @@ def merge_labeling_view(
 
     This is the cheap, *per-request* half: it never touches the (large) result rows, only the
     small label/status maps, so it's fine to run on every request even when ``cases`` came from
-    a cache. ``labels_by_key`` maps ``(test_id, chunk_id) -> relevant`` (scoped to the viewing
-    user, so each annotator sees and edits their own judgments). ``labeler_by_key`` maps the same
+    a cache. ``labels_by_key`` maps ``(test_id, chunk_id) -> graded relevance 0..3`` (scoped to
+    the viewing user, so each annotator sees and edits their own judgments). ``labeler_by_key``
+    maps the same
     key to the display name of who made the shown label; ``complete_by_test`` is the manual
     "labeling complete" flag; ``slice_by_test`` is the risk slice. ``labelers_by_test`` lists
     *every* annotator who has judged any chunk in a case; when omitted it falls back to the
@@ -114,11 +115,11 @@ def merge_labeling_view(
             labeler = labeler_by_key.get(key) if key else None
             if label is not None:
                 labeled += 1
-                if label:
+                if label >= 1:  # graded: any non-zero grade counts as relevant
                     relevant += 1
                 if labeler and labeler not in labelers:
                     labelers.append(labeler)
-            merged_chunks.append(ch.model_copy(update={"relevant": label, "labeled_by": labeler}))
+            merged_chunks.append(ch.model_copy(update={"relevance": label, "labeled_by": labeler}))
         out.append(
             c.model_copy(
                 update={
@@ -181,8 +182,9 @@ def build_pool_view(
     pool: PoolResult,
     *,
     provider_connected: bool,
-    labels_by_key: dict[tuple[str, str], bool],
+    labels_by_key: dict[tuple[str, str], int],
     labeler_by_key: dict[tuple[str, str], str] | None = None,
+    computed_at: str | None = None,
 ) -> LabelingPoolResponse:
     """Shape an assembled :class:`PoolResult` into the labeling-pool API response.
 
@@ -203,7 +205,7 @@ def build_pool_view(
                 score=pc.score,
                 provenance=pc.provenance,
                 ranks=pc.ranks,
-                relevant=labels_by_key.get(key),
+                relevance=labels_by_key.get(key),
                 labeled_by=labeler_by_key.get(key),
             )
         )
@@ -215,6 +217,7 @@ def build_pool_view(
         heads_ran=pool.heads_ran,
         heads_failed=pool.heads_failed,
         chunks=chunks,
+        computed_at=computed_at,
     )
 
 

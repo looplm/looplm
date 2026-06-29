@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -28,6 +29,19 @@ from app.models.base import Base
 # default when unset. Safety/adversarial pools are judged deeper (see chunk_pool).
 SLICE_VALUES = ("broad", "safety", "adversarial")
 DEFAULT_SLICE = "broad"
+
+# Graded relevance scale (TREC-style): 0 irrelevant, 1 marginally relevant, 2 relevant,
+# 3 highly relevant. nDCG uses the grade directly as gain; the set-based metrics
+# (recall/precision/hit/bpref) and Cohen's kappa binarize at ``RELEVANT_GRADE`` — any
+# grade >= 1 is "relevant".
+GRADE_MIN = 0
+GRADE_MAX = 3
+RELEVANT_GRADE = 1
+GRADE_LABELS = {0: "Irrelevant", 1: "Marginally relevant", 2: "Relevant", 3: "Highly relevant"}
+
+
+def is_valid_grade(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and GRADE_MIN <= value <= GRADE_MAX
 
 
 class ChunkRelevanceLabel(Base):
@@ -59,7 +73,8 @@ class ChunkRelevanceLabel(Base):
     test_id = Column(String(512), nullable=False)
     # Azure AI Search document key of the chunk.
     chunk_id = Column(String(512), nullable=False)
-    relevant = Column(Boolean, nullable=False)
+    # Graded relevance 0..3 (see GRADE_LABELS). 0 = irrelevant, 3 = highly relevant.
+    relevance = Column(Integer, nullable=False)
 
     # Snapshots so the chunk stays readable in the UI without re-running the eval.
     content_preview = Column(Text, nullable=True)
@@ -96,7 +111,8 @@ class ChunkGoldLabel(Base):
     )
     test_id = Column(String(512), nullable=False)
     chunk_id = Column(String(512), nullable=False)
-    relevant = Column(Boolean, nullable=False)
+    # Adjudicated graded relevance 0..3, overriding the annotator consensus.
+    relevance = Column(Integer, nullable=False)
     decided_by = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

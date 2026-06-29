@@ -7,6 +7,7 @@ chunk-level retrieval metrics are computed against.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,10 +19,13 @@ from app.cache import cache_get_json, cache_set_json
 from app.db import get_db
 from app.index_providers.registry import build_index_provider
 from app.models.chunk_labels import (
+    GRADE_MAX,
+    GRADE_MIN,
     SLICE_VALUES,
     ChunkGoldLabel,
     ChunkRelevanceLabel,
     TestCaseLabelingStatus,
+    is_valid_grade,
 )
 from app.models.evaluations import EvalResult, EvalRun
 from app.models.index_providers import IndexProvider
@@ -44,7 +48,13 @@ from app.services.chunk_labeling import (
     build_pool_view,
     merge_labeling_view,
 )
-from app.services.chunk_pool import DEFAULT_POOL_DEPTH, SLICE_POOL_DEPTH, assemble_pool
+from app.services.chunk_pool import (
+    DEFAULT_POOL_DEPTH,
+    SLICE_POOL_DEPTH,
+    PooledChunk,
+    PoolResult,
+    assemble_pool,
+)
 
 
 def _display_name(email: str | None) -> str | None:
@@ -108,13 +118,14 @@ async def _latest_or_named_run(
 
 async def _project_labels(
     db: AsyncSession, project: Project, *, user_id: UUID | None = None
-) -> tuple[dict[tuple[str, str], bool], dict[tuple[str, str], str], dict[str, list[str]]]:
+) -> tuple[dict[tuple[str, str], int], dict[tuple[str, str], str], dict[str, list[str]]]:
     """Load chunk labels for the labeling view, scoped to one annotator's own judgments.
 
     Returns ``(labels_by_key, labeler_by_key, labelers_by_test)``. The first two are scoped to
-    ``user_id`` (so each annotator sees and edits their *own* relevance verdicts), keyed by
-    ``(test_id, chunk_id)``. ``labelers_by_test`` lists every annotator (across all annotators)
-    who has judged any chunk in a test case, for the per-case "who labeled" display.
+    ``user_id`` (so each annotator sees and edits their *own* graded relevance verdicts), keyed
+    by ``(test_id, chunk_id)`` — ``labels_by_key`` maps to the 0..3 grade. ``labelers_by_test``
+    lists every annotator (across all annotators) who has judged any chunk in a test case, for
+    the per-case "who labeled" display.
     """
     labels = (
         await db.execute(
@@ -131,7 +142,7 @@ async def _project_labels(
         names = {u.id: _display_name(u.email) for u in users}
 
     scoped = [lbl for lbl in labels if user_id is None or lbl.labeled_by == user_id]
-    labels_by_key = {(lbl.test_id, lbl.chunk_id): lbl.relevant for lbl in scoped}
+    labels_by_key = {(lbl.test_id, lbl.chunk_id): lbl.relevance for lbl in scoped}
     labeler_by_key = {
         (lbl.test_id, lbl.chunk_id): names.get(lbl.labeled_by)
         for lbl in scoped
@@ -231,6 +242,57 @@ async def get_labeling_view(
 # Hard cap on per-head pool depth so a "load deeper pool" request can't hammer the index.
 _MAX_POOL_DEPTH = 50
 
+# The auto-pool (a case's own input against the index heads) is user-independent and stable
+# until the index is re-indexed, so we cache the assembled pool in Redis. This is what lets the
+# labeling view eager-load per-method ranks for every case without re-hitting Azure on every
+# page open — mirroring the reference design, which persists the pool on first visit. Manual
+# searches (an explicit ``q``) always run fresh and are never cached. TTL is a freshness bound;
+# changing a case's slice changes its depth, which changes the key, so it re-pools immediately.
+_POOL_CACHE_TTL = 21_600  # 6 hours
+
+
+def _pool_cache_key(project_id: UUID, test_id: str, per_head: int) -> str:
+    return f"labeling:pool:{project_id}:{test_id}:{per_head}"
+
+
+def _serialize_pool(pool: PoolResult, computed_at: str) -> dict:
+    return {
+        "computed_at": computed_at,
+        "heads_ran": pool.heads_ran,
+        "heads_failed": pool.heads_failed,
+        "chunks": [
+            {
+                "chunk_id": c.chunk_id,
+                "title": c.title,
+                "url": c.url,
+                "content_preview": c.content_preview,
+                "score": c.score,
+                "provenance": c.provenance,
+                "ranks": c.ranks,
+            }
+            for c in pool.chunks
+        ],
+    }
+
+
+def _deserialize_pool(data: dict) -> PoolResult:
+    return PoolResult(
+        chunks=[
+            PooledChunk(
+                chunk_id=c["chunk_id"],
+                title=c.get("title"),
+                url=c.get("url"),
+                content_preview=c.get("content_preview"),
+                score=c.get("score"),
+                provenance=list(c.get("provenance") or []),
+                ranks={k: int(v) for k, v in (c.get("ranks") or {}).items()},
+            )
+            for c in data.get("chunks", [])
+        ],
+        heads_ran=list(data.get("heads_ran") or []),
+        heads_failed=dict(data.get("heads_failed") or {}),
+    )
+
 
 @router.get("/labeling/pool", response_model=LabelingPoolResponse)
 async def get_labeling_pool(
@@ -238,6 +300,7 @@ async def get_labeling_pool(
     run_id: UUID | None = None,
     q: str | None = None,
     depth: int | None = None,
+    refresh: bool = False,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
     user: User = Depends(get_current_user),
@@ -306,14 +369,33 @@ async def get_labeling_pool(
             .limit(1)
         )
     ).scalar_one_or_none()
-    provider = build_index_provider(provider_row) if provider_row is not None else None
-    try:
-        pool = await assemble_pool(
-            provider, query, trace_chunks=trace_chunks, per_head_depth=per_head
-        )
-    finally:
-        if provider is not None:
-            await provider.aclose()
+
+    # The auto-pool is user-independent and stable until re-index, so serve it from Redis when
+    # cached. ``refresh`` forces a recompute (the explicit "recompute pooling" button); a manual
+    # search query stands alone and is always run fresh.
+    cache_key = None if manual else _pool_cache_key(project.id, test_id, per_head)
+    pool: PoolResult | None = None
+    computed_at: str | None = None
+    if cache_key and not refresh:
+        cached = await cache_get_json(cache_key)
+        if cached is not None:
+            pool = _deserialize_pool(cached)
+            computed_at = cached.get("computed_at")
+
+    if pool is None:
+        provider = build_index_provider(provider_row) if provider_row is not None else None
+        try:
+            pool = await assemble_pool(
+                provider, query, trace_chunks=trace_chunks, per_head_depth=per_head
+            )
+        finally:
+            if provider is not None:
+                await provider.aclose()
+        computed_at = datetime.now(timezone.utc).isoformat()
+        if cache_key:
+            await cache_set_json(
+                cache_key, _serialize_pool(pool, computed_at), ttl_seconds=_POOL_CACHE_TTL
+            )
 
     labels_by_key, labeler_by_key, _ = await _project_labels(db, project, user_id=user.id)
     return build_pool_view(
@@ -323,6 +405,7 @@ async def get_labeling_pool(
         provider_connected=provider_row is not None,
         labels_by_key=labels_by_key,
         labeler_by_key=labeler_by_key,
+        computed_at=computed_at,
     )
 
 
@@ -448,12 +531,24 @@ async def upsert_labels(
     project: Project = Depends(get_current_project),
     user: User = Depends(get_current_user),
 ):
-    """Create or update the current user's relevance labels for (test_id, chunk_id) pairs.
+    """Create or update the current user's graded relevance labels for (test_id, chunk_id) pairs.
 
     Labels are per-annotator: each user owns their own row for a chunk, so two annotators can
     disagree (the rows inter-annotator agreement and gold resolution are built from). Saving
-    only ever touches the calling user's own label.
+    only ever touches the calling user's own label. ``relevance`` is the graded 0..3 score.
     """
+    for item in body.labels:
+        if not is_valid_grade(item.relevance):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": {
+                        "code": "INVALID_GRADE",
+                        "message": f"relevance must be an integer {GRADE_MIN}..{GRADE_MAX}",
+                    }
+                },
+            )
+
     existing = (
         await db.execute(
             select(ChunkRelevanceLabel).where(
@@ -473,7 +568,7 @@ async def upsert_labels(
                     project_id=project.id,
                     test_id=item.test_id,
                     chunk_id=item.chunk_id,
-                    relevant=item.relevant,
+                    relevance=item.relevance,
                     content_preview=item.content_preview,
                     url=item.url,
                     title=item.title,
@@ -481,7 +576,7 @@ async def upsert_labels(
                 )
             )
         else:
-            current.relevant = item.relevant
+            current.relevance = item.relevance
             if item.content_preview is not None:
                 current.content_preview = item.content_preview
             if item.url is not None:
@@ -521,7 +616,7 @@ async def get_agreement(
         Vote(
             test_id=lbl.test_id,
             chunk_id=lbl.chunk_id,
-            relevant=lbl.relevant,
+            relevance=lbl.relevance,
             annotator_id=lbl.labeled_by,
             annotator_name=names.get(lbl.labeled_by, "unknown"),
             title=lbl.title,
@@ -534,7 +629,7 @@ async def get_agreement(
             select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id)
         )
     ).scalars().all()
-    overrides = {(g.test_id, g.chunk_id): g.relevant for g in golds}
+    overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
 
     return build_agreement_report(votes, overrides)
 
@@ -549,7 +644,17 @@ async def set_gold(
     project: Project = Depends(get_current_project),
     user: User = Depends(get_current_user),
 ):
-    """Adjudicate a chunk's gold relevance verdict, overriding the annotator majority vote."""
+    """Adjudicate a chunk's gold relevance grade (0..3), overriding the annotator consensus."""
+    if not is_valid_grade(body.relevance):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "INVALID_GRADE",
+                    "message": f"relevance must be an integer {GRADE_MIN}..{GRADE_MAX}",
+                }
+            },
+        )
     gold = (
         await db.execute(
             select(ChunkGoldLabel).where(
@@ -565,12 +670,12 @@ async def set_gold(
                 project_id=project.id,
                 test_id=body.test_id,
                 chunk_id=body.chunk_id,
-                relevant=body.relevant,
+                relevance=body.relevance,
                 decided_by=user.id,
             )
         )
     else:
-        gold.relevant = body.relevant
+        gold.relevance = body.relevance
         gold.decided_by = user.id
     await db.flush()
-    return {"test_id": body.test_id, "chunk_id": body.chunk_id, "relevant": body.relevant}
+    return {"test_id": body.test_id, "chunk_id": body.chunk_id, "relevance": body.relevance}

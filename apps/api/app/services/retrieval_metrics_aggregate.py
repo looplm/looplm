@@ -21,6 +21,7 @@ from app.services.chunk_labeling import retrieved_chunk_ids
 from app.services.retrieval_metrics import (
     compute_bpref,
     compute_condensed_ndcg_at_k,
+    compute_graded_ndcg_at_k,
     compute_retrieval_metrics,
 )
 
@@ -131,26 +132,34 @@ def _aggregate_rows(
         recall = metrics["recall_at_k"] or {}
         ndcg = metrics["ndcg_at_k"] or {}
         hit_rate = metrics["hit_rate_at_k"] or {}
+
+        # Incomplete-judgment-safe metrics — only when the row carries a judged-non-relevant
+        # set (the chunk-label path). bpref/condensed nDCG drop unjudged retrieved chunks
+        # instead of scoring them as misses. When the row also carries graded ``gains`` (gold
+        # grade per relevant chunk), nDCG and condensed nDCG score by grade rather than binary
+        # presence, so a highly-relevant chunk up top beats a marginal one. The graded nDCG
+        # replaces the binary ``ndcg`` before any roll-up so per-case and run-level agree.
+        bpref: float | None = None
+        cndcg: dict[str, float] = {}
+        if "judged_nonrelevant" in row:
+            nonrel = row["judged_nonrelevant"]
+            # Empty gains (no graded labels) → fall back to binary scoring, not all-zero gains.
+            gains = row.get("gains") or None
+            bpref = compute_bpref(expected, nonrel, retrieved)
+            cndcg = compute_condensed_ndcg_at_k(expected, nonrel, retrieved, ks, gains=gains) or {}
+            if gains:
+                ndcg = compute_graded_ndcg_at_k(gains, retrieved, ks) or ndcg
+
         recalls.append(recall)
         precisions.append(metrics["precision_at_k"] or {})
         hit_rates.append(hit_rate)
         ndcgs.append(ndcg)
         if metrics["mrr"] is not None:
             mrrs.append(metrics["mrr"])
-
-        # Incomplete-judgment-safe metrics — only when the row carries a judged-non-relevant
-        # set (the chunk-label path). bpref/condensed nDCG drop unjudged retrieved chunks
-        # instead of scoring them as misses.
-        bpref: float | None = None
-        cndcg: dict[str, float] = {}
-        if "judged_nonrelevant" in row:
-            nonrel = row["judged_nonrelevant"]
-            bpref = compute_bpref(expected, nonrel, retrieved)
-            cndcg = compute_condensed_ndcg_at_k(expected, nonrel, retrieved, ks) or {}
-            if bpref is not None:
-                bprefs.append(bpref)
-            if cndcg:
-                cndcgs.append(cndcg)
+        if bpref is not None:
+            bprefs.append(bpref)
+        if cndcg:
+            cndcgs.append(cndcg)
 
         cases.append(
             RetrievalCaseMetrics(
@@ -235,6 +244,7 @@ def aggregate_run_retrieval_metrics_from_labels(
     relevant_by_test: dict[str, set[str]],
     judged_nonrelevant_by_test: dict[str, set[str]] | None = None,
     slice_by_test: dict[str, str] | None = None,
+    grade_by_test: dict[str, dict[str, int]] | None = None,
     ks: tuple[int, ...] = AGG_KS,
 ) -> RetrievalRunMetrics:
     """Run summary from human chunk labels, with pooled recall.
@@ -243,11 +253,14 @@ def aggregate_run_retrieval_metrics_from_labels(
     query (pooled across all runs). ``judged_nonrelevant_by_test`` maps test_id → chunk ids
     explicitly judged *not* relevant; supplying it enables the incomplete-judgment-safe
     metrics (bpref, condensed nDCG), which need to tell judged-irrelevant chunks apart from
-    merely-unjudged ones. ``slice_by_test`` maps test_id → its risk slice for the per-slice
-    breakdown. Retrieved chunk ids come from each result's captured ``retrieved_chunks`` in
-    rank order.
+    merely-unjudged ones. ``grade_by_test`` maps test_id → ``{chunk_id: gold grade}`` for the
+    relevant chunks; supplying it makes nDCG / condensed nDCG use graded gains (gain = grade)
+    instead of binary relevance. ``slice_by_test`` maps test_id → its risk slice for the
+    per-slice breakdown. Retrieved chunk ids come from each result's captured
+    ``retrieved_chunks`` in rank order.
     """
     judged_nonrelevant_by_test = judged_nonrelevant_by_test or {}
+    grade_by_test = grade_by_test or {}
     slice_by_test = slice_by_test or {}
     result_list = list(results)
     rows: list[dict[str, Any]] = []
@@ -263,6 +276,7 @@ def aggregate_run_retrieval_metrics_from_labels(
                 "retrieved": retrieved_chunk_ids(r),
                 "missing": [],
                 "judged_nonrelevant": judged_nonrelevant_by_test.get(r.test_id, set()),
+                "gains": {k: float(v) for k, v in grade_by_test.get(r.test_id, {}).items()},
                 "slice": slice_by_test.get(r.test_id),
             }
         )

@@ -152,13 +152,18 @@ async def get_retrieval_metrics(
                 select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id)
             )
         ).scalars().all()
-        overrides = {(g.test_id, g.chunk_id): g.relevant for g in golds}
-        relevant_by_test, nonrelevant_by_test = resolve_gold(
-            ((lbl.test_id, lbl.chunk_id, lbl.relevant, lbl.labeled_by) for lbl in labels),
+        overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
+        relevant_by_test, nonrelevant_by_test, grade_by_test = resolve_gold(
+            ((lbl.test_id, lbl.chunk_id, lbl.relevance, lbl.labeled_by) for lbl in labels),
             overrides,
         )
         return aggregate_run_retrieval_metrics_from_labels(
-            run, results, relevant_by_test, nonrelevant_by_test, slice_by_test
+            run,
+            results,
+            relevant_by_test,
+            nonrelevant_by_test,
+            slice_by_test,
+            grade_by_test=grade_by_test,
         )
 
     return aggregate_run_retrieval_metrics(run, results, slice_by_test)

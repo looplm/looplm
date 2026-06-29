@@ -20,35 +20,41 @@ from app.services.chunk_agreement import (
 
 def test_resolve_gold_majority_vote():
     rows = [
-        ("t1", "c1", True, "ann1"),
-        ("t1", "c1", True, "ann2"),
-        ("t1", "c1", False, "ann3"),  # 2-1 relevant
-        ("t1", "c2", False, "ann1"),
-        ("t1", "c2", False, "ann2"),  # both not relevant
+        ("t1", "c1", 2, "ann1"),
+        ("t1", "c1", 3, "ann2"),
+        ("t1", "c1", 0, "ann3"),  # 2-1 relevant
+        ("t1", "c2", 0, "ann1"),
+        ("t1", "c2", 0, "ann2"),  # both irrelevant
     ]
-    rel, non = resolve_gold(rows)
+    rel, non, grades = resolve_gold(rows)
     assert rel == {"t1": {"c1"}}
     assert non == {"t1": {"c2"}}
+    # Gold grade for c1 is the rounded mean of the votes (2, 3, 0) -> round(1.67) = 2.
+    assert grades == {"t1": {"c1": 2}}
 
 
 def test_resolve_gold_tie_is_unjudged():
-    # 1-1 split, no override → chunk is in neither set (stays unjudged).
-    rel, non = resolve_gold([("t", "c", True, "a"), ("t", "c", False, "b")])
+    # 1-1 relevant/irrelevant split, no override → chunk is in neither set (stays unjudged).
+    rel, non, grades = resolve_gold([("t", "c", 2, "a"), ("t", "c", 0, "b")])
     assert rel == {}
     assert non == {}
+    assert grades == {}
 
 
 def test_resolve_gold_override_wins_over_majority():
-    rows = [("t", "c", True, "a"), ("t", "c", True, "b")]  # majority says relevant
-    rel, non = resolve_gold(rows, overrides={("t", "c"): False})
+    rows = [("t", "c", 2, "a"), ("t", "c", 3, "b")]  # majority says relevant
+    rel, non, grades = resolve_gold(rows, overrides={("t", "c"): 0})
     assert rel == {}
     assert non == {"t": {"c"}}
+    assert grades == {}
 
 
-def test_resolve_gold_single_annotator_matches_their_vote():
-    rel, non = resolve_gold([("t", "c1", True, "a"), ("t", "c2", False, "a")])
+def test_resolve_gold_single_annotator_matches_their_grade():
+    rel, non, grades = resolve_gold([("t", "c1", 3, "a"), ("t", "c2", 0, "a")])
     assert rel == {"t": {"c1"}}
     assert non == {"t": {"c2"}}
+    # A single annotator's grade is preserved exactly.
+    assert grades == {"t": {"c1": 3}}
 
 
 # --- Cohen's kappa ---
@@ -76,10 +82,10 @@ def test_cohen_kappa_no_overlap():
 
 def test_agreement_report_kappa_and_disagreements():
     votes = [
-        Vote("t1", "c1", True, "a", "alice", title="Chunk one"),
-        Vote("t1", "c1", False, "b", "bob"),  # disagreement on c1
-        Vote("t1", "c2", True, "a", "alice"),
-        Vote("t1", "c2", True, "b", "bob"),  # agreement on c2
+        Vote("t1", "c1", 2, "a", "alice", title="Chunk one"),
+        Vote("t1", "c1", 0, "b", "bob"),  # disagreement on c1
+        Vote("t1", "c2", 2, "a", "alice"),
+        Vote("t1", "c2", 2, "b", "bob"),  # agreement on c2
     ]
     report = build_agreement_report(votes)
     assert report.available is True
@@ -96,18 +102,18 @@ def test_agreement_report_kappa_and_disagreements():
 
 
 def test_agreement_report_unavailable_single_annotator():
-    report = build_agreement_report([Vote("t", "c", True, "a", "alice")])
+    report = build_agreement_report([Vote("t", "c", 2, "a", "alice")])
     assert report.available is False
     assert report.pairwise == []
 
 
 def test_agreement_report_reflects_gold_override():
     votes = [
-        Vote("t", "c", True, "a", "alice"),
-        Vote("t", "c", False, "b", "bob"),
+        Vote("t", "c", 2, "a", "alice"),
+        Vote("t", "c", 0, "b", "bob"),
     ]
-    report = build_agreement_report(votes, overrides={("t", "c"): True})
-    assert report.disagreements[0].gold is True
+    report = build_agreement_report(votes, overrides={("t", "c"): 3})
+    assert report.disagreements[0].gold == 3
 
 
 # --- endpoints ---
@@ -127,16 +133,16 @@ async def test_agreement_and_gold_endpoints(client: AsyncClient, auth_headers, d
     # Only one annotator so far → agreement not available.
     await client.post(
         "/api/pipeline/labels", headers=auth_headers,
-        json={"labels": [{"test_id": "q1", "chunk_id": "c1", "relevant": True}]},
+        json={"labels": [{"test_id": "q1", "chunk_id": "c1", "relevance": 2}]},
     )
     resp = await client.get("/api/pipeline/labeling/agreement", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["available"] is False
 
-    # Adjudicate a gold verdict; metrics then score against it.
+    # Adjudicate a gold grade; metrics then score against it.
     gold = await client.put(
         "/api/pipeline/labeling/gold", headers=auth_headers,
-        json={"test_id": "q1", "chunk_id": "c1", "relevant": True},
+        json={"test_id": "q1", "chunk_id": "c1", "relevance": 3},
     )
     assert gold.status_code == 200
     metrics = await client.get(

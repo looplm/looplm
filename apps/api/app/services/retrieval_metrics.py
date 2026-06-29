@@ -231,18 +231,54 @@ def compute_bpref(
     return total / R
 
 
+def compute_graded_ndcg_at_k(
+    gains: dict[str, float],
+    retrieved: list[str],
+    ks: tuple[int, ...] = DEFAULT_KS,
+) -> dict[str, float] | None:
+    """nDCG@k with *graded* gains — gain(doc) = its relevance grade (1..3), not a flat 1.
+
+    For the chunk-label path: ``gains`` maps a judged-relevant chunk id to its gold grade, so a
+    highly-relevant chunk ranked first scores higher than a marginally-relevant one in the same
+    slot, and the ideal DCG packs the highest grades at the top. Keys are opaque chunk ids, so
+    — like bpref / condensed nDCG — they are NOT run through ``normalize_source_url``.
+
+    Returns ``None`` when there are no graded-relevant docs. Keys are stringified k values.
+    """
+    if not gains:
+        return None
+    seen: set[str] = set()
+    ranked: list[str] = []
+    for cid in retrieved:
+        if cid not in seen:
+            seen.add(cid)
+            ranked.append(cid)
+    ideal = sorted(gains.values(), reverse=True)
+    out: dict[str, float] = {}
+    for k in ks:
+        dcg = sum(
+            gains.get(cid, 0.0) / math.log2(i + 1)
+            for i, cid in enumerate(ranked[:k], start=1)
+        )
+        idcg = sum(g / math.log2(i + 1) for i, g in enumerate(ideal[:k], start=1))
+        out[str(k)] = dcg / idcg if idcg > 0 else 0.0
+    return out
+
+
 def compute_condensed_ndcg_at_k(
     relevant: Iterable[str],
     judged_nonrelevant: Iterable[str],
     retrieved: list[str],
     ks: tuple[int, ...] = DEFAULT_KS,
+    gains: dict[str, float] | None = None,
 ) -> dict[str, float] | None:
     """nDCG@k over the *condensed* ranking — unjudged docs removed before scoring.
 
-    Same binary-relevance nDCG as :func:`compute_ndcg_at_k`, but the retrieved list is first
-    condensed to judged docs only (relevant ∪ judged-non-relevant), so an unjudged chunk
-    sitting at rank 2 doesn't push a relevant chunk down to rank 3 in the discount. This is
-    the inferred/condensed-nDCG idea (Sakai 2007) for incomplete pools.
+    Same nDCG as :func:`compute_ndcg_at_k`, but the retrieved list is first condensed to judged
+    docs only (relevant ∪ judged-non-relevant), so an unjudged chunk sitting at rank 2 doesn't
+    push a relevant chunk down to rank 3 in the discount. This is the inferred/condensed-nDCG
+    idea (Sakai 2007) for incomplete pools. When ``gains`` is given the relevant docs are scored
+    by their graded gain (gain = grade); otherwise relevance is binary (gain 1).
 
     Returns ``None`` when there are no judged-relevant docs. Keys are stringified k values.
     """
@@ -258,15 +294,21 @@ def compute_condensed_ndcg_at_k(
             seen.add(cid)
             condensed.append(cid)
 
+    def gain(cid: str) -> float:
+        if gains is not None:
+            return gains.get(cid, 0.0)
+        return 1.0 if cid in rel else 0.0
+
+    ideal = (
+        sorted((gains.get(c, 0.0) for c in rel), reverse=True)
+        if gains is not None
+        else [1.0] * len(rel)
+    )
+
     out: dict[str, float] = {}
     for k in ks:
-        dcg = sum(
-            1.0 / math.log2(i + 1)
-            for i, cid in enumerate(condensed[:k], start=1)
-            if cid in rel
-        )
-        ideal_hits = min(len(rel), k)
-        idcg = sum(1.0 / math.log2(i + 1) for i in range(1, ideal_hits + 1))
+        dcg = sum(gain(cid) / math.log2(i + 1) for i, cid in enumerate(condensed[:k], start=1))
+        idcg = sum(g / math.log2(i + 1) for i, g in enumerate(ideal[:k], start=1))
         out[str(k)] = dcg / idcg if idcg > 0 else 0.0
     return out
 

@@ -36,7 +36,7 @@ def test_build_pool_view_overlays_labels_and_provenance():
         "what is X?",
         pool,
         provider_connected=True,
-        labels_by_key={("test-1", "t1"): True},
+        labels_by_key={("test-1", "t1"): 2},
         labeler_by_key={("test-1", "t1"): "tim"},
     )
     assert out.pool_size == 2
@@ -44,9 +44,9 @@ def test_build_pool_view_overlays_labels_and_provenance():
     assert out.heads_failed == {"hybrid": "no vector field"}
     t1, v1 = out.chunks
     assert t1.provenance == ["trace", "keyword"]
-    assert t1.relevant is True and t1.labeled_by == "tim"
+    assert t1.relevance == 2 and t1.labeled_by == "tim"
     # An unjudged, index-only candidate carries no label.
-    assert v1.provenance == ["vector"] and v1.relevant is None
+    assert v1.provenance == ["vector"] and v1.relevance is None
 
 
 def _run():
@@ -78,7 +78,7 @@ def test_retrieved_chunk_ids_in_rank_order():
 
 def test_build_labeling_view_merges_labels_and_sorts_unfinished_first():
     results = [_result("done", CHUNKS), _result("todo", CHUNKS)]
-    labels = {("done", "c1"): True, ("done", "c2"): False}
+    labels = {("done", "c1"): 2, ("done", "c2"): 0}
     view = build_labeling_view(results, labels)
     assert view.available is True
     assert view.labelable_cases == 2
@@ -87,9 +87,9 @@ def test_build_labeling_view_merges_labels_and_sorts_unfinished_first():
     assert view.cases[0].labeled_count == 0
     done = next(c for c in view.cases if c.test_id == "done")
     assert done.labeled_count == 2
-    assert done.relevant_count == 1
-    assert done.chunks[0].relevant is True
-    assert done.chunks[1].relevant is False
+    assert done.relevant_count == 1  # grade 2 counts as relevant, grade 0 does not
+    assert done.chunks[0].relevance == 2
+    assert done.chunks[1].relevance == 0
 
 
 def test_build_labeling_view_skips_cases_without_chunks():
@@ -107,23 +107,23 @@ def test_cases_skeleton_is_label_free_and_merge_layers_labels():
     assert total == 1
     skel = cases[0]
     assert skel.labeled_count == 0 and skel.relevant_count == 0
-    assert all(ch.relevant is None and ch.labeled_by is None for ch in skel.chunks)
+    assert all(ch.relevance is None and ch.labeled_by is None for ch in skel.chunks)
 
     # Round-trip the skeleton through dump/validate to mimic the Redis cache, then merge.
     cached = [LabelingCase.model_validate(c.model_dump()) for c in cases]
     view = merge_labeling_view(
         cached,
         total,
-        {("t1", "c1"): True},
+        {("t1", "c1"): 3},
         labeler_by_key={("t1", "c1"): "tim"},
         complete_by_test={"t1": True},
     )
     case = view.cases[0]
     assert case.labeled_count == 1 and case.relevant_count == 1 and case.complete is True
-    assert case.chunks[0].relevant is True and case.chunks[0].labeled_by == "tim"
-    assert case.chunks[1].relevant is None
+    assert case.chunks[0].relevance == 3 and case.chunks[0].labeled_by == "tim"
+    assert case.chunks[1].relevance is None
     # Merging must not have mutated the source skeleton (it's the shared cached object).
-    assert cached[0].chunks[0].relevant is None and cached[0].labeled_count == 0
+    assert cached[0].chunks[0].relevance is None and cached[0].labeled_count == 0
 
 
 def test_build_labeling_view_dedupes_test_case_across_runs():
@@ -174,13 +174,13 @@ async def test_labeling_endpoints_roundtrip(client: AsyncClient, auth_headers, d
     assert resp.status_code == 200
     body = resp.json()
     assert body["available"] is True
-    assert body["cases"][0]["chunks"][0]["relevant"] is None
+    assert body["cases"][0]["chunks"][0]["relevance"] is None
 
-    # Save a label.
+    # Save a graded label.
     save = await client.post(
         "/api/pipeline/labels",
         headers=auth_headers,
-        json={"labels": [{"test_id": "q1", "chunk_id": "c1", "relevant": True}]},
+        json={"labels": [{"test_id": "q1", "chunk_id": "c1", "relevance": 3}]},
     )
     assert save.status_code == 200
     assert save.json()["saved"] == 1
@@ -188,7 +188,7 @@ async def test_labeling_endpoints_roundtrip(client: AsyncClient, auth_headers, d
     # Label now shows up, and label-based metrics are measurable.
     resp2 = await client.get(f"/api/pipeline/labeling?run_id={run.id}", headers=auth_headers)
     c1 = next(c for c in resp2.json()["cases"][0]["chunks"] if c["chunk_id"] == "c1")
-    assert c1["relevant"] is True
+    assert c1["relevance"] == 3
 
     # The labeler's display name is surfaced (local part of their email).
     assert c1["labeled_by"] == "test"

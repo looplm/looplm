@@ -120,6 +120,24 @@ def test_labels_path_reports_bpref_and_condensed_ndcg():
     assert out.cases[0].bpref == 1.0
 
 
+def test_labels_path_graded_ndcg_penalizes_low_grade_on_top():
+    # Two relevant chunks: hi (grade 3) and lo (grade 1). Retrieving lo above hi is worse than
+    # the ideal (hi first), so graded nDCG@10 is below 1.0 even though both relevant docs are
+    # retrieved (binary nDCG would be a perfect 1.0 here).
+    results = [_chunk_result("t1", ["lo", "hi"])]
+    out = aggregate_run_retrieval_metrics_from_labels(
+        _run(),
+        results,
+        relevant_by_test={"t1": {"hi", "lo"}},
+        judged_nonrelevant_by_test={"t1": set()},
+        grade_by_test={"t1": {"hi": 3, "lo": 1}},
+    )
+    assert out.available is True
+    assert 0.0 < out.ndcg_at_k["10"] < 1.0
+    # Recall is still perfect — both relevant docs were retrieved.
+    assert out.recall_at_k["10"] == 1.0
+
+
 def test_per_slice_breakdown():
     # Two safety cases (one perfect, one miss) + one broad case. Slices report separately.
     results = [

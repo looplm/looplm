@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   getLabelingView,
@@ -43,16 +43,75 @@ function pickIndexText(fields: Record<string, unknown> | null): string | null {
   return null;
 }
 
+// Graded relevance scale (TREC-style): 0 irrelevant … 3 highly relevant. Any grade >= 1
+// counts as relevant for the set-based metrics; nDCG uses the grade as gain.
+const GRADES: { value: number; label: string; selected: string; hover: string }[] = [
+  { value: 0, label: "Irrelevant", selected: "bg-red-500 border-red-500 text-white", hover: "hover:border-red-400" },
+  { value: 1, label: "Marginally relevant", selected: "bg-amber-500 border-amber-500 text-white", hover: "hover:border-amber-400" },
+  { value: 2, label: "Relevant", selected: "bg-emerald-500 border-emerald-500 text-white", hover: "hover:border-emerald-400" },
+  { value: 3, label: "Highly relevant", selected: "bg-emerald-600 border-emerald-600 text-white", hover: "hover:border-emerald-500" },
+];
+
+function gradeLabel(grade: number): string {
+  return GRADES.find((g) => g.value === grade)?.label ?? String(grade);
+}
+
+// Row background tint by grade: irrelevant red, any-relevant emerald, unjudged none.
+function gradeTint(grade: number | null | undefined): string {
+  if (grade == null) return "";
+  return grade >= 1 ? "bg-emerald-500/5" : "bg-red-500/5";
+}
+
+// Four-button 0..3 relevance picker, shared by retrieved rows, pooled candidates and adjudication.
+function GradeSelector({
+  value,
+  disabled,
+  onSelect,
+}: {
+  value: number | null;
+  disabled: boolean;
+  onSelect: (grade: number) => void;
+}) {
+  return (
+    <div className="shrink-0 flex items-center gap-1" role="group" aria-label="Relevance grade">
+      {GRADES.map((g) => (
+        <button
+          key={g.value}
+          disabled={disabled}
+          onClick={() => onSelect(g.value)}
+          title={`${g.value} — ${g.label}`}
+          className={`w-7 h-7 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-40 ${
+            value === g.value
+              ? g.selected
+              : `border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 ${g.hover}`
+          }`}
+        >
+          {g.value}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ChunkRow({
   chunk,
   disabled,
   indexConnected,
-  onLabel,
+  provenance,
+  ranks,
+  ranksLoading,
+  onGrade,
 }: {
   chunk: ChunkForLabeling;
   disabled: boolean;
   indexConnected: boolean;
-  onLabel: (relevant: boolean) => void;
+  // Per-method ranks for this chunk, sourced live from the index heads (Azure AI Search):
+  // which heads surfaced it and the rank it held in each. "trace" is omitted by the caller
+  // since the left-margin number already shows the final retrieved rank.
+  provenance?: string[];
+  ranks?: Record<string, number>;
+  ranksLoading?: boolean;
+  onGrade: (grade: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
@@ -80,13 +139,9 @@ function ChunkRow({
 
   return (
     <div
-      className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 dark:border-slate-800/50 ${
-        chunk.relevant === true
-          ? "bg-emerald-500/5"
-          : chunk.relevant === false
-            ? "bg-red-500/5"
-            : ""
-      }`}
+      className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 dark:border-slate-800/50 ${gradeTint(
+        chunk.relevance,
+      )}`}
     >
       <span className="shrink-0 w-6 text-right text-[11px] font-mono text-gray-400 dark:text-slate-500 pt-0.5">
         {chunk.rank}
@@ -98,6 +153,23 @@ function ChunkRow({
           <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-300">
             Chunk
           </span>
+          {/* Per-method ranks from the index heads (Azure AI Search): where BM25/vector/hybrid
+              each ranked this chunk. "trace" is excluded — the left-margin number already shows
+              the final retrieved rank. */}
+          {provenance && provenance.some((p) => p !== "trace") ? (
+            <ProvenanceBadges provenance={provenance.filter((p) => p !== "trace")} ranks={ranks} />
+          ) : ranksLoading ? (
+            <span className="text-[9px] uppercase tracking-wide text-gray-400 dark:text-slate-500 animate-pulse">
+              ranking…
+            </span>
+          ) : indexConnected && provenance ? (
+            <span
+              className="text-[9px] uppercase tracking-wide text-gray-400 dark:text-slate-500"
+              title="No index head (BM25/vector/hybrid) ranked this chunk within the pooled depth"
+            >
+              not pooled
+            </span>
+          ) : null}
           {chunk.heading_context && (
             <span className="text-[11px] text-gray-500 dark:text-slate-400 truncate" title={chunk.heading_context}>
               {chunk.heading_context}
@@ -166,7 +238,7 @@ function ChunkRow({
             </a>
           )}
           {chunk.chunk_id && <span className="font-mono truncate">{chunk.chunk_id}</span>}
-          {chunk.relevant != null && chunk.labeled_by && (
+          {chunk.relevance != null && chunk.labeled_by && (
             <span className="italic">by {chunk.labeled_by}</span>
           )}
         </div>
@@ -214,30 +286,11 @@ function ChunkRow({
         )}
       </div>
 
-      <div className="shrink-0 flex items-center gap-1.5">
-        <button
-          disabled={disabled || !labelable}
-          onClick={() => onLabel(true)}
-          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${
-            chunk.relevant === true
-              ? "bg-emerald-500 border-emerald-500 text-white"
-              : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-emerald-400"
-          }`}
-        >
-          Relevant
-        </button>
-        <button
-          disabled={disabled || !labelable}
-          onClick={() => onLabel(false)}
-          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${
-            chunk.relevant === false
-              ? "bg-red-500 border-red-500 text-white"
-              : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-red-400"
-          }`}
-        >
-          Not
-        </button>
-      </div>
+      <GradeSelector
+        value={chunk.relevance ?? null}
+        disabled={disabled || !labelable}
+        onSelect={onGrade}
+      />
     </div>
   );
 }
@@ -286,16 +339,16 @@ function ProvenanceBadges({
 // document locators — but judgeable the same way, with provenance badges and full-text fetch.
 function PoolChunkRow({
   chunk,
-  relevant,
+  relevance,
   disabled,
   indexConnected,
-  onLabel,
+  onGrade,
 }: {
   chunk: PooledChunkForLabeling;
-  relevant: boolean | null;
+  relevance: number | null;
   disabled: boolean;
   indexConnected: boolean;
-  onLabel: (relevant: boolean) => void;
+  onGrade: (grade: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [doc, setDoc] = useState<Record<string, unknown> | null>(null);
@@ -318,9 +371,9 @@ function PoolChunkRow({
 
   return (
     <div
-      className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 dark:border-slate-800/50 ${
-        relevant === true ? "bg-emerald-500/5" : relevant === false ? "bg-red-500/5" : ""
-      }`}
+      className={`flex items-start gap-3 px-4 py-3 border-b border-gray-50 dark:border-slate-800/50 ${gradeTint(
+        relevance,
+      )}`}
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap mb-1.5">
@@ -372,34 +425,11 @@ function PoolChunkRow({
             </a>
           )}
           <span className="font-mono truncate">{chunk.chunk_id}</span>
-          {relevant != null && chunk.labeled_by && <span className="italic">by {chunk.labeled_by}</span>}
+          {relevance != null && chunk.labeled_by && <span className="italic">by {chunk.labeled_by}</span>}
         </div>
       </div>
 
-      <div className="shrink-0 flex items-center gap-1.5">
-        <button
-          disabled={disabled}
-          onClick={() => onLabel(true)}
-          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${
-            relevant === true
-              ? "bg-emerald-500 border-emerald-500 text-white"
-              : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-emerald-400"
-          }`}
-        >
-          Relevant
-        </button>
-        <button
-          disabled={disabled}
-          onClick={() => onLabel(false)}
-          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${
-            relevant === false
-              ? "bg-red-500 border-red-500 text-white"
-              : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-red-400"
-          }`}
-        >
-          Not
-        </button>
-      </div>
+      <GradeSelector value={relevance} disabled={disabled} onSelect={onGrade} />
     </div>
   );
 }
@@ -412,19 +442,34 @@ function PoolSection({
   testId,
   canEdit,
   indexConnected,
+  initialPool,
   traceChunkIds,
 }: {
   testId: string;
   canEdit: boolean;
   indexConnected: boolean;
+  // Pool already fetched by the page (auto query). Adopted as-is so opening this section
+  // doesn't re-hit the index; a manual search still re-queries.
+  initialPool: LabelingPoolResponse | null;
   traceChunkIds: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
-  const [state, setState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
-  const [pool, setPool] = useState<LabelingPoolResponse | null>(null);
+  const [state, setState] = useState<"idle" | "loading" | "loaded" | "error">(
+    initialPool ? "loaded" : "idle",
+  );
+  const [pool, setPool] = useState<LabelingPoolResponse | null>(initialPool);
   const [q, setQ] = useState("");
   const [searching, setSearching] = useState(false);
-  const [labels, setLabels] = useState<Record<string, boolean>>({});
+  // chunk_id -> graded relevance 0..3 the user assigned to a pooled candidate (optimistic).
+  const [labels, setLabels] = useState<Record<string, number>>({});
+
+  // Adopt the page's pool once it arrives, as long as we haven't run our own (manual) search.
+  useEffect(() => {
+    if (initialPool && state === "idle") {
+      setPool(initialPool);
+      setState("loaded");
+    }
+  }, [initialPool, state]);
 
   const load = useCallback(
     (query?: string) => {
@@ -448,21 +493,26 @@ function PoolSection({
     if (next && state === "idle") load();
   };
 
-  const onLabelPool = (chunk: PooledChunkForLabeling, relevant: boolean) => {
+  const onGradePool = (chunk: PooledChunkForLabeling, relevance: number) => {
     const prev = labels[chunk.chunk_id];
-    setLabels((m) => ({ ...m, [chunk.chunk_id]: relevant }));
+    setLabels((m) => ({ ...m, [chunk.chunk_id]: relevance }));
     saveChunkLabels([
       {
         test_id: testId,
         chunk_id: chunk.chunk_id,
-        relevant,
+        relevance,
         content_preview: chunk.content_preview,
         url: chunk.url,
         title: chunk.title,
       },
     ]).catch(() => {
       toast.error("Failed to save label");
-      setLabels((m) => ({ ...m, [chunk.chunk_id]: prev }));
+      setLabels((m) => {
+        const next = { ...m };
+        if (prev == null) delete next[chunk.chunk_id];
+        else next[chunk.chunk_id] = prev;
+        return next;
+      });
     });
   };
 
@@ -543,10 +593,10 @@ function PoolSection({
                     <PoolChunkRow
                       key={chunk.chunk_id}
                       chunk={chunk}
-                      relevant={labels[chunk.chunk_id] ?? chunk.relevant ?? null}
+                      relevance={labels[chunk.chunk_id] ?? chunk.relevance ?? null}
                       disabled={!canEdit}
                       indexConnected={indexConnected}
-                      onLabel={(relevant) => onLabelPool(chunk, relevant)}
+                      onGrade={(grade) => onGradePool(chunk, grade)}
                     />
                   ))}
                 </div>
@@ -563,21 +613,35 @@ function CaseCard({
   c,
   canEdit,
   indexConnected,
+  pool,
+  poolLoading,
   collapsed,
   onToggleCollapse,
   onToggleComplete,
   onSetSlice,
-  onLabel,
+  onGrade,
 }: {
   c: LabelingCase;
   canEdit: boolean;
   indexConnected: boolean;
+  // The case's index pool (trace chunks ∪ Azure heads), eager-loaded by the page. Used to
+  // overlay per-method ranks onto the retrieved chunks and to seed the PoolSection.
+  pool: LabelingPoolResponse | null;
+  poolLoading: boolean;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onToggleComplete: (complete: boolean) => void;
   onSetSlice: (slice: string | null) => void;
-  onLabel: (testId: string, chunk: ChunkForLabeling, relevant: boolean) => void;
+  onGrade: (testId: string, chunk: ChunkForLabeling, grade: number) => void;
 }) {
+  // chunk_id -> the heads that surfaced it and the rank it held in each, from the pool.
+  const ranksByChunk = useMemo(() => {
+    const m: Record<string, { provenance: string[]; ranks: Record<string, number> }> = {};
+    for (const pc of pool?.chunks ?? []) {
+      m[pc.chunk_id] = { provenance: pc.provenance, ranks: pc.ranks };
+    }
+    return m;
+  }, [pool]);
   return (
     <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30">
@@ -642,19 +706,26 @@ function CaseCard({
       </div>
       {!collapsed && (
         <div>
-          {c.chunks.map((chunk) => (
-            <ChunkRow
-              key={`${chunk.chunk_id ?? "x"}-${chunk.rank}`}
-              chunk={chunk}
-              disabled={!canEdit}
-              indexConnected={indexConnected}
-              onLabel={(relevant) => onLabel(c.test_id, chunk, relevant)}
-            />
-          ))}
+          {c.chunks.map((chunk) => {
+            const pr = chunk.chunk_id ? ranksByChunk[chunk.chunk_id] : undefined;
+            return (
+              <ChunkRow
+                key={`${chunk.chunk_id ?? "x"}-${chunk.rank}`}
+                chunk={chunk}
+                disabled={!canEdit}
+                indexConnected={indexConnected}
+                provenance={pr?.provenance}
+                ranks={pr?.ranks}
+                ranksLoading={poolLoading}
+                onGrade={(grade) => onGrade(c.test_id, chunk, grade)}
+              />
+            );
+          })}
           <PoolSection
             testId={c.test_id}
             canEdit={canEdit}
             indexConnected={indexConnected}
+            initialPool={pool}
             traceChunkIds={
               new Set(c.chunks.map((ch) => ch.chunk_id).filter((id): id is string => !!id))
             }
@@ -680,7 +751,7 @@ function AgreementPanel({ canEdit }: { canEdit: boolean }) {
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<AgreementReport | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
-  const [goldByKey, setGoldByKey] = useState<Record<string, boolean>>({});
+  const [goldByKey, setGoldByKey] = useState<Record<string, number>>({});
 
   const load = useCallback(() => {
     setState("loading");
@@ -698,13 +769,18 @@ function AgreementPanel({ canEdit }: { canEdit: boolean }) {
     if (next && state === "idle") load();
   };
 
-  const adjudicate = (d: Disagreement, relevant: boolean) => {
+  const adjudicate = (d: Disagreement, grade: number) => {
     const key = `${d.test_id}|${d.chunk_id}`;
     const prev = goldByKey[key];
-    setGoldByKey((m) => ({ ...m, [key]: relevant }));
-    setGold(d.test_id, d.chunk_id, relevant).catch(() => {
+    setGoldByKey((m) => ({ ...m, [key]: grade }));
+    setGold(d.test_id, d.chunk_id, grade).catch(() => {
       toast.error("Failed to adjudicate");
-      setGoldByKey((m) => ({ ...m, [key]: prev }));
+      setGoldByKey((m) => {
+        const next = { ...m };
+        if (prev == null) delete next[key];
+        else next[key] = prev;
+        return next;
+      });
     });
   };
 
@@ -780,39 +856,20 @@ function AgreementPanel({ canEdit }: { canEdit: boolean }) {
                             </p>
                             <p className="text-[11px] text-gray-400 dark:text-slate-500">
                               {d.votes
-                                .map((v) => `${v.labeler}: ${v.relevant ? "relevant" : "not"}`)
+                                .map((v) => `${v.labeler}: ${v.relevance} (${gradeLabel(v.relevance)})`)
                                 .join(" · ")}
                               {gold != null && (
                                 <span className="ml-2 text-gray-500 dark:text-slate-400">
-                                  → gold: {gold ? "relevant" : "not"}
+                                  → gold: {gold} ({gradeLabel(gold)})
                                 </span>
                               )}
                             </p>
                           </div>
-                          <div className="shrink-0 flex items-center gap-1.5">
-                            <button
-                              disabled={!canEdit}
-                              onClick={() => adjudicate(d, true)}
-                              className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-40 ${
-                                gold === true
-                                  ? "bg-emerald-500 border-emerald-500 text-white"
-                                  : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-emerald-400"
-                              }`}
-                            >
-                              Relevant
-                            </button>
-                            <button
-                              disabled={!canEdit}
-                              onClick={() => adjudicate(d, false)}
-                              className={`px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-40 ${
-                                gold === false
-                                  ? "bg-red-500 border-red-500 text-white"
-                                  : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-red-400"
-                              }`}
-                            >
-                              Not
-                            </button>
-                          </div>
+                          <GradeSelector
+                            value={gold}
+                            disabled={!canEdit}
+                            onSelect={(grade) => adjudicate(d, grade)}
+                          />
                         </div>
                       );
                     })}
@@ -831,6 +888,21 @@ function AgreementPanel({ canEdit }: { canEdit: boolean }) {
   );
 }
 
+// Compact "x ago" for the last-pooled timestamp. Falls back to the locale date past a week.
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 45) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days <= 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 export default function LabelingPage() {
   const { canWrite } = usePermissions();
   const canEdit = canWrite("labeling");
@@ -841,6 +913,12 @@ export default function LabelingPage() {
   const [indexConnected, setIndexConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Per-method ranks come from the index heads (Azure), pooled per case. Eager-loaded for every
+  // case once the view is in, so each retrieved chunk can show where each method ranked it.
+  // The pool is cached server-side, so re-opening the page doesn't re-query the index.
+  const [poolByCase, setPoolByCase] = useState<Record<string, LabelingPoolResponse>>({});
+  const [poolLoading, setPoolLoading] = useState<Set<string>>(new Set());
+  const poolRequested = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     getIndexProviders()
@@ -856,10 +934,92 @@ export default function LabelingPage() {
       .then((v) => {
         setView(v);
         setCollapsed(new Set());
+        // Fresh view: drop any pooled ranks so they're re-fetched against the new cases.
+        setPoolByCase({});
+        setPoolLoading(new Set());
+        poolRequested.current = new Set();
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  // Pool a set of cases through the index heads (Azure) with bounded concurrency, writing each
+  // result into poolByCase as it lands. ``refresh`` forces a server-side recompute (bypassing
+  // the pool cache). Shared by the eager initial load and the manual "recompute" button.
+  const loadPools = useCallback(async (testIds: string[], refresh: boolean) => {
+    if (testIds.length === 0) return;
+    setPoolLoading((prev) => new Set([...prev, ...testIds]));
+    const settle = (id: string) =>
+      setPoolLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < testIds.length) {
+        const testId = testIds[cursor++];
+        try {
+          const p = await getLabelingPool(testId, { refresh });
+          setPoolByCase((prev) => ({ ...prev, [testId]: p }));
+        } catch {
+          // Leave this case without ranks; its chunks just won't show method badges.
+        } finally {
+          settle(testId);
+        }
+      }
+    };
+    const POOL_CONCURRENCY = 4;
+    await Promise.all(Array.from({ length: Math.min(POOL_CONCURRENCY, testIds.length) }, worker));
+  }, []);
+
+  // Eager-pool every case once the view is in, so each retrieved chunk shows its per-method
+  // ranks. The server-side pool cache makes repeat loads cheap. Skipped entirely with no index.
+  useEffect(() => {
+    if (!view?.available || !indexConnected) return;
+    const todo = view.cases
+      .filter((c) => c.chunks.some((ch) => ch.chunk_id) && !poolRequested.current.has(c.test_id))
+      .map((c) => c.test_id);
+    if (todo.length === 0) return;
+    todo.forEach((id) => poolRequested.current.add(id));
+    void loadPools(todo, false);
+  }, [view, indexConnected, loadPools]);
+
+  // Explicit recompute: re-pool every labelable case against the index, bypassing the cache.
+  const [recomputing, setRecomputing] = useState(false);
+  const recomputePools = useCallback(async () => {
+    if (!view) return;
+    const ids = view.cases
+      .filter((c) => c.chunks.some((ch) => ch.chunk_id))
+      .map((c) => c.test_id);
+    if (ids.length === 0) return;
+    setRecomputing(true);
+    try {
+      await loadPools(ids, true);
+    } finally {
+      setRecomputing(false);
+    }
+  }, [view, loadPools]);
+
+  // Oldest pool timestamp across loaded cases — the freshness floor shown on the page.
+  const lastPooledAt = useMemo(() => {
+    const times = Object.values(poolByCase)
+      .map((p) => p.computed_at)
+      .filter((t): t is string => !!t);
+    return times.length ? times.reduce((a, b) => (a < b ? a : b)) : null;
+  }, [poolByCase]);
+
+  // Which index heads actually ran vs. couldn't (e.g. no vectorizer), aggregated across cases.
+  // Surfaced so "not pooled" rows are explainable: if a head is unavailable, it can't rank.
+  const poolHeads = useMemo(() => {
+    const ran = new Set<string>();
+    const failed: Record<string, string> = {};
+    for (const p of Object.values(poolByCase)) {
+      for (const h of p.heads_ran) if (h !== "trace") ran.add(h);
+      for (const [h, reason] of Object.entries(p.heads_failed)) if (!(h in failed)) failed[h] = reason;
+    }
+    return { ran: [...ran], failed };
+  }, [poolByCase]);
 
   const toggleCase = useCallback((testId: string) => {
     setCollapsed((prev) => {
@@ -916,9 +1076,9 @@ export default function LabelingPage() {
     load();
   }, [load]);
 
-  // Optimistic label: update local state, persist, roll back on error.
-  const onLabel = useCallback(
-    async (testId: string, chunk: ChunkForLabeling, relevant: boolean) => {
+  // Optimistic graded label: update local state, persist, roll back on error.
+  const onGrade = useCallback(
+    async (testId: string, chunk: ChunkForLabeling, relevance: number) => {
       if (!chunk.chunk_id) return;
       setView((prev) => {
         if (!prev) return prev;
@@ -927,10 +1087,10 @@ export default function LabelingPage() {
           cases: prev.cases.map((c) => {
             if (c.test_id !== testId) return c;
             const chunks = c.chunks.map((ch) =>
-              ch.chunk_id === chunk.chunk_id ? { ...ch, relevant } : ch,
+              ch.chunk_id === chunk.chunk_id ? { ...ch, relevance } : ch,
             );
-            const labeled_count = chunks.filter((ch) => ch.relevant != null).length;
-            const relevant_count = chunks.filter((ch) => ch.relevant === true).length;
+            const labeled_count = chunks.filter((ch) => ch.relevance != null).length;
+            const relevant_count = chunks.filter((ch) => (ch.relevance ?? 0) >= 1).length;
             return { ...c, chunks, labeled_count, relevant_count };
           }),
         };
@@ -940,7 +1100,7 @@ export default function LabelingPage() {
           {
             test_id: testId,
             chunk_id: chunk.chunk_id,
-            relevant,
+            relevance,
             content_preview: chunk.content_preview,
             url: chunk.url,
             title: chunk.title,
@@ -971,11 +1131,12 @@ export default function LabelingPage() {
         <h1 className="text-3xl font-bold">Labeling</h1>
       </div>
       <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
-        Judge the chunks each test case actually retrieved. Mark each one relevant or not;
-        these labels become the ground truth for the chunk-level precision and recall on the
-        Pipeline page. Labels are shared across runs, so you only judge a chunk once per query.
-        Expand a case to also pool extra candidates from the connected index (BM25/vector/hybrid)
-        and judge chunks the system may have missed.
+        Judge the chunks each test case actually retrieved. Grade each one 0 (irrelevant),
+        1 (marginally relevant), 2 (relevant), or 3 (highly relevant); these labels become the
+        ground truth for the chunk-level precision, recall and nDCG on the Pipeline page (any
+        grade ≥ 1 counts as relevant; nDCG weights by grade). Labels are shared across runs, so
+        you only judge a chunk once per query. Expand a case to also pool extra candidates from
+        the connected index (BM25/vector/hybrid) and judge chunks the system may have missed.
       </p>
 
       {error && (
@@ -1005,6 +1166,37 @@ export default function LabelingPage() {
             </div>
             {!canEdit && <span className="text-amber-600 dark:text-amber-400">read-only access</span>}
             <div className="ml-auto flex items-center gap-3">
+              {indexConnected && (
+                <div className="flex items-center gap-2">
+                  <span
+                    title="Per-method ranks (BM25/vector/hybrid) are pooled live from the index (Azure AI Search). Shows the oldest pool across cases."
+                  >
+                    {poolLoading.size > 0
+                      ? "Pooling ranks…"
+                      : lastPooledAt
+                        ? `Ranks pooled ${relativeTime(lastPooledAt)}`
+                        : "Ranks not pooled"}
+                  </span>
+                  {Object.keys(poolHeads.failed).length > 0 && (
+                    <span
+                      className="text-amber-600 dark:text-amber-400"
+                      title={Object.entries(poolHeads.failed)
+                        .map(([h, r]) => `${h}: ${r}`)
+                        .join("\n")}
+                    >
+                      {Object.keys(poolHeads.failed).join(", ")} unavailable
+                    </span>
+                  )}
+                  <button
+                    onClick={recomputePools}
+                    disabled={recomputing || poolLoading.size > 0}
+                    title="Re-query the index for every case, bypassing the cache. Use after re-indexing."
+                    className="px-2 py-0.5 rounded-md border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-indigo-400 disabled:opacity-40"
+                  >
+                    {recomputing ? "Recomputing…" : "Recompute"}
+                  </button>
+                </div>
+              )}
               <button onClick={collapseAll} className="hover:text-gray-600 dark:hover:text-slate-300">
                 Collapse all
               </button>
@@ -1051,11 +1243,13 @@ export default function LabelingPage() {
                         c={c}
                         canEdit={canEdit}
                         indexConnected={indexConnected}
+                        pool={poolByCase[c.test_id] ?? null}
+                        poolLoading={poolLoading.has(c.test_id)}
                         collapsed={collapsed.has(c.test_id)}
                         onToggleCollapse={() => toggleCase(c.test_id)}
                         onToggleComplete={(v) => onToggleComplete(c.test_id, v)}
                         onSetSlice={(s) => onSetSlice(c.test_id, s)}
-                        onLabel={onLabel}
+                        onGrade={onGrade}
                       />
                     ))}
                   </div>

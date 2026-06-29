@@ -59,7 +59,8 @@ export interface ChunkForLabeling {
   pdf_page_number?: number | null;
   score?: number | null;
   rank: number;
-  relevant?: boolean | null;
+  // Graded relevance 0..3, or null when not yet judged.
+  relevance?: number | null;
   labeled_by?: string | null;
 }
 
@@ -107,7 +108,8 @@ export interface PairwiseKappa {
 
 export interface VoteEntry {
   labeler: string;
-  relevant: boolean;
+  // Graded relevance 0..3 this annotator assigned.
+  relevance: number;
 }
 
 export interface Disagreement {
@@ -115,7 +117,8 @@ export interface Disagreement {
   chunk_id: string;
   title?: string | null;
   votes: VoteEntry[];
-  gold?: boolean | null;
+  // Adjudicated gold grade 0..3, or null if not yet resolved.
+  gold?: number | null;
 }
 
 export interface AgreementReport {
@@ -132,7 +135,8 @@ export interface AgreementReport {
 export interface ChunkLabelUpsert {
   test_id: string;
   chunk_id: string;
-  relevant: boolean;
+  // Graded relevance 0..3.
+  relevance: number;
   content_preview?: string | null;
   url?: string | null;
   title?: string | null;
@@ -150,7 +154,8 @@ export interface PooledChunkForLabeling {
   provenance: string[];
   // head -> 1-indexed rank the chunk held in that head's results, e.g. { vector: 3, hybrid: 2 }.
   ranks: Record<string, number>;
-  relevant?: boolean | null;
+  // Graded relevance 0..3, or null when not yet judged.
+  relevance?: number | null;
   labeled_by?: string | null;
 }
 
@@ -162,6 +167,8 @@ export interface LabelingPoolResponse {
   heads_ran: string[];
   heads_failed: Record<string, string>;
   chunks: PooledChunkForLabeling[];
+  // ISO timestamp of when this pool was last assembled against the index, or null.
+  computed_at?: string | null;
 }
 
 // --- Quantitative retrieval-quality metrics (eval-run based) ---

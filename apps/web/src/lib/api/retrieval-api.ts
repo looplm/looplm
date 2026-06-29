@@ -42,12 +42,13 @@ export const getLabelingView = (runId?: string) =>
 
 export const getLabelingPool = (
   testId: string,
-  opts: { runId?: string; q?: string; depth?: number } = {},
+  opts: { runId?: string; q?: string; depth?: number; refresh?: boolean } = {},
 ) => {
   const params = new URLSearchParams({ test_id: testId });
   if (opts.runId) params.set("run_id", opts.runId);
   if (opts.q) params.set("q", opts.q);
   if (opts.depth) params.set("depth", String(opts.depth));
+  if (opts.refresh) params.set("refresh", "true");
   return request<LabelingPoolResponse>(`/api/pipeline/labeling/pool?${params.toString()}`);
 };
 
@@ -72,10 +73,10 @@ export const setLabelingSlice = (testId: string, slice: string | null) =>
 export const getAgreement = () =>
   request<AgreementReport>(`/api/pipeline/labeling/agreement`);
 
-export const setGold = (testId: string, chunkId: string, relevant: boolean) =>
-  request<{ test_id: string; chunk_id: string; relevant: boolean }>(
+export const setGold = (testId: string, chunkId: string, relevance: number) =>
+  request<{ test_id: string; chunk_id: string; relevance: number }>(
     `/api/pipeline/labeling/gold`,
-    { method: "PUT", body: JSON.stringify({ test_id: testId, chunk_id: chunkId, relevant }) },
+    { method: "PUT", body: JSON.stringify({ test_id: testId, chunk_id: chunkId, relevance }) },
   );
 
 export const getChunkMetadata = (chunkId: string) =>
