@@ -68,13 +68,20 @@ export function CaseCard({
   );
 
   return (
-    <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50/60 dark:bg-slate-800/30">
+    <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+      {/* Sticky so the question stays visible while scrolling a case's chunks. The card itself
+          must NOT be overflow-hidden (that disables sticky); the body wrapper below clips the
+          rounded corners instead. */}
+      <div
+        className={`sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800 rounded-t-xl ${
+          collapsed ? "rounded-b-xl" : ""
+        }`}
+      >
         <button onClick={onToggleCollapse} className="flex items-center gap-2 min-w-0 text-left">
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
+            width="15"
+            height="15"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -85,7 +92,10 @@ export function CaseCard({
           >
             <polyline points="9 18 15 12 9 6" />
           </svg>
-          <span className="text-sm font-medium text-gray-800 dark:text-slate-200 truncate" title={c.input ?? c.test_id}>
+          <span
+            className="text-[15px] font-semibold text-gray-900 dark:text-white truncate"
+            title={c.input ?? c.test_id}
+          >
             {c.input || c.test_id}
           </span>
         </button>
@@ -137,7 +147,7 @@ export function CaseCard({
         </div>
       </div>
       {!collapsed && (
-        <div>
+        <div className="overflow-hidden rounded-b-xl">
           {!indexConnected ? (
             <p className="px-4 py-6 text-[12px] text-gray-400 dark:text-slate-500">
               Connect an index provider (Settings → Integrations) to pool candidate chunks for
