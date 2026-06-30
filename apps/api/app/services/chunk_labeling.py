@@ -14,6 +14,7 @@ from app.models.datasets import TestCase
 from app.schemas.retrieval import (
     LabelingCase,
     LabelingPoolResponse,
+    LabelingQueries,
     LabelingRunResponse,
     PooledChunkForLabeling,
 )
@@ -127,9 +128,10 @@ def build_labeling_view(
 
 
 # Head priority for ordering the pool: the semantic reranker is the system's final ranking, then
-# hybrid (RRF), then vector, then keyword. A chunk sorts by the best (highest-priority) head that
-# returned it, at that head's rank — so reranked chunks lead, in reranked order.
-_POOL_ORDER_HEADS = ("semantic", "hybrid", "vector", "keyword")
+# hybrid (RRF), then vector, then keyword, then agentic. A chunk sorts by the best (highest-
+# priority) head that returned it, at that head's rank — so reranked chunks lead, in reranked
+# order, and chunks only an agentic sub-query surfaced sort last (by their agentic rank).
+_POOL_ORDER_HEADS = ("semantic", "hybrid", "vector", "keyword", "agentic")
 
 
 def _pool_order_key(ranks: dict[str, int]) -> tuple[int, int]:
@@ -149,14 +151,16 @@ def build_pool_view(
     labeler_by_key: dict[tuple[str, str], str] | None = None,
     ai_labels_by_key: dict[tuple[str, str], int] | None = None,
     computed_at: str | None = None,
+    queries: LabelingQueries | None = None,
 ) -> LabelingPoolResponse:
     """Shape an assembled :class:`PoolResult` into the labeling-pool API response.
 
     Overlays any existing human label (and labeler) onto each pooled chunk, keyed by
     ``(test_id, chunk_id)``. Chunks are ordered reranked-first: by the rank the semantic reranker
-    gave them, falling back to hybrid → vector → keyword for chunks a higher-priority head didn't
-    return — so the list mirrors the system's true final ranking, with judged-relevant candidates
-    near the top.
+    gave them, falling back to hybrid → vector → keyword → agentic for chunks a higher-priority
+    head didn't return — so the list mirrors the system's true final ranking, with judged-relevant
+    candidates near the top. ``queries`` carries the base question and any agentic sub-queries that
+    were run, so the UI can show exactly what was sent to the index.
     """
     labeler_by_key = labeler_by_key or {}
     ai_labels_by_key = ai_labels_by_key or {}
@@ -172,6 +176,7 @@ def build_pool_view(
                 score=pc.score,
                 provenance=pc.provenance,
                 ranks=pc.ranks,
+                agentic_queries=pc.agentic_queries,
                 relevance=labels_by_key.get(key),
                 labeled_by=labeler_by_key.get(key),
                 ai_relevance=ai_labels_by_key.get(key),
@@ -186,4 +191,5 @@ def build_pool_view(
         heads_failed=pool.heads_failed,
         chunks=chunks,
         computed_at=computed_at,
+        queries=queries,
     )

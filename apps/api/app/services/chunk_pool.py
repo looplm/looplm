@@ -35,6 +35,19 @@ SLICE_POOL_DEPTH = {"safety": 35, "adversarial": 35}
 
 
 @dataclass
+class AgenticQuery:
+    """A planner-produced sub-query plus its embedding (``None`` → provider text fallback).
+
+    The agentic path (see :mod:`app.services.query_planner`) decomposes a case's question into
+    several focused sub-queries; each carries its own embedding so the vector/hybrid heads can run
+    on it even when the index has no server-side vectorizer.
+    """
+
+    text: str
+    vector: list[float] | None = None
+
+
+@dataclass
 class PooledChunk:
     """One candidate in the labeling pool, with the heads that surfaced it."""
 
@@ -44,13 +57,18 @@ class PooledChunk:
     content_preview: str | None = None
     # Best-effort backend score (not comparable across heads — informational only).
     score: float | None = None
-    # Subset of {"trace", "keyword", "vector", "hybrid"} — why this chunk is in the pool,
-    # in the order the heads first surfaced it.
+    # Subset of {"trace", "keyword", "vector", "hybrid", "agentic"} — why this chunk is in the
+    # pool, in the order the heads first surfaced it. "agentic" means an LLM-planned sub-query
+    # found it (in addition to whichever index heads, if any, ran on the base question).
     provenance: list[str] = field(default_factory=list)
     # head -> 1-indexed rank this chunk held in that head's results (e.g. {"vector": 3,
     # "hybrid": 2}). Lets the labeler see *where* each method ranked the chunk, not just that
-    # it surfaced it. A head missing from the map didn't surface this chunk.
+    # it surfaced it. A head missing from the map didn't surface this chunk. The pseudo-head
+    # "agentic" holds the best rank any planned sub-query gave the chunk.
     ranks: dict[str, int] = field(default_factory=dict)
+    # The agentic sub-queries that surfaced this chunk, in the order they first did. Empty unless
+    # agentic pooling ran. Drives the per-chunk "found by query X" display.
+    agentic_queries: list[str] = field(default_factory=list)
 
     def _seen(self, head: str, rank: int) -> None:
         """Record that ``head`` surfaced this chunk at ``rank`` (keeping the best/first)."""
@@ -60,6 +78,20 @@ class PooledChunk:
         existing = self.ranks.get(head)
         if existing is None or rank < existing:
             self.ranks[head] = rank
+
+    def _seen_agentic(self, query: str, rank: int) -> None:
+        """Record that an agentic sub-query surfaced this chunk at ``rank``.
+
+        Agentic hits don't write into the per-head ranks (those stay authoritative for the base
+        question's badges); they land under the "agentic" pseudo-head, keeping the best rank.
+        """
+        if "agentic" not in self.provenance:
+            self.provenance.append("agentic")
+        existing = self.ranks.get("agentic")
+        if existing is None or rank < existing:
+            self.ranks["agentic"] = rank
+        if query and query not in self.agentic_queries:
+            self.agentic_queries.append(query)
 
 
 @dataclass
@@ -114,6 +146,41 @@ def _seed_from_trace(
     return seeded
 
 
+def _merge_hit(
+    pool: dict[str, PooledChunk], d: Any, *, mode: str | None, rank: int, agentic_query: str | None
+) -> None:
+    """Merge one index hit into the pool, recording its head/agentic provenance + rank.
+
+    ``mode`` records a base-question head (keyword/vector/hybrid); ``agentic_query`` records the
+    planned sub-query that surfaced it. Exactly one is set per call.
+    """
+    existing = pool.get(d.id)
+    if existing is None:
+        chunk = PooledChunk(
+            chunk_id=d.id,
+            title=_coalesce(d.title),
+            url=_coalesce(d.url),
+            content_preview=_coalesce(d.snippet),
+            score=d.score,
+        )
+        if agentic_query is not None:
+            chunk._seen_agentic(agentic_query, rank)
+        else:
+            chunk._seen(mode, rank)
+        pool[d.id] = chunk
+        return
+    if agentic_query is not None:
+        existing._seen_agentic(agentic_query, rank)
+    else:
+        existing._seen(mode, rank)
+    # Backfill anything an earlier (e.g. trace) capture lacked.
+    existing.title = existing.title or _coalesce(d.title)
+    existing.url = existing.url or _coalesce(d.url)
+    existing.content_preview = existing.content_preview or _coalesce(d.snippet)
+    if existing.score is None:
+        existing.score = d.score
+
+
 async def assemble_pool(
     provider: BaseIndexProvider | None,
     query: str,
@@ -123,6 +190,7 @@ async def assemble_pool(
     per_head_depth: int = DEFAULT_POOL_DEPTH,
     filters: dict[str, str] | None = None,
     query_vector: list[float] | None = None,
+    agentic_queries: Iterable[AgenticQuery] | None = None,
 ) -> PoolResult:
     """Build the deduped candidate pool for one query.
 
@@ -132,9 +200,16 @@ async def assemble_pool(
     provider can't serve (``NotImplementedError``) or that errors is recorded in
     ``heads_failed`` and skipped, so a missing vector head never blocks the keyword pool.
 
+    When ``agentic_queries`` are given, each planned sub-query then runs the same modes and its
+    hits are folded in with provenance ``agentic`` — raising the recall ceiling to what an
+    agentic retriever would surface, not just the bare question. Their per-head failures are not
+    re-reported (the base pass already did), and they never overwrite the base question's per-head
+    ranks.
+
     ``provider`` may be ``None`` (no index connected), in which case the pool is just the
     trace chunks — still useful, just not augmented.
     """
+    modes = list(modes)
     pool: dict[str, PooledChunk] = {}
     heads_ran: list[str] = []
     heads_failed: dict[str, str] = {}
@@ -157,27 +232,27 @@ async def assemble_pool(
 
             heads_ran.append(mode)
             for rank, d in enumerate(docs, start=1):
-                if not d.id:
-                    continue
-                existing = pool.get(d.id)
-                if existing is None:
-                    chunk = PooledChunk(
-                        chunk_id=d.id,
-                        title=_coalesce(d.title),
-                        url=_coalesce(d.url),
-                        content_preview=_coalesce(d.snippet),
-                        score=d.score,
+                if d.id:
+                    _merge_hit(pool, d, mode=mode, rank=rank, agentic_query=None)
+
+    agentic_ran = False
+    if provider is not None and agentic_queries:
+        for aq in agentic_queries:
+            if not aq.text.strip():
+                continue
+            for mode in modes:
+                try:
+                    docs = await provider.search_documents(
+                        aq.text, per_head_depth, filters, mode=mode, query_vector=aq.vector
                     )
-                    chunk._seen(mode, rank)
-                    pool[d.id] = chunk
-                else:
-                    existing._seen(mode, rank)
-                    # Backfill anything the trace capture lacked.
-                    existing.title = existing.title or _coalesce(d.title)
-                    existing.url = existing.url or _coalesce(d.url)
-                    existing.content_preview = existing.content_preview or _coalesce(d.snippet)
-                    if existing.score is None:
-                        existing.score = d.score
+                except Exception:  # failures already surfaced by the base pass; skip quietly.
+                    continue
+                for rank, d in enumerate(docs, start=1):
+                    if d.id:
+                        agentic_ran = True
+                        _merge_hit(pool, d, mode=None, rank=rank, agentic_query=aq.text)
+    if agentic_ran:
+        heads_ran.append("agentic")
 
     return PoolResult(
         chunks=list(pool.values()), heads_ran=heads_ran, heads_failed=heads_failed

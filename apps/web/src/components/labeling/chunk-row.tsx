@@ -40,6 +40,7 @@ export const PROVENANCE_BADGES: Record<string, { label: string; cls: string }> =
   vector: { label: "Vector", cls: "bg-violet-500/10 text-violet-600 dark:text-violet-300" },
   hybrid: { label: "Hybrid", cls: "bg-teal-500/10 text-teal-600 dark:text-teal-300" },
   semantic: { label: "Reranked", cls: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300" },
+  agentic: { label: "Agentic", cls: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-300" },
 };
 
 // Each badge shows the head and, when known, the rank the chunk held in that head — so the

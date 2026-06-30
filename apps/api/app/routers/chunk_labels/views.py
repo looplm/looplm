@@ -19,15 +19,20 @@ from app.models.user import User
 from app.schemas.retrieval import (
     ChunkMetadataResponse,
     LabelingPoolResponse,
+    LabelingPromptDefaults,
+    LabelingQueries,
     LabelingRunResponse,
 )
+from app.services.chunk_ai_judge import DEFAULT_AI_JUDGE_INSTRUCTIONS
 from app.services.chunk_labeling import (
     build_labeling_cases,
     build_pool_view,
     merge_labeling_view,
 )
+from app.services.query_planner import DEFAULT_QUERY_PLANNER_INSTRUCTIONS
 
 from ._helpers import (
+    _dataset_case_agentic_queries,
     _dataset_case_query,
     _list_dataset_options,
     _project_labels,
@@ -125,8 +130,12 @@ async def get_labeling_pool(
         )
     query = (q if manual else str(case_query or "")).strip()
 
+    # Fold the case's planned agentic sub-queries into the auto pool (not a manual one-off search).
+    agentic = [] if manual else await _dataset_case_agentic_queries(db, dataset.id, test_id)
+
     pool, computed_at, provider_connected = await assemble_case_pool(
-        db, project, test_id, query, depth=depth, manual=manual, refresh=refresh
+        db, project, test_id, query, depth=depth, manual=manual, refresh=refresh,
+        agentic_queries=agentic,
     )
 
     labels_by_key, labeler_by_key, _, ai_labels_by_key = await _project_labels(
@@ -141,6 +150,22 @@ async def get_labeling_pool(
         labeler_by_key=labeler_by_key,
         ai_labels_by_key=ai_labels_by_key,
         computed_at=computed_at,
+        queries=LabelingQueries(base=[query] if query else [], agentic=agentic),
+    )
+
+
+@router.get("/labeling/prompts", response_model=LabelingPromptDefaults)
+async def get_labeling_prompts(
+    project: Project = Depends(get_current_project),
+):
+    """Default rubrics for the AI judge and query planner, so the UI shows the real text.
+
+    The reviewer can edit these before running either; the defaults are sourced from the services
+    so the displayed text never drifts from what actually runs.
+    """
+    return LabelingPromptDefaults(
+        ai_judge=DEFAULT_AI_JUDGE_INSTRUCTIONS,
+        query_planner=DEFAULT_QUERY_PLANNER_INSTRUCTIONS,
     )
 
 

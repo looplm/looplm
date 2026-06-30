@@ -1,13 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   type LabelingCase,
   type LabelingPoolResponse,
+  type LabelingPromptDefaults,
   type PooledChunkForLabeling,
 } from "@/lib/api";
 import { PoolChunkRow } from "./pool-chunk-row";
 import { PoolSection } from "./pool-section";
+import { CasePromptsPanel } from "./case-prompts";
 
 // Risk slices a test case can be assigned to (matches the API's SLICE_VALUES).
 const SLICES = ["broad", "safety", "adversarial"] as const;
@@ -33,6 +35,9 @@ export function CaseCard({
   onClearGrade,
   onAiJudge,
   aiJudging,
+  onPlan,
+  planning,
+  promptDefaults,
 }: {
   c: LabelingCase;
   canEdit: boolean;
@@ -48,9 +53,18 @@ export function CaseCard({
   onGrade: (testId: string, chunk: PooledChunkForLabeling, grade: number) => void;
   onClearGrade: (testId: string, chunk: PooledChunkForLabeling) => void;
   // Run the LLM "AI judge" over this case's pooled chunks (a one-click second annotator).
-  onAiJudge: () => void;
+  // ``instructions`` overrides the default rubric (edited in the prompts panel).
+  onAiJudge: (instructions?: string) => void;
   aiJudging: boolean;
+  // Plan (or re-plan) the agentic sub-queries for this case, then re-pool.
+  onPlan: (instructions?: string) => void;
+  planning: boolean;
+  // Default rubrics (judge + planner) loaded once by the page; null until fetched.
+  promptDefaults: LabelingPromptDefaults | null;
 }) {
+  // Edited AI-judge rubric for this case (null = use the default). The header judge button runs
+  // with it; the prompts panel edits it.
+  const [judgeInstructions, setJudgeInstructions] = useState<string | null>(null);
   const chunks = useMemo(() => pool?.chunks ?? [], [pool]);
   // Counts come from the live pool once loaded; until then fall back to the view's tallies.
   const counts = useMemo(() => {
@@ -126,7 +140,7 @@ export function CaseCard({
           </select>
           <button
             disabled={!canEdit || aiJudging || !indexConnected}
-            onClick={onAiJudge}
+            onClick={() => onAiJudge(judgeInstructions ?? undefined)}
             title="Grade this case's chunks with the LLM — a second opinion that shows up in annotator agreement"
             className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border border-violet-300 dark:border-violet-700/60 text-violet-600 dark:text-violet-300 hover:border-violet-400 disabled:opacity-40"
           >
@@ -148,6 +162,18 @@ export function CaseCard({
       </div>
       {!collapsed && (
         <div className="overflow-hidden rounded-b-xl">
+          {indexConnected && (
+            <CasePromptsPanel
+              queries={pool?.queries}
+              defaults={promptDefaults}
+              canEdit={canEdit}
+              indexConnected={indexConnected}
+              planning={planning}
+              judgeInstructions={judgeInstructions}
+              onJudgeInstructionsChange={setJudgeInstructions}
+              onPlan={onPlan}
+            />
+          )}
           {!indexConnected ? (
             <p className="px-4 py-6 text-[12px] text-gray-400 dark:text-slate-500">
               Connect an index provider (Settings → Integrations) to pool candidate chunks for

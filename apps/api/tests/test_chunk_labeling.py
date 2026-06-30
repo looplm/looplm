@@ -181,7 +181,7 @@ async def test_labeling_endpoints_roundtrip(client: AsyncClient, auth_headers, d
 async def test_ai_judge_stores_labels_under_ai_annotator(
     client: AsyncClient, auth_headers, db_session, test_project, monkeypatch
 ):
-    import app.routers.chunk_labels.operations as ops
+    import app.routers.chunk_labels.llm_ops as ops
     from app.services.analysis_llm import LlmUsageInfo
 
     await _seed_dataset(db_session, test_project)

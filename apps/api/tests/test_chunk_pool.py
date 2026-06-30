@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.index_providers.base import CorpusDoc
-from app.services.chunk_pool import assemble_pool
+from app.services.chunk_pool import AgenticQuery, assemble_pool
 
 
 class FakeProvider:
@@ -105,3 +105,57 @@ async def test_no_provider_returns_trace_only_pool():
     assert [c.chunk_id for c in res.chunks] == ["t1"]
     assert res.heads_ran == ["trace"]
     assert res.heads_failed == {}
+
+
+class QueryAwareProvider:
+    """Provider that returns canned hits per (query, mode), so agentic sub-queries differ."""
+
+    def __init__(self, by_query_mode: dict[tuple[str, str], list[CorpusDoc]]):
+        self._by = by_query_mode
+
+    async def search_documents(self, query, n, filters=None, *, mode="keyword", query_vector=None):
+        return self._by.get((query, mode), [])[:n]
+
+
+@pytest.mark.asyncio
+async def test_agentic_queries_fold_new_chunks_with_provenance():
+    provider = QueryAwareProvider(
+        {
+            ("base", "keyword"): [_doc("b1")],
+            ("sub-a", "keyword"): [_doc("b1"), _doc("a1")],
+            ("sub-b", "keyword"): [_doc("b2")],
+        }
+    )
+    res = await assemble_pool(
+        provider,
+        "base",
+        modes=["keyword"],
+        agentic_queries=[AgenticQuery("sub-a"), AgenticQuery("sub-b")],
+    )
+    by_id = {c.chunk_id: c for c in res.chunks}
+    # Base-found chunk also surfaced by an agentic query gains the agentic provenance.
+    assert by_id["b1"].provenance == ["keyword", "agentic"]
+    assert by_id["b1"].agentic_queries == ["sub-a"]
+    # Agentic-only chunks enter the pool tagged agentic, with their best agentic rank.
+    assert by_id["a1"].provenance == ["agentic"]
+    assert by_id["a1"].ranks == {"agentic": 2}
+    assert by_id["b2"].agentic_queries == ["sub-b"]
+    assert "agentic" in res.heads_ran
+
+
+@pytest.mark.asyncio
+async def test_agentic_does_not_overwrite_base_head_ranks():
+    # The base query ranks "shared" at keyword #2; an agentic query ranks it #1. The base
+    # per-head rank must stay #2 (authoritative for the badge); agentic rank is tracked apart.
+    provider = QueryAwareProvider(
+        {
+            ("base", "keyword"): [_doc("other"), _doc("shared")],
+            ("sub", "keyword"): [_doc("shared")],
+        }
+    )
+    res = await assemble_pool(
+        provider, "base", modes=["keyword"], agentic_queries=[AgenticQuery("sub")]
+    )
+    shared = {c.chunk_id: c for c in res.chunks}["shared"]
+    assert shared.ranks == {"keyword": 2, "agentic": 1}
+    assert shared.provenance == ["keyword", "agentic"]

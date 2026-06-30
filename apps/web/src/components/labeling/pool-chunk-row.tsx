@@ -97,6 +97,14 @@ export function PoolChunkRow({
           )}
           <span className="font-mono truncate">{chunk.chunk_id}</span>
           {relevance != null && chunk.labeled_by && <span className="italic">by {chunk.labeled_by}</span>}
+          {chunk.agentic_queries && chunk.agentic_queries.length > 0 && (
+            <span
+              className="text-indigo-500/80 dark:text-indigo-400/80 truncate max-w-[300px]"
+              title={`Surfaced by agentic ${chunk.agentic_queries.length === 1 ? "query" : "queries"}: ${chunk.agentic_queries.join(" · ")}`}
+            >
+              via {chunk.agentic_queries.join(" · ")}
+            </span>
+          )}
         </div>
       </div>
 

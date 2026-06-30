@@ -11,7 +11,7 @@ from fastapi import APIRouter
 
 from app.auth import require_section
 
-from . import operations, views
+from . import llm_ops, operations, views
 
 router = APIRouter(
     prefix="/api/pipeline",
@@ -20,9 +20,10 @@ router = APIRouter(
 )
 
 # Include order preserves the original module's registration: read endpoints (the GET views)
-# first, then the mutation/agreement operations. All paths are specific and static, so ordering
-# does not affect matching.
+# first, then the human-label mutations/agreement, then the LLM-backed ops (AI judge, planner).
+# All paths are specific and static, so ordering does not affect matching.
 router.include_router(views.router)
 router.include_router(operations.router)
+router.include_router(llm_ops.router)
 
 __all__ = ["router"]

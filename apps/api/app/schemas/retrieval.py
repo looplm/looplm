@@ -196,13 +196,28 @@ class PooledChunkForLabeling(BaseModel):
     content_preview: str | None = None
     score: float | None = None
     provenance: list[str] = Field(default_factory=list)
-    # head -> 1-indexed rank in that head's results (e.g. {"vector": 3, "hybrid": 2}).
+    # head -> 1-indexed rank in that head's results (e.g. {"vector": 3, "hybrid": 2}). The
+    # pseudo-head "agentic" holds the best rank any planned sub-query gave the chunk.
     ranks: dict[str, int] = Field(default_factory=dict)
+    # Agentic sub-queries (from the LLM planner) that surfaced this chunk, when any did.
+    agentic_queries: list[str] = Field(default_factory=list)
     # Current graded relevance label 0..3, or None when not yet judged.
     relevance: int | None = None
     labeled_by: str | None = None
     # The AI judge's graded relevance 0..3 for this chunk, when it has judged it (read-only).
     ai_relevance: int | None = None
+
+
+class LabelingQueries(BaseModel):
+    """The queries run to build a case's pool: the base question + any agentic sub-queries.
+
+    ``base`` is the case's own question (what the keyword/vector/hybrid heads ran on); ``agentic``
+    is the LLM planner's decomposition (empty until the planner has been run for the case). Shown
+    in the labeling UI so a reviewer sees exactly what was sent to the index.
+    """
+
+    base: list[str] = Field(default_factory=list)
+    agentic: list[str] = Field(default_factory=list)
 
 
 class LabelingPoolResponse(BaseModel):
@@ -224,6 +239,8 @@ class LabelingPoolResponse(BaseModel):
     # ISO timestamp of when this pool was assembled against the index. Reflects the cached
     # build time, so the UI can show "pooled 2h ago" and offer an explicit recompute.
     computed_at: str | None = None
+    # The queries this pool was built from (base question + any agentic sub-queries).
+    queries: LabelingQueries | None = None
 
 
 class ChunkLabelUpsert(BaseModel):
@@ -253,6 +270,31 @@ class AiJudgeResponse(BaseModel):
     # chunk_id -> AI-assigned graded relevance 0..3.
     grades: dict[str, int] = Field(default_factory=dict)
     judged: int = 0
+
+
+class PlanQueriesRequest(BaseModel):
+    test_id: str
+    # Dataset the case belongs to; defaults to the most recently updated dataset.
+    dataset_id: str | None = None
+    # Optional override of the default planner rubric (system prompt) for this run.
+    instructions: str | None = None
+    # Optional cap on how many sub-queries to plan (server clamps to a sane range).
+    max_queries: int | None = None
+
+
+class PlanQueriesResponse(BaseModel):
+    """The planned agentic queries for a case, persisted so later pools fold them in."""
+
+    test_id: str
+    base: list[str] = Field(default_factory=list)
+    agentic: list[str] = Field(default_factory=list)
+
+
+class LabelingPromptDefaults(BaseModel):
+    """Default rubrics the UI shows (and lets a reviewer edit before running)."""
+
+    ai_judge: str
+    query_planner: str
 
 
 class LabelingStatusUpdate(BaseModel):

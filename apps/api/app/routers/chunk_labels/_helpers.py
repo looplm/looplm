@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -21,11 +22,17 @@ from app.services.analysis_llm import merge_llm_settings
 from app.services.chunk_pool import (
     DEFAULT_POOL_DEPTH,
     SLICE_POOL_DEPTH,
+    AgenticQuery,
     PooledChunk,
     PoolResult,
     assemble_pool,
 )
 from app.services.query_embedding import embed_query
+
+# Key on the test case's metadata under which the planner's agentic queries are persisted, so the
+# pool folds them in on every later visit (and the multi-mode eval can reuse them) without
+# re-spending an LLM call.
+LABELING_QUERIES_META_KEY = "labeling_queries"
 
 
 def _display_name(email: str | None) -> str | None:
@@ -96,6 +103,44 @@ async def _dataset_case_query(db: AsyncSession, dataset_id: UUID, test_id: str) 
             )
         )
     ).scalar_one_or_none()
+
+
+async def _dataset_case_agentic_queries(
+    db: AsyncSession, dataset_id: UUID, test_id: str
+) -> list[str]:
+    """The planner's persisted agentic sub-queries for a case, or [] if none planned yet."""
+    meta = (
+        await db.execute(
+            select(TestCase.test_case_metadata).where(
+                TestCase.dataset_id == dataset_id, TestCase.test_id == test_id
+            )
+        )
+    ).scalar_one_or_none()
+    queries = (meta or {}).get(LABELING_QUERIES_META_KEY, {}).get("agentic")
+    return [q for q in queries if isinstance(q, str) and q.strip()] if isinstance(queries, list) else []
+
+
+async def _persist_case_agentic_queries(
+    db: AsyncSession, dataset_id: UUID, test_id: str, *, base: str, agentic: list[str]
+) -> None:
+    """Persist the planned queries onto the case's metadata so later pools fold them in.
+
+    Stored under ``metadata.labeling_queries = {base, agentic}``. JSONB needs a fresh dict assigned
+    for SQLAlchemy to flag the column dirty, so we copy-update rather than mutate in place.
+    """
+    case = (
+        await db.execute(
+            select(TestCase).where(
+                TestCase.dataset_id == dataset_id, TestCase.test_id == test_id
+            )
+        )
+    ).scalar_one_or_none()
+    if case is None:
+        return
+    meta = dict(case.test_case_metadata or {})
+    meta[LABELING_QUERIES_META_KEY] = {"base": [base], "agentic": agentic}
+    case.test_case_metadata = meta
+    await db.flush()
 
 
 async def _project_labels(
@@ -169,8 +214,21 @@ _MAX_POOL_DEPTH = 50
 _POOL_CACHE_TTL = 21_600  # 6 hours
 
 
-def _pool_cache_key(project_id: UUID, test_id: str, per_head: int) -> str:
-    return f"labeling:pool:{project_id}:{test_id}:{per_head}"
+def _agentic_signature(queries: list[str]) -> str:
+    """Stable short signature of the agentic query set, for the pool cache key.
+
+    Folding agentic queries changes the pool, so the cache must distinguish a base-only pool
+    ("0") from one built with a given set of sub-queries. Re-planning yields a different set →
+    a different key → a natural cache miss, so no explicit invalidation is needed.
+    """
+    if not queries:
+        return "0"
+    joined = "\n".join(sorted(queries))
+    return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:12]
+
+
+def _pool_cache_key(project_id: UUID, test_id: str, per_head: int, agentic_sig: str) -> str:
+    return f"labeling:pool:{project_id}:{test_id}:{per_head}:{agentic_sig}"
 
 
 def _serialize_pool(pool: PoolResult, computed_at: str) -> dict:
@@ -187,6 +245,7 @@ def _serialize_pool(pool: PoolResult, computed_at: str) -> dict:
                 "score": c.score,
                 "provenance": c.provenance,
                 "ranks": c.ranks,
+                "agentic_queries": c.agentic_queries,
             }
             for c in pool.chunks
         ],
@@ -204,6 +263,7 @@ def _deserialize_pool(data: dict) -> PoolResult:
                 score=c.get("score"),
                 provenance=list(c.get("provenance") or []),
                 ranks={k: int(v) for k, v in (c.get("ranks") or {}).items()},
+                agentic_queries=list(c.get("agentic_queries") or []),
             )
             for c in data.get("chunks", [])
         ],
@@ -238,15 +298,19 @@ async def assemble_case_pool(
     depth: int | None = None,
     manual: bool = False,
     refresh: bool = False,
+    agentic_queries: list[str] | None = None,
 ) -> tuple[PoolResult, str | None, bool]:
     """Assemble (or load from cache) the candidate pool for a case's query.
 
     Shared by the labeling-pool view and the AI judge so both judge the *same* chunks. Resolves
     the per-head depth from the case's slice, runs the connected index's heads via
     :func:`assemble_pool`, and caches the auto-pool in Redis (a manual ``q`` is always fresh and
-    never cached; ``refresh`` bypasses the cache). Returns ``(pool, computed_at, provider_connected)``.
+    never cached; ``refresh`` bypasses the cache). When ``agentic_queries`` are given, each is
+    embedded and folded into the pool, and the cache key carries their signature so a base-only
+    pool and an agentic pool never collide. Returns ``(pool, computed_at, provider_connected)``.
     """
     per_head = await _case_pool_depth(db, project, test_id, depth)
+    agentic_queries = [q for q in (agentic_queries or []) if q and q.strip()]
 
     provider_row = (
         await db.execute(
@@ -257,20 +321,32 @@ async def assemble_case_pool(
         )
     ).scalar_one_or_none()
 
-    cache_key = None if manual else _pool_cache_key(project.id, test_id, per_head)
+    cache_key = (
+        None
+        if manual
+        else _pool_cache_key(project.id, test_id, per_head, _agentic_signature(agentic_queries))
+    )
     if cache_key and not refresh:
         cached = await cache_get_json(cache_key)
         if cached is not None:
             return _deserialize_pool(cached), cached.get("computed_at"), provider_row is not None
 
-    # Embed the query ourselves so vector/hybrid heads work even when the index has no
+    # Embed each query ourselves so vector/hybrid heads work even when the index has no
     # server-side vectorizer. None (unconfigured or failed) → text-based vector search fallback.
-    query_vector = await embed_query(merge_llm_settings(project.settings, None), query)
+    llm_settings = merge_llm_settings(project.settings, None)
+    query_vector = await embed_query(llm_settings, query)
+    agentic_specs = [
+        AgenticQuery(text=q, vector=await embed_query(llm_settings, q)) for q in agentic_queries
+    ]
 
     provider = build_index_provider(provider_row) if provider_row is not None else None
     try:
         pool = await assemble_pool(
-            provider, query, per_head_depth=per_head, query_vector=query_vector
+            provider,
+            query,
+            per_head_depth=per_head,
+            query_vector=query_vector,
+            agentic_queries=agentic_specs or None,
         )
     finally:
         if provider is not None:

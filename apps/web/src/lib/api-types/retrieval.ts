@@ -167,15 +167,24 @@ export interface PooledChunkForLabeling {
   url?: string | null;
   content_preview?: string | null;
   score?: number | null;
-  // Heads that surfaced this chunk: "trace" | "keyword" | "vector" | "hybrid".
+  // Heads that surfaced this chunk: "trace" | "keyword" | "vector" | "hybrid" | "agentic".
   provenance: string[];
   // head -> 1-indexed rank the chunk held in that head's results, e.g. { vector: 3, hybrid: 2 }.
+  // The pseudo-head "agentic" holds the best rank any planned sub-query gave the chunk.
   ranks: Record<string, number>;
+  // Agentic sub-queries (from the LLM planner) that surfaced this chunk, when any did.
+  agentic_queries?: string[];
   // Graded relevance 0..3, or null when not yet judged.
   relevance?: number | null;
   labeled_by?: string | null;
   // The AI judge's graded relevance 0..3 for this chunk (read-only second opinion).
   ai_relevance?: number | null;
+}
+
+// The queries a case's pool was built from: the base question + any agentic sub-queries.
+export interface LabelingQueries {
+  base: string[];
+  agentic: string[];
 }
 
 export interface LabelingPoolResponse {
@@ -188,6 +197,21 @@ export interface LabelingPoolResponse {
   chunks: PooledChunkForLabeling[];
   // ISO timestamp of when this pool was last assembled against the index, or null.
   computed_at?: string | null;
+  // The queries this pool was built from (base question + any agentic sub-queries).
+  queries?: LabelingQueries | null;
+}
+
+// Result of planning agentic sub-queries for a case (persisted on the case).
+export interface PlanQueriesResponse {
+  test_id: string;
+  base: string[];
+  agentic: string[];
+}
+
+// Default rubrics the UI shows (and lets a reviewer edit before running).
+export interface LabelingPromptDefaults {
+  ai_judge: string;
+  query_planner: string;
 }
 
 // --- Quantitative retrieval-quality metrics (eval-run based) ---

@@ -14,6 +14,8 @@ import type {
   ChunkMetadataResponse,
   AgreementReport,
   AiJudgeResponse,
+  PlanQueriesResponse,
+  LabelingPromptDefaults,
 } from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
@@ -82,6 +84,25 @@ export const aiJudgeCase = (
       instructions: opts.instructions,
     }),
   });
+
+// Plan agentic sub-queries for a case with the LLM and persist them; later pools fold them in.
+export const planCaseQueries = (
+  testId: string,
+  opts: { datasetId?: string; instructions?: string; maxQueries?: number } = {},
+) =>
+  request<PlanQueriesResponse>(`/api/pipeline/labeling/plan-queries`, {
+    method: "POST",
+    body: JSON.stringify({
+      test_id: testId,
+      dataset_id: opts.datasetId,
+      instructions: opts.instructions,
+      max_queries: opts.maxQueries,
+    }),
+  });
+
+// Default rubrics for the AI judge and query planner (shown + editable in the labeling UI).
+export const getLabelingPrompts = () =>
+  request<LabelingPromptDefaults>(`/api/pipeline/labeling/prompts`);
 
 export const setLabelingComplete = (testId: string, complete: boolean) =>
   request<{ test_id: string; complete: boolean }>(`/api/pipeline/labeling/status`, {

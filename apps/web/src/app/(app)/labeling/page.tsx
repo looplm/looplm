@@ -11,28 +11,17 @@ import {
   saveChunkLabels,
   deleteChunkLabel,
   aiJudgeCase,
+  planCaseQueries,
+  getLabelingPrompts,
   type LabelingRunResponse,
   type LabelingPoolResponse,
+  type LabelingPromptDefaults,
   type PooledChunkForLabeling,
 } from "@/lib/api";
 import { usePermissions } from "@/components/permissions-context";
 import { AgreementPanel } from "@/components/labeling/agreement-panel";
 import { CaseCard } from "@/components/labeling/case-card";
-
-// Compact "x ago" for the last-pooled timestamp. Falls back to the locale date past a week.
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (secs < 45) return "just now";
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.round(hrs / 24);
-  if (days <= 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
+import { LabelingControls } from "@/components/labeling/labeling-controls";
 
 export default function LabelingPage() {
   const { canWrite } = usePermissions();
@@ -52,11 +41,18 @@ export default function LabelingPage() {
   const [poolByCase, setPoolByCase] = useState<Record<string, LabelingPoolResponse>>({});
   const [poolLoading, setPoolLoading] = useState<Set<string>>(new Set());
   const poolRequested = useRef<Set<string>>(new Set());
+  // Default judge + planner rubrics, loaded once and shown (editable) in each case's prompts panel.
+  const [promptDefaults, setPromptDefaults] = useState<LabelingPromptDefaults | null>(null);
+  // Cases whose agentic queries are currently being (re-)planned (per-case spinner).
+  const [planning, setPlanning] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     getIndexProviders()
       .then((res) => setIndexConnected(res.data.length > 0))
       .catch(() => setIndexConnected(false));
+    getLabelingPrompts()
+      .then(setPromptDefaults)
+      .catch(() => setPromptDefaults(null));
   }, []);
 
   // Load the labeling view for a dataset (or the most-recent one when unspecified).
@@ -266,10 +262,13 @@ export default function LabelingPage() {
   // Run the AI judge over a case's pooled chunks, then fold the grades in as a read-only second
   // opinion (the human's own grades are untouched). "AI" joins the case's labelers.
   const onAiJudge = useCallback(
-    async (testId: string) => {
+    async (testId: string, instructions?: string) => {
       setAiJudging((prev) => new Set(prev).add(testId));
       try {
-        const res = await aiJudgeCase(testId, { datasetId: view?.dataset_id ?? undefined });
+        const res = await aiJudgeCase(testId, {
+          datasetId: view?.dataset_id ?? undefined,
+          instructions,
+        });
         setPoolByCase((prev) => {
           const p = prev[testId];
           if (!p) return prev;
@@ -307,6 +306,35 @@ export default function LabelingPage() {
       }
     },
     [view],
+  );
+
+  // Plan (or re-plan) a case's agentic sub-queries with the LLM, then re-pool so their index hits
+  // fold in. The pool's cache key carries the query signature, so the re-fetch is a natural miss.
+  const onPlan = useCallback(
+    async (testId: string, instructions?: string) => {
+      setPlanning((prev) => new Set(prev).add(testId));
+      try {
+        const res = await planCaseQueries(testId, {
+          datasetId: view?.dataset_id ?? undefined,
+          instructions,
+        });
+        await loadPools([testId], view?.dataset_id ?? undefined, false);
+        toast.success(
+          res.agentic.length > 0
+            ? `Planned ${res.agentic.length} agentic quer${res.agentic.length === 1 ? "y" : "ies"}`
+            : "No agentic queries were planned for this case",
+        );
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Query planning failed");
+      } finally {
+        setPlanning((prev) => {
+          const next = new Set(prev);
+          next.delete(testId);
+          return next;
+        });
+      }
+    },
+    [view, loadPools],
   );
 
   // Progress: graded chunks over pooled chunks, across the pools loaded so far.
@@ -378,53 +406,18 @@ export default function LabelingPage() {
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-3 mb-4 text-xs text-gray-400 dark:text-slate-500">
-            <span>{progress.labeled} / {progress.total} pooled chunks labeled</span>
-            <div className="flex-1 max-w-[240px] h-1.5 rounded-full bg-gray-100 dark:bg-slate-800 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-indigo-500"
-                style={{ width: `${progress.total ? (progress.labeled / progress.total) * 100 : 0}%` }}
-              />
-            </div>
-            {!canEdit && <span className="text-amber-600 dark:text-amber-400">read-only access</span>}
-            <div className="ml-auto flex items-center gap-3">
-              {indexConnected && (
-                <div className="flex items-center gap-2">
-                  <span title="Candidates are pooled live from the index. Shows the oldest pool across cases.">
-                    {poolLoading.size > 0
-                      ? "Pooling…"
-                      : lastPooledAt
-                        ? `Pooled ${relativeTime(lastPooledAt)}`
-                        : "Not pooled"}
-                  </span>
-                  {Object.keys(poolHeadsFailed).length > 0 && (
-                    <span
-                      className="text-amber-600 dark:text-amber-400"
-                      title={Object.entries(poolHeadsFailed)
-                        .map(([h, r]) => `${h}: ${r}`)
-                        .join("\n")}
-                    >
-                      {Object.keys(poolHeadsFailed).join(", ")} unavailable
-                    </span>
-                  )}
-                  <button
-                    onClick={recomputePools}
-                    disabled={recomputing || poolLoading.size > 0}
-                    title="Re-query the index for every case, bypassing the cache. Use after re-indexing."
-                    className="px-2 py-0.5 rounded-md border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-indigo-400 disabled:opacity-40"
-                  >
-                    {recomputing ? "Recomputing…" : "Recompute"}
-                  </button>
-                </div>
-              )}
-              <button onClick={collapseAll} className="hover:text-gray-600 dark:hover:text-slate-300">
-                Collapse all
-              </button>
-              <button onClick={expandAll} className="hover:text-gray-600 dark:hover:text-slate-300">
-                Expand all
-              </button>
-            </div>
-          </div>
+          <LabelingControls
+            progress={progress}
+            canEdit={canEdit}
+            indexConnected={indexConnected}
+            pooling={poolLoading.size > 0}
+            lastPooledAt={lastPooledAt}
+            poolHeadsFailed={poolHeadsFailed}
+            recomputing={recomputing}
+            onRecompute={recomputePools}
+            onCollapseAll={collapseAll}
+            onExpandAll={expandAll}
+          />
 
           <AgreementPanel canEdit={canEdit} />
 
@@ -472,8 +465,11 @@ export default function LabelingPage() {
                         onSetSlice={(s) => onSetSlice(c.test_id, s)}
                         onGrade={onGrade}
                         onClearGrade={onClearGrade}
-                        onAiJudge={() => onAiJudge(c.test_id)}
+                        onAiJudge={(instructions) => onAiJudge(c.test_id, instructions)}
                         aiJudging={aiJudging.has(c.test_id)}
+                        onPlan={(instructions) => onPlan(c.test_id, instructions)}
+                        planning={planning.has(c.test_id)}
+                        promptDefaults={promptDefaults}
                       />
                     ))}
                   </div>
