@@ -20,8 +20,8 @@ export function JudgeAllButton({
   onDone,
 }: {
   datasets: { id: string; name: string }[];
-  // The datasets currently in scope on the panel; empty means "all datasets" (the metrics default
-  // is most-recent, but judging is explicit about covering everything so the AI gold is complete).
+  // The datasets to judge; empty means "all datasets" (judge every case in the project so the AI
+  // gold is complete across datasets, not just the one currently open).
   selectedIds: string[];
   // Called after judging finishes so the caller can recompute metrics against the new AI labels.
   onDone: () => void;

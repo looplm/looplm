@@ -172,20 +172,11 @@ export default function RetrievalMetricsPanel() {
           )}
           {source === "labels"
             ? datasets.length > 0 && (
-                <>
-                  {canEdit && (
-                    <JudgeAllButton
-                      datasets={datasets}
-                      selectedIds={datasetIds}
-                      onDone={() => setReloadKey((k) => k + 1)}
-                    />
-                  )}
-                  <DatasetMultiSelect
-                    datasets={datasets}
-                    selected={datasetIds}
-                    onChange={setDatasetIds}
-                  />
-                </>
+                <DatasetMultiSelect
+                  datasets={datasets}
+                  selected={datasetIds}
+                  onChange={setDatasetIds}
+                />
               )
             : runs.length > 0 && (
                 <select
@@ -226,7 +217,7 @@ export default function RetrievalMetricsPanel() {
       )}
 
       {source === "labels" && labelsView === "byStage" ? (
-        <ByStageComparison key={reloadKey} datasetIds={datasetIds} goldSource={goldSource} />
+        <ByStageComparison datasetIds={datasetIds} goldSource={goldSource} />
       ) : loading ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
           Computing retrieval metrics...

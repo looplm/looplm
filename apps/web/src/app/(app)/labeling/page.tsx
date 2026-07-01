@@ -13,6 +13,7 @@ import {
 import { usePermissions } from "@/components/permissions-context";
 import { AgreementPanel } from "@/components/labeling/agreement-panel";
 import { LabelingControls } from "@/components/labeling/labeling-controls";
+import { JudgeAllButton } from "@/components/retrieval/judge-all-button";
 import { runBounded } from "@/lib/run-bounded";
 
 const SLICE_BADGE: Record<string, string> = {
@@ -125,18 +126,23 @@ export default function LabelingIndexPage() {
       <div className="flex items-center justify-between gap-4 mb-1">
         <h1 className="text-3xl font-bold">Labeling</h1>
         {datasets.length > 0 && (
-          <select
-            value={datasetId ?? ""}
-            onChange={(e) => setDatasetId(e.target.value || undefined)}
-            className="rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-sm"
-            title="Dataset to label"
-          >
-            {datasets.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name} ({d.test_count})
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            {canEdit && indexConnected && (
+              <JudgeAllButton datasets={datasets} selectedIds={[]} onDone={() => load(datasetId)} />
+            )}
+            <select
+              value={datasetId ?? ""}
+              onChange={(e) => setDatasetId(e.target.value || undefined)}
+              className="rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 text-sm"
+              title="Dataset to label"
+            >
+              {datasets.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} ({d.test_count})
+                </option>
+              ))}
+            </select>
+          </div>
         )}
       </div>
       <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
