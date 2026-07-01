@@ -21,7 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chunk_labels import DEFAULT_SLICE, TestCaseLabelingStatus
 from app.models.evaluations import EvalResult, EvalRun
-from app.schemas.retrieval import RetrievalCaseMetrics, RetrievalRunMetrics, SliceMetrics
+from app.schemas.retrieval import (
+    ByStageCaseMetrics,
+    RetrievalCaseMetrics,
+    RetrievalRunMetrics,
+    SliceMetrics,
+    StageMetrics,
+)
 from app.services.retrieval_metrics import (
     compute_bpref,
     compute_condensed_ndcg_at_k,
@@ -33,6 +39,79 @@ logger = logging.getLogger(__name__)
 
 # Richer k grid than the grader default so the run view can draw a recall curve.
 AGG_KS: tuple[int, ...] = (1, 3, 5, 10)
+
+# Retrieval pipeline stages, in pipeline order, mapping each pool head to a display label.
+STAGE_LABELS: tuple[tuple[str, str], ...] = (
+    ("keyword", "Sparse"),
+    ("vector", "Dense"),
+    ("hybrid", "RRF"),
+    ("semantic", "Reranked"),
+    ("agentic", "Agentic"),
+)
+
+
+def build_by_stage_metrics(
+    cases: list[tuple[str, str | None]],
+    retrieved_by_stage: dict[str, dict[str, list[str]]],
+    relevant_by_test: dict[str, set[str]],
+    nonrelevant_by_test: dict[str, set[str]],
+    grade_by_test: dict[str, dict[str, int]],
+    slice_by_test: dict[str, str],
+    ks: tuple[int, ...] = AGG_KS,
+) -> tuple[list[StageMetrics], list[ByStageCaseMetrics], int]:
+    """Per-stage metrics + a per-case grid, by scoring each stage's ranking against the gold.
+
+    ``retrieved_by_stage`` maps stage head → {test_id → ranked chunk ids that stage returned}.
+    Each stage reuses :func:`aggregate_retrieval_metrics_from_labels`, so the metric math and the
+    "drop cases without gold" rule stay identical to the single-ranking view. Returns
+    ``(stages, per_case_rows, evaluated_cases)``; the per-case grid carries each stage's recall and
+    nDCG at the largest k for the drilldown.
+    """
+    lk = str(max(ks))
+    stages: list[StageMetrics] = []
+    # test_id -> {"input", "recall": {stage: v}, "ndcg": {stage: v}}
+    per_case: dict[str, dict[str, Any]] = {}
+    evaluated = 0
+    for head, label in STAGE_LABELS:
+        m = aggregate_retrieval_metrics_from_labels(
+            cases,
+            retrieved_by_stage.get(head, {}),
+            relevant_by_test,
+            nonrelevant_by_test,
+            slice_by_test,
+            grade_by_test,
+            ks=ks,
+        )
+        evaluated = max(evaluated, m.evaluated_cases)
+        stages.append(
+            StageMetrics(
+                stage=head,
+                label=label,
+                evaluated_cases=m.evaluated_cases,
+                recall_at_k=m.recall_at_k,
+                precision_at_k=m.precision_at_k,
+                hit_rate_at_k=m.hit_rate_at_k,
+                ndcg_at_k=m.ndcg_at_k,
+                mrr=m.mrr,
+            )
+        )
+        for c in m.cases:
+            slot = per_case.setdefault(c.test_id, {"input": c.input, "recall": {}, "ndcg": {}})
+            slot["recall"][head] = (c.recall_at_k or {}).get(lk)
+            slot["ndcg"][head] = (c.ndcg_at_k or {}).get(lk)
+
+    rows = [
+        ByStageCaseMetrics(
+            test_id=tid,
+            input=slot["input"],
+            recall_by_stage=slot["recall"],
+            ndcg_by_stage=slot["ndcg"],
+        )
+        for tid, slot in per_case.items()
+    ]
+    # Worst reranked recall first, so the cases the final ranking struggles on lead the drilldown.
+    rows.sort(key=lambda r: (r.recall_by_stage.get("semantic") is None, r.recall_by_stage.get("semantic") or 0.0))
+    return stages, rows, evaluated
 
 
 async def compute_and_store_run_retrieval_summary(

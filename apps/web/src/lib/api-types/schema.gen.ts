@@ -2739,6 +2739,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipeline/retrieval-metrics/by-stage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Retrieval Metrics By Stage
+         * @description Deterministic retrieval metrics per pipeline stage (sparse/dense/RRF/reranked/agentic).
+         *
+         *     For each of a dataset's cases we assemble the candidate pool (which records each chunk's rank
+         *     per head), reconstruct each stage's ranked list, and score it against the chunk-label gold
+         *     (``gold_source`` = human | ai | both). Stages are compared side by side, with a per-case grid.
+         */
+        get: operations["get_retrieval_metrics_by_stage_api_pipeline_retrieval_metrics_by_stage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipeline/targets": {
         parameters: {
             query?: never;
@@ -3566,6 +3590,26 @@ export interface paths {
         get: operations["get_gap_run_api_source_registry_gap_runs__run_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/source-registry/gap-runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Gap Run
+         * @description Stop a pending/running gap analysis. No-op if it already finished.
+         */
+        post: operations["cancel_gap_run_api_source_registry_gap_runs__run_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4430,6 +4474,60 @@ export interface components {
              * @default 0
              */
             total_traces: number;
+        };
+        /**
+         * ByStageCaseMetrics
+         * @description One test case's per-stage score (at the largest k) for the drilldown grid.
+         */
+        ByStageCaseMetrics: {
+            /** Input */
+            input?: string | null;
+            /** Ndcg By Stage */
+            ndcg_by_stage?: {
+                [key: string]: number | null;
+            };
+            /** Recall By Stage */
+            recall_by_stage?: {
+                [key: string]: number | null;
+            };
+            /** Test Id */
+            test_id: string;
+        };
+        /**
+         * ByStageMetricsResponse
+         * @description Per-stage retrieval-quality comparison over a dataset's cases, vs. chunk-label gold.
+         */
+        ByStageMetricsResponse: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /** Cases */
+            cases?: components["schemas"]["ByStageCaseMetrics"][];
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Dataset Name */
+            dataset_name?: string | null;
+            /**
+             * Evaluated Cases
+             * @default 0
+             */
+            evaluated_cases: number;
+            /**
+             * Gold Source
+             * @default human
+             */
+            gold_source: string;
+            /** Ks */
+            ks?: number[];
+            /** Stages */
+            stages?: components["schemas"]["StageMetrics"][];
+            /**
+             * Total Cases
+             * @default 0
+             */
+            total_cases: number;
         };
         /** CallbackInstallation */
         CallbackInstallation: {
@@ -8826,6 +8924,39 @@ export interface components {
             tokens_out?: number | null;
             /** Type */
             type?: string | null;
+        };
+        /**
+         * StageMetrics
+         * @description Deterministic retrieval metrics for one pipeline stage, macro-averaged across cases.
+         */
+        StageMetrics: {
+            /**
+             * Evaluated Cases
+             * @default 0
+             */
+            evaluated_cases: number;
+            /** Hit Rate At K */
+            hit_rate_at_k?: {
+                [key: string]: number;
+            };
+            /** Label */
+            label: string;
+            /** Mrr */
+            mrr?: number | null;
+            /** Ndcg At K */
+            ndcg_at_k?: {
+                [key: string]: number;
+            };
+            /** Precision At K */
+            precision_at_k?: {
+                [key: string]: number;
+            };
+            /** Recall At K */
+            recall_at_k?: {
+                [key: string]: number;
+            };
+            /** Stage */
+            stage: string;
         };
         /** StatusResponse */
         StatusResponse: {
@@ -15288,7 +15419,7 @@ export interface operations {
                 dataset_id?: string | null;
                 source?: string;
                 refresh?: boolean;
-                include_ai?: boolean;
+                gold_source?: string;
             };
             header?: {
                 "x-project-id"?: string | null;
@@ -15305,6 +15436,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetrievalRunMetrics"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_retrieval_metrics_by_stage_api_pipeline_retrieval_metrics_by_stage_get: {
+        parameters: {
+            query?: {
+                dataset_id?: string | null;
+                gold_source?: string;
+                refresh?: boolean;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ByStageMetricsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -17190,6 +17356,39 @@ export interface operations {
         };
     };
     get_gap_run_api_source_registry_gap_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_gap_run_api_source_registry_gap_runs__run_id__cancel_post: {
         parameters: {
             query?: never;
             header?: {

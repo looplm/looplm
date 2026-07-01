@@ -417,3 +417,40 @@ class RetrievalRunMetrics(BaseModel):
     # deep-rank miss on the safety slice isn't averaged away by the broad slice.
     slices: list[SliceMetrics] = Field(default_factory=list)
     cases: list[RetrievalCaseMetrics] = Field(default_factory=list)
+
+
+class StageMetrics(BaseModel):
+    """Deterministic retrieval metrics for one pipeline stage, macro-averaged across cases."""
+
+    stage: str  # keyword | vector | hybrid | semantic | agentic
+    label: str  # display label (Sparse / Dense / RRF / Reranked / Agentic)
+    evaluated_cases: int = 0
+    recall_at_k: dict[str, float] = Field(default_factory=dict)
+    precision_at_k: dict[str, float] = Field(default_factory=dict)
+    hit_rate_at_k: dict[str, float] = Field(default_factory=dict)
+    ndcg_at_k: dict[str, float] = Field(default_factory=dict)
+    mrr: float | None = None
+
+
+class ByStageCaseMetrics(BaseModel):
+    """One test case's per-stage score (at the largest k) for the drilldown grid."""
+
+    test_id: str
+    input: str | None = None
+    # stage -> recall@largest_k / nDCG@largest_k (None when that stage returned nothing for the case)
+    recall_by_stage: dict[str, float | None] = Field(default_factory=dict)
+    ndcg_by_stage: dict[str, float | None] = Field(default_factory=dict)
+
+
+class ByStageMetricsResponse(BaseModel):
+    """Per-stage retrieval-quality comparison over a dataset's cases, vs. chunk-label gold."""
+
+    available: bool = False
+    dataset_id: str | None = None
+    dataset_name: str | None = None
+    gold_source: str = "human"
+    ks: list[int] = Field(default_factory=list)
+    total_cases: int = 0
+    evaluated_cases: int = 0
+    stages: list[StageMetrics] = Field(default_factory=list)
+    cases: list[ByStageCaseMetrics] = Field(default_factory=list)

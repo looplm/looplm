@@ -8,6 +8,7 @@ import type {
   RetrievalPipelineResponse,
   RetrievalRunMetrics,
   RetrievalTargets,
+  ByStageMetricsResponse,
   LabelingRunResponse,
   LabelingPoolResponse,
   ChunkLabelUpsert,
@@ -48,6 +49,20 @@ export const getRetrievalMetrics = (
   if (opts.refresh) params.set("refresh", "true");
   if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
   return request<RetrievalRunMetrics>(`/api/pipeline/retrieval-metrics?${params.toString()}`);
+};
+
+// Per-stage deterministic retrieval metrics (sparse/dense/RRF/reranked/agentic) vs chunk-label gold.
+export const getRetrievalByStageMetrics = (
+  opts: { datasetId?: string; goldSource?: "human" | "ai" | "both"; refresh?: boolean } = {},
+) => {
+  const params = new URLSearchParams();
+  if (opts.datasetId) params.set("dataset_id", opts.datasetId);
+  if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
+  if (opts.refresh) params.set("refresh", "true");
+  const qs = params.toString();
+  return request<ByStageMetricsResponse>(
+    `/api/pipeline/retrieval-metrics/by-stage${qs ? `?${qs}` : ""}`,
+  );
 };
 
 export const getLabelingView = (datasetId?: string) =>

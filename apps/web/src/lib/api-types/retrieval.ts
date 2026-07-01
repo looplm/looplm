@@ -230,6 +230,38 @@ export interface LabelingPromptDefaults {
   query_planner: string;
 }
 
+// --- Per-stage deterministic retrieval metrics comparison ---
+
+export interface StageMetrics {
+  stage: string;
+  label: string;
+  evaluated_cases: number;
+  recall_at_k: Record<string, number>;
+  precision_at_k: Record<string, number>;
+  hit_rate_at_k: Record<string, number>;
+  ndcg_at_k: Record<string, number>;
+  mrr?: number | null;
+}
+
+export interface ByStageCaseMetrics {
+  test_id: string;
+  input?: string | null;
+  recall_by_stage: Record<string, number | null>;
+  ndcg_by_stage: Record<string, number | null>;
+}
+
+export interface ByStageMetricsResponse {
+  available: boolean;
+  dataset_id?: string | null;
+  dataset_name?: string | null;
+  gold_source: string;
+  ks: number[];
+  total_cases: number;
+  evaluated_cases: number;
+  stages: StageMetrics[];
+  cases: ByStageCaseMetrics[];
+}
+
 // --- Quantitative retrieval-quality metrics (eval-run based) ---
 
 export interface RetrievalCaseMetrics {

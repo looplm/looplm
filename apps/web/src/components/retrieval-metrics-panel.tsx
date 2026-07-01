@@ -20,6 +20,7 @@ import {
   ReliabilityBanner,
   SliceBreakdown,
 } from "@/components/retrieval/retrieval-table";
+import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 
 function TargetsEditor({
   targets,
@@ -132,6 +133,8 @@ export default function RetrievalMetricsPanel() {
   const [source, setSource] = useState<"urls" | "labels">("urls");
   // Which chunk labels resolve the gold (labels source only): human only, AI judge only, or both.
   const [goldSource, setGoldSource] = useState<"human" | "ai" | "both">("human");
+  // Labels source view: the overall system metrics, or the per-stage comparison.
+  const [labelsView, setLabelsView] = useState<"overall" | "byStage">("overall");
   const [metrics, setMetrics] = useState<RetrievalRunMetrics | null>(null);
   const [targets, setTargets] = useState<RetrievalTargets | null>(null);
   const [editing, setEditing] = useState(false);
@@ -151,6 +154,11 @@ export default function RetrievalMetricsPanel() {
   }, []);
 
   useEffect(() => {
+    // The per-stage view fetches its own data; skip the overall metrics request while it's shown.
+    if (source === "labels" && labelsView === "byStage") {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -178,7 +186,7 @@ export default function RetrievalMetricsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [runId, datasetId, source, goldSource]);
+  }, [runId, datasetId, source, goldSource, labelsView]);
 
   const largestK = metrics?.ks.length ? Math.max(...metrics.ks) : 10;
   const lk = String(largestK);
@@ -214,6 +222,23 @@ export default function RetrievalMetricsPanel() {
               </button>
             ))}
           </div>
+          {source === "labels" && (
+            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700 text-xs">
+              {(["overall", "byStage"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setLabelsView(v)}
+                  className={`px-2.5 py-1.5 ${
+                    labelsView === v
+                      ? "bg-indigo-600 text-white"
+                      : "bg-white dark:bg-slate-900 text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+                  }`}
+                >
+                  {v === "overall" ? "Overall" : "By stage"}
+                </button>
+              ))}
+            </div>
+          )}
           {source === "labels" && (
             <div
               className="flex items-center gap-1.5 text-xs"
@@ -321,7 +346,9 @@ export default function RetrievalMetricsPanel() {
         </div>
       )}
 
-      {loading ? (
+      {source === "labels" && labelsView === "byStage" ? (
+        <ByStageComparison datasetId={datasetId ?? undefined} goldSource={goldSource} />
+      ) : loading ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
           Computing retrieval metrics...
         </div>

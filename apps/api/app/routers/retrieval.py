@@ -30,7 +30,12 @@ from app.models.evaluations import EvalResult, EvalRun
 from app.models.index_providers import IndexProvider
 from app.models.models import Integration, Trace
 from app.models.project import Project
+from app.routers.chunk_labels._helpers import (
+    _dataset_case_agentic_queries,
+    assemble_case_pool,
+)
 from app.schemas.retrieval import (
+    ByStageMetricsResponse,
     RetrievalPipelineResponse,
     RetrievalRunMetrics,
     RetrievalTargets,
@@ -41,8 +46,10 @@ from app.services.query_embedding import embed_query
 from app.services.retrieval_config import get_rag_span_names
 from app.services.retrieval_metrics_aggregate import (
     AGG_KS,
+    STAGE_LABELS,
     aggregate_retrieval_metrics_from_labels,
     aggregate_run_retrieval_metrics,
+    build_by_stage_metrics,
 )
 from app.services.retrieval_pipeline_aggregate import build_retrieval_pipeline_aggregate
 from app.services.retrieval_probe import cached_probe_chunk_ids
@@ -159,6 +166,49 @@ async def get_retrieval_metrics(
     return aggregate_run_retrieval_metrics(run, results, slice_by_test)
 
 
+async def _resolve_project_gold(
+    db: AsyncSession, project: Project, gold_source: str
+) -> tuple[dict[str, set[str]], dict[str, set[str]], dict[str, dict[str, int]]]:
+    """Resolve gold chunk relevance for the project from the chosen annotator source.
+
+    ``gold_source`` picks whose labels count: ``human`` (default, human labels only), ``ai`` (the
+    AI judge's labels only), or ``both`` (as independent annotators). Human labels carry
+    ``annotator=None`` (keyed by user); the AI judge carries ``annotator="AI"``. Adjudicated gold
+    overrides always win. Returns ``(relevant_by_test, nonrelevant_by_test, grade_by_test)``.
+    """
+    labels = (
+        await db.execute(
+            select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
+        )
+    ).scalars().all()
+    golds = (
+        await db.execute(select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id))
+    ).scalars().all()
+    overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
+
+    def _included(lbl: ChunkRelevanceLabel) -> bool:
+        is_ai = lbl.annotator is not None
+        if gold_source == "ai":
+            return is_ai
+        if gold_source == "both":
+            return True
+        return not is_ai  # "human"
+
+    return resolve_gold(
+        (
+            (
+                lbl.test_id,
+                lbl.chunk_id,
+                lbl.relevance,
+                lbl.labeled_by if lbl.annotator is None else lbl.annotator,
+            )
+            for lbl in labels
+            if _included(lbl)
+        ),
+        overrides,
+    )
+
+
 async def _labels_metrics(
     db: AsyncSession,
     project: Project,
@@ -191,40 +241,8 @@ async def _labels_metrics(
     ).all()
     cases = [(tid, prompt) for tid, prompt in case_rows]
 
-    # Resolve per-annotator labels into a single gold verdict per chunk (majority vote / adjudicated
-    # override). ``gold_source`` picks whose labels count: human only (default), the AI judge only,
-    # or both as independent annotators. Human labels carry ``annotator=None`` (keyed by user);
-    # the AI judge carries ``annotator="AI"``.
-    labels = (
-        await db.execute(
-            select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
-        )
-    ).scalars().all()
-    golds = (
-        await db.execute(select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id))
-    ).scalars().all()
-    overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
-
-    def _included(lbl: ChunkRelevanceLabel) -> bool:
-        is_ai = lbl.annotator is not None
-        if gold_source == "ai":
-            return is_ai
-        if gold_source == "both":
-            return True
-        return not is_ai  # "human"
-
-    relevant_by_test, nonrelevant_by_test, grade_by_test = resolve_gold(
-        (
-            (
-                lbl.test_id,
-                lbl.chunk_id,
-                lbl.relevance,
-                lbl.labeled_by if lbl.annotator is None else lbl.annotator,
-            )
-            for lbl in labels
-            if _included(lbl)
-        ),
-        overrides,
+    relevant_by_test, nonrelevant_by_test, grade_by_test = await _resolve_project_gold(
+        db, project, gold_source
     )
 
     # Probe the connected index live for what "the system" retrieves per case. No index → no
@@ -280,6 +298,98 @@ async def _labels_metrics(
         grade_by_test=grade_by_test,
         dataset_id=str(dataset.id),
         dataset_name=dataset.name,
+    )
+
+
+@router.get("/retrieval-metrics/by-stage", response_model=ByStageMetricsResponse)
+async def get_retrieval_metrics_by_stage(
+    dataset_id: UUID | None = None,
+    gold_source: str = "human",
+    refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Deterministic retrieval metrics per pipeline stage (sparse/dense/RRF/reranked/agentic).
+
+    For each of a dataset's cases we assemble the candidate pool (which records each chunk's rank
+    per head), reconstruct each stage's ranked list, and score it against the chunk-label gold
+    (``gold_source`` = human | ai | both). Stages are compared side by side, with a per-case grid.
+    """
+    dataset = (
+        await db.execute(
+            select(TestDataset)
+            .where(
+                TestDataset.project_id == project.id,
+                *([TestDataset.id == dataset_id] if dataset_id is not None else []),
+            )
+            .order_by(TestDataset.updated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if dataset is None:
+        return ByStageMetricsResponse(available=False, gold_source=gold_source, ks=list(AGG_KS))
+
+    case_rows = (
+        await db.execute(
+            select(TestCase.test_id, TestCase.prompt).where(TestCase.dataset_id == dataset.id)
+        )
+    ).all()
+    cases = [(tid, prompt) for tid, prompt in case_rows]
+
+    relevant_by_test, nonrelevant_by_test, grade_by_test = await _resolve_project_gold(
+        db, project, gold_source
+    )
+    slice_rows = (
+        await db.execute(
+            select(TestCaseLabelingStatus.test_id, TestCaseLabelingStatus.slice).where(
+                TestCaseLabelingStatus.project_id == project.id,
+                TestCaseLabelingStatus.slice.is_not(None),
+            )
+        )
+    ).all()
+    slice_by_test = {tid: s for tid, s in slice_rows}
+
+    # Only pool cases that have gold (others are dropped by the aggregator anyway).
+    todo = [(tid, q) for tid, q in cases if relevant_by_test.get(tid)]
+    heads = [head for head, _ in STAGE_LABELS]
+    retrieved_by_stage: dict[str, dict[str, list[str]]] = {h: {} for h in heads}
+    sem = asyncio.Semaphore(_PROBE_CONCURRENCY)
+
+    async def _pool_case(test_id: str, query: str) -> None:
+        async with sem:
+            agentic = await _dataset_case_agentic_queries(db, dataset.id, test_id)
+            pool, _computed, connected = await assemble_case_pool(
+                db, project, test_id, str(query or ""), agentic_queries=agentic, refresh=refresh
+            )
+            if not connected:
+                return
+            for head in heads:
+                ranked = sorted(
+                    (c for c in pool.chunks if head in c.ranks), key=lambda c: c.ranks[head]
+                )
+                if ranked:
+                    retrieved_by_stage[head][test_id] = [c.chunk_id for c in ranked]
+
+    await asyncio.gather(*(_pool_case(tid, q) for tid, q in todo))
+
+    stages, case_rows_out, evaluated = build_by_stage_metrics(
+        cases,
+        retrieved_by_stage,
+        relevant_by_test,
+        nonrelevant_by_test,
+        grade_by_test,
+        slice_by_test,
+    )
+    return ByStageMetricsResponse(
+        available=evaluated > 0,
+        dataset_id=str(dataset.id),
+        dataset_name=dataset.name,
+        gold_source=gold_source,
+        ks=list(AGG_KS),
+        total_cases=len(cases),
+        evaluated_cases=evaluated,
+        stages=stages,
+        cases=case_rows_out,
     )
 
 
