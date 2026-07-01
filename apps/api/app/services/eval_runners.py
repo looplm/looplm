@@ -18,6 +18,7 @@ from app.models.models import Evaluator, TestCase
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
 from app.services.retrieval_config import extract_retrieved_urls
 from app.services.retrieval_metrics import compute_retrieval_metrics
+from app.services.safe_expression import ExpressionError, evaluate_bool_expression
 
 
 def _resolve_dot_path(data: Any, path: str) -> Any:
@@ -330,4 +331,36 @@ def _run_deterministic(
         )
         return {"pass": passed, "reason": reason, "skipped": False}
 
+    if check_type == "expression":
+        expression = config.get("expression", "")
+        names = _build_expression_namespace(output_text, test_case, context, payload_key)
+        try:
+            passed = evaluate_bool_expression(expression, names)
+        except ExpressionError as e:
+            return {"pass": False, "reason": f"Expression error: {e}", "skipped": True}
+        return {
+            "pass": passed,
+            "reason": "Expression passed" if passed else "Expression evaluated to false",
+            "skipped": False,
+        }
+
     return {"pass": False, "reason": f"Unknown check_type: {check_type}", "skipped": True}
+
+
+def _build_expression_namespace(
+    output_text: str,
+    test_case: TestCase,
+    context: str | None,
+    payload_key: str | None,
+) -> dict[str, Any]:
+    """The variables a Code (expression) evaluator sees. Keep in sync with EXPRESSION_VARIABLES."""
+    ctx = context or ""
+    return {
+        "input": test_case.prompt or "",
+        "output": output_text or "",
+        "expected_output": test_case.expected_answer or "",
+        "context": ctx,
+        "retrieved_urls": extract_retrieved_urls(ctx or output_text, payload_key=payload_key),
+        "expected_urls": list(test_case.expected_page_urls or []),
+        "expected_sources": list(test_case.expected_sources or []),
+    }

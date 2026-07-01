@@ -37,27 +37,31 @@ export interface StructuredConfig {
   check_type: string;
   pattern: string;
   expected_strings: string;
+  // Boolean DSL expression for the "expression" check type (the primary way to author Code).
+  expression: string;
 }
 
 export const EMPTY_STRUCTURED: StructuredConfig = {
   prompt_template: "",
   model: "",
-  check_type: "contains_urls",
+  check_type: "expression",
   pattern: "",
   expected_strings: "",
+  expression: "",
 };
 
 export function parseStructuredConfig(configObj: Record<string, unknown>): StructuredConfig {
   return {
     prompt_template: typeof configObj.prompt_template === "string" ? configObj.prompt_template : "",
     model: typeof configObj.model === "string" ? configObj.model : "",
-    check_type: typeof configObj.check_type === "string" ? configObj.check_type : "contains_urls",
+    check_type: typeof configObj.check_type === "string" ? configObj.check_type : "expression",
     pattern: typeof configObj.pattern === "string" ? configObj.pattern : "",
     expected_strings: Array.isArray(configObj.expected_strings)
       ? configObj.expected_strings.join("\n")
       : typeof configObj.expected_strings === "string"
         ? configObj.expected_strings
         : "",
+    expression: typeof configObj.expression === "string" ? configObj.expression : "",
   };
 }
 
@@ -78,18 +82,25 @@ export function mergeStructuredIntoRaw(raw: string, structured: StructuredConfig
 
   if (type === "deterministic" || type === "hybrid") {
     base.check_type = structured.check_type;
-    if (structured.check_type === "regex_match") {
+    if (structured.check_type === "expression") {
+      base.expression = structured.expression;
+      delete base.pattern;
+      delete base.expected_strings;
+    } else if (structured.check_type === "regex_match") {
       base.pattern = structured.pattern;
       delete base.expected_strings;
+      delete base.expression;
     } else if (structured.check_type === "string_contains") {
       base.expected_strings = structured.expected_strings
         .split("\n")
         .map((s) => s.trim())
         .filter(Boolean);
       delete base.pattern;
+      delete base.expression;
     } else {
       delete base.pattern;
       delete base.expected_strings;
+      delete base.expression;
     }
   }
 
@@ -98,6 +109,7 @@ export function mergeStructuredIntoRaw(raw: string, structured: StructuredConfig
     delete base.check_type;
     delete base.pattern;
     delete base.expected_strings;
+    delete base.expression;
   }
   if (type === "deterministic") {
     delete base.prompt_template;

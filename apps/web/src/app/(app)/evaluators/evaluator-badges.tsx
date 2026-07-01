@@ -155,6 +155,10 @@ export const SOURCE_PILL_STYLES: Record<string, { active: string; inactive: stri
 };
 
 export const CHECK_TYPE_PILL_STYLES: Record<string, { active: string; inactive: string }> = {
+  expression: {
+    active: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-300 dark:ring-emerald-700",
+    inactive: "bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 ring-1 ring-gray-200 dark:ring-slate-700",
+  },
   contains_urls: {
     active: "bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 ring-1 ring-sky-300 dark:ring-sky-700",
     inactive: "bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 ring-1 ring-gray-200 dark:ring-slate-700",

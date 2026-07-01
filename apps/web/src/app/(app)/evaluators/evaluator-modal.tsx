@@ -77,7 +77,7 @@ export function EvaluatorModal({
         next.model = "";
       }
       if (newType === "llm_judge") {
-        next.check_type = "contains_urls";
+        next.check_type = "expression";
         next.pattern = "";
         next.expected_strings = "";
       }
@@ -268,6 +268,7 @@ export function EvaluatorModal({
                         <label className="block text-sm font-medium mb-2">Check Type</label>
                         <PillGroup
                           options={[
+                            { value: "expression", label: "Expression" },
                             { value: "contains_urls", label: "Contains URLs" },
                             { value: "contains_sources", label: "Contains Sources" },
                             { value: "regex_match", label: "Regex Match" },
@@ -281,6 +282,26 @@ export function EvaluatorModal({
                           styles={CHECK_TYPE_PILL_STYLES}
                         />
                       </div>
+                      {structured.check_type === "expression" && (
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Expression</label>
+                          <textarea
+                            value={structured.expression}
+                            onChange={(e) => setStructured({ ...structured, expression: e.target.value })}
+                            className={`${inputClass} font-mono`}
+                            rows={4}
+                            placeholder={'e.g. all(u in retrieved_urls for u in expected_urls)'}
+                          />
+                          <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                            A boolean expression — passes when it evaluates truthy. No imports or IO;
+                            only the helpers <code>len, any, all, contains, matches, lower, upper</code>{" "}
+                            are available. Variables:{" "}
+                            <code>input</code>, <code>output</code>, <code>expected_output</code>,{" "}
+                            <code>context</code>, <code>retrieved_urls</code>,{" "}
+                            <code>expected_urls</code>, <code>expected_sources</code>.
+                          </p>
+                        </div>
+                      )}
                       {structured.check_type === "regex_match" && (
                         <div>
                           <label className="block text-sm font-medium mb-1">Pattern</label>
