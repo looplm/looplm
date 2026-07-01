@@ -110,7 +110,7 @@ async def get_retrieval_metrics(
     dataset_id: UUID | None = None,
     source: str = "urls",
     refresh: bool = False,
-    include_ai: bool = False,
+    gold_source: str = "human",
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
@@ -134,7 +134,7 @@ async def get_retrieval_metrics(
     slice_by_test = {test_id: slice_ for test_id, slice_ in statuses}
 
     if source == "labels":
-        return await _labels_metrics(db, project, dataset_id, slice_by_test, refresh, include_ai)
+        return await _labels_metrics(db, project, dataset_id, slice_by_test, refresh, gold_source)
 
     run_filter = [EvalRun.project_id == project.id]
     if run_id is not None:
@@ -165,12 +165,13 @@ async def _labels_metrics(
     dataset_id: UUID | None,
     slice_by_test: dict[str, str],
     refresh: bool,
-    include_ai: bool = False,
+    gold_source: str = "human",
 ) -> RetrievalRunMetrics:
     """Labels-vs-live-probe metrics over a dataset's cases.
 
-    ``include_ai`` folds the AI judge's chunk labels into the gold as one more annotator; by default
-    they are a read-only second opinion and excluded.
+    ``gold_source`` selects which annotators' chunk labels resolve the gold: ``human`` (default,
+    human labels only), ``ai`` (the AI judge's labels only), or ``both`` (union — AI counts as one
+    more annotator). Gold overrides (adjudicated) always win regardless.
     """
     ds_filter = [TestDataset.project_id == project.id]
     if dataset_id is not None:
@@ -191,8 +192,9 @@ async def _labels_metrics(
     cases = [(tid, prompt) for tid, prompt in case_rows]
 
     # Resolve per-annotator labels into a single gold verdict per chunk (majority vote / adjudicated
-    # override). AI judge labels (annotator set) are a read-only second opinion — excluded from gold
-    # unless ``include_ai`` is set, in which case they count as one more annotator.
+    # override). ``gold_source`` picks whose labels count: human only (default), the AI judge only,
+    # or both as independent annotators. Human labels carry ``annotator=None`` (keyed by user);
+    # the AI judge carries ``annotator="AI"``.
     labels = (
         await db.execute(
             select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
@@ -202,6 +204,15 @@ async def _labels_metrics(
         await db.execute(select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id))
     ).scalars().all()
     overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
+
+    def _included(lbl: ChunkRelevanceLabel) -> bool:
+        is_ai = lbl.annotator is not None
+        if gold_source == "ai":
+            return is_ai
+        if gold_source == "both":
+            return True
+        return not is_ai  # "human"
+
     relevant_by_test, nonrelevant_by_test, grade_by_test = resolve_gold(
         (
             (
@@ -211,7 +222,7 @@ async def _labels_metrics(
                 lbl.labeled_by if lbl.annotator is None else lbl.annotator,
             )
             for lbl in labels
-            if lbl.annotator is None or include_ai
+            if _included(lbl)
         ),
         overrides,
     )

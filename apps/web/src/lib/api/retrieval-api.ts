@@ -39,14 +39,14 @@ export const getRetrievalMetrics = (
     datasetId?: string;
     source?: "urls" | "labels";
     refresh?: boolean;
-    includeAi?: boolean;
+    goldSource?: "human" | "ai" | "both";
   } = {},
 ) => {
   const params = new URLSearchParams({ source: opts.source ?? "urls" });
   if (opts.runId) params.set("run_id", opts.runId);
   if (opts.datasetId) params.set("dataset_id", opts.datasetId);
   if (opts.refresh) params.set("refresh", "true");
-  if (opts.includeAi) params.set("include_ai", "true");
+  if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
   return request<RetrievalRunMetrics>(`/api/pipeline/retrieval-metrics?${params.toString()}`);
 };
 

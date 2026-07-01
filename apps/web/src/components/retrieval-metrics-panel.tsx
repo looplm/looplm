@@ -130,8 +130,8 @@ export default function RetrievalMetricsPanel() {
   const [datasets, setDatasets] = useState<{ id: string; name: string }[]>([]);
   const [datasetId, setDatasetId] = useState<string | null>(null);
   const [source, setSource] = useState<"urls" | "labels">("urls");
-  // Fold the AI judge's chunk labels into the gold (labels source only).
-  const [includeAi, setIncludeAi] = useState(false);
+  // Which chunk labels resolve the gold (labels source only): human only, AI judge only, or both.
+  const [goldSource, setGoldSource] = useState<"human" | "ai" | "both">("human");
   const [metrics, setMetrics] = useState<RetrievalRunMetrics | null>(null);
   const [targets, setTargets] = useState<RetrievalTargets | null>(null);
   const [editing, setEditing] = useState(false);
@@ -156,7 +156,7 @@ export default function RetrievalMetricsPanel() {
     setError(null);
     const req =
       source === "labels"
-        ? getRetrievalMetrics({ datasetId: datasetId ?? undefined, source: "labels", includeAi })
+        ? getRetrievalMetrics({ datasetId: datasetId ?? undefined, source: "labels", goldSource })
         : getRetrievalMetrics({ runId: runId ?? undefined, source: "urls" });
     req
       .then((m) => {
@@ -178,7 +178,7 @@ export default function RetrievalMetricsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [runId, datasetId, source, includeAi]);
+  }, [runId, datasetId, source, goldSource]);
 
   const largestK = metrics?.ks.length ? Math.max(...metrics.ks) : 10;
   const lk = String(largestK);
@@ -215,18 +215,27 @@ export default function RetrievalMetricsPanel() {
             ))}
           </div>
           {source === "labels" && (
-            <label
-              className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-slate-400 cursor-pointer"
-              title="Fold the AI judge's chunk labels into the gold as one more annotator"
+            <div
+              className="flex items-center gap-1.5 text-xs"
+              title="Which chunk labels resolve the gold: human only, the AI judge only, or both"
             >
-              <input
-                type="checkbox"
-                checked={includeAi}
-                onChange={(e) => setIncludeAi(e.target.checked)}
-                className="rounded border-gray-300 dark:border-slate-600"
-              />
-              Include AI judge
-            </label>
+              <span className="text-gray-400 dark:text-slate-500">Gold</span>
+              <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700">
+                {(["human", "ai", "both"] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setGoldSource(g)}
+                    className={`px-2.5 py-1.5 capitalize ${
+                      goldSource === g
+                        ? "bg-indigo-600 text-white"
+                        : "bg-white dark:bg-slate-900 text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+                    }`}
+                  >
+                    {g === "ai" ? "AI" : g}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {metrics?.available && targets && (
             <span
