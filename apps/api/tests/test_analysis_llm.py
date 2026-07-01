@@ -75,8 +75,8 @@ async def test_retries_without_response_format_when_json_mode_unsupported():
 
 
 @pytest.mark.asyncio
-async def test_bad_request_without_response_format_propagates():
-    # A 400 that isn't about JSON mode (no response_format sent) must not be swallowed.
+async def test_persistent_bad_request_propagates_after_one_retry():
+    # A 400 that survives stripping the optional params (e.g. context length) still propagates.
     class _AlwaysFails(_Completions):
         async def create(self, **kwargs):
             self.calls.append(kwargs)
@@ -86,5 +86,27 @@ async def test_bad_request_without_response_format_propagates():
     svc = _service_with(completions)
 
     with pytest.raises(BadRequestError):
-        await svc.tracked_chat_completion(messages=[{"role": "user", "content": "x"}])
+        await svc.tracked_chat_completion(
+            messages=[{"role": "user", "content": "x"}], temperature=0.0
+        )
+    # One retry (dropping the non-default temperature) then propagates.
+    assert len(completions.calls) == 2
+    assert "temperature" not in completions.calls[1]
+
+
+@pytest.mark.asyncio
+async def test_no_retry_when_nothing_to_strip():
+    # temperature=1 and no response_format: nothing to strip, so a 400 propagates immediately.
+    class _AlwaysFails(_Completions):
+        async def create(self, **kwargs):
+            self.calls.append(kwargs)
+            raise _bad_request("content_filter")
+
+    completions = _AlwaysFails(fail_with_response_format=False)
+    svc = _service_with(completions)
+
+    with pytest.raises(BadRequestError):
+        await svc.tracked_chat_completion(
+            messages=[{"role": "user", "content": "x"}], temperature=1
+        )
     assert len(completions.calls) == 1

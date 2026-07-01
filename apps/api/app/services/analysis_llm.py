@@ -130,19 +130,27 @@ class AnalysisLlmService:
         try:
             response = await self._client.chat.completions.create(**kwargs)
         except BadRequestError:
-            # Some Azure/OpenAI deployments reject the JSON response_format ("The requested
-            # operation is unsupported."). Every caller here parses JSON tolerantly (extracting
-            # the first object, ignoring fences/prose), so drop the hint and retry once rather
-            # than failing the whole call. A genuine 400 (context length, content filter) will
-            # simply 400 again and propagate.
-            if "response_format" not in kwargs:
+            # Some Azure/OpenAI deployments reject the JSON response_format and/or a non-default
+            # temperature ("The requested operation is unsupported.") — reasoning-model
+            # deployments in particular only allow the default temperature and no JSON mode. The
+            # error carries no hint which one, so drop both and retry once: every caller here
+            # parses JSON tolerantly, and a model that rejects temperature ignores it anyway. A
+            # genuine 400 with nothing to strip (context length, content filter) still propagates.
+            retry_kwargs = dict(kwargs)
+            dropped: list[str] = []
+            if retry_kwargs.pop("response_format", None) is not None:
+                dropped.append("response_format")
+            if "temperature" in retry_kwargs and retry_kwargs["temperature"] != 1:
+                retry_kwargs.pop("temperature")
+                dropped.append("temperature")
+            if not dropped:
                 raise
             logger.warning(
-                "response_format unsupported by %s deployment; retrying without JSON mode",
+                "%s deployment rejected the request; retrying without %s",
                 self.provider,
+                ", ".join(dropped),
             )
-            kwargs.pop("response_format", None)
-            response = await self._client.chat.completions.create(**kwargs)
+            response = await self._client.chat.completions.create(**retry_kwargs)
         duration_ms = round((time.monotonic() - t0) * 1000)
 
         content = response.choices[0].message.content or ""
