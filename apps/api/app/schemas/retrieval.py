@@ -272,6 +272,27 @@ class AiJudgeResponse(BaseModel):
     judged: int = 0
 
 
+class AiJudgePromptBatch(BaseModel):
+    """One LLM call's user message: the full, untruncated chunk text for that batch."""
+
+    user_prompt: str
+    chunk_count: int = 0
+
+
+class AiJudgePreviewResponse(BaseModel):
+    """The exact prompt(s) the AI judge would send for a case — no LLM call, no grading.
+
+    Rendered server-side from the same pool, rubric and batching the judge uses, so the reviewer
+    sees the full chunk text (never truncated) and how the pool splits across calls before
+    spending a judge call. The system prompt is shared by every batch.
+    """
+
+    test_id: str
+    system_prompt: str
+    batches: list[AiJudgePromptBatch] = Field(default_factory=list)
+    chunk_count: int = 0
+
+
 class PlanQueriesRequest(BaseModel):
     test_id: str
     # Dataset the case belongs to; defaults to the most recently updated dataset.

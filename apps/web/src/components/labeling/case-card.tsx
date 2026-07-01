@@ -164,6 +164,8 @@ export function CaseCard({
         <div className="overflow-hidden rounded-b-xl">
           {indexConnected && (
             <CasePromptsPanel
+              testId={c.test_id}
+              datasetId={datasetId}
               queries={pool?.queries}
               defaults={promptDefaults}
               canEdit={canEdit}

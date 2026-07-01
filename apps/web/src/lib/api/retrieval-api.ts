@@ -14,6 +14,7 @@ import type {
   ChunkMetadataResponse,
   AgreementReport,
   AiJudgeResponse,
+  AiJudgePreviewResponse,
   PlanQueriesResponse,
   LabelingPromptDefaults,
 } from "../api-types/retrieval";
@@ -77,6 +78,21 @@ export const aiJudgeCase = (
   opts: { datasetId?: string; instructions?: string } = {},
 ) =>
   request<AiJudgeResponse>(`/api/pipeline/labeling/ai-judge`, {
+    method: "POST",
+    body: JSON.stringify({
+      test_id: testId,
+      dataset_id: opts.datasetId,
+      instructions: opts.instructions,
+    }),
+  });
+
+// The exact prompt the AI judge would send for a case (system + user, with chunk text folded in),
+// rendered server-side so the preview never drifts from what actually runs. No LLM call.
+export const aiJudgePreviewCase = (
+  testId: string,
+  opts: { datasetId?: string; instructions?: string } = {},
+) =>
+  request<AiJudgePreviewResponse>(`/api/pipeline/labeling/ai-judge/preview`, {
     method: "POST",
     body: JSON.stringify({
       test_id: testId,

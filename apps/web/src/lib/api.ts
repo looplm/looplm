@@ -54,6 +54,7 @@ export type {
   LabelingPoolResponse,
   LabelingQueries,
   PlanQueriesResponse,
+  AiJudgePreviewResponse,
   LabelingPromptDefaults,
   PooledChunkForLabeling,
   ChunkForLabeling,

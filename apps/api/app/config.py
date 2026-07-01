@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     eval_target_endpoint: str = ""
     eval_default_concurrency: int = 2
 
+    # AI judge (chunk relevance grader) — chunks go out in FULL, never truncated. To stay under
+    # the model's context window the judge splits the pool into token-budgeted batches (mirroring
+    # the retrieval app's ChunkRelevanceJudge) and merges the per-batch grades.
+    ai_judge_context_tokens: int = 128000          # judge model's usable context window
+    ai_judge_response_reserve_tokens: int = 2048   # held back for the model's JSON reply
+    ai_judge_chars_per_token: float = 4.0          # conservative token estimate (under-fills)
+    ai_judge_max_batch_chunks: int = 40            # cap chunks per call (guards grading quality)
+
     # Sync — max traces fetched per sync run (bounds the time-window pagination)
     sync_max_traces: int = 5000
     # Sync — overall timeout (seconds) for one background sync run

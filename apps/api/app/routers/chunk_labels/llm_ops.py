@@ -14,19 +14,25 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user, require_write
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
 from app.models.chunk_labels import AI_ANNOTATOR, ChunkRelevanceLabel
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import (
+    AiJudgePreviewResponse,
+    AiJudgePromptBatch,
     AiJudgeRequest,
     AiJudgeResponse,
     PlanQueriesRequest,
     PlanQueriesResponse,
 )
 from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
-from app.services.chunk_ai_judge import AiJudgeChunk, ai_judge_chunks
+from app.services.chunk_ai_judge import (
+    AiJudgeChunk,
+    ai_judge_chunks,
+    plan_ai_judge_prompts,
+)
 from app.services.llm_usage_tracker import record_llm_usage
 from app.services.query_planner import DEFAULT_PLANNER_MAX_QUERIES, plan_queries
 
@@ -175,6 +181,58 @@ async def ai_judge_case(
 
     await db.flush()
     return AiJudgeResponse(test_id=body.test_id, grades=grades, judged=len(grades))
+
+
+@router.post(
+    "/labeling/ai-judge/preview",
+    response_model=AiJudgePreviewResponse,
+    dependencies=[require_section("evaluate", "labeling")],
+)
+async def ai_judge_preview(
+    body: AiJudgeRequest,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Render the exact prompt the AI judge would send for a case, without calling the LLM.
+
+    Assembles the *same* pooled chunks and applies the *same* rubric the ``ai-judge`` endpoint
+    uses, then returns the full system + user message — including the chunk text folded into it —
+    so a reviewer can inspect precisely what will be sent before spending a judge call.
+    """
+    dataset = await _resolve_dataset(db, project, _as_uuid(body.dataset_id))
+    if dataset is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found"}},
+        )
+    query = await _dataset_case_query(db, dataset.id, body.test_id)
+    if query is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Test case not found in dataset"}},
+        )
+
+    # Same pool the judge grades, including any agentic-pooled candidates.
+    agentic = await _dataset_case_agentic_queries(db, dataset.id, body.test_id)
+    pool, _computed_at, _connected = await assemble_case_pool(
+        db, project, body.test_id, query, agentic_queries=agentic
+    )
+    chunks = [
+        AiJudgeChunk(chunk_id=pc.chunk_id, text=str(pc.content_preview or ""))
+        for pc in pool.chunks
+    ]
+    system_prompt, planned = plan_ai_judge_prompts(
+        query, chunks, instructions=body.instructions
+    )
+    batches = [
+        AiJudgePromptBatch(user_prompt=up, chunk_count=n) for up, n in planned
+    ]
+    return AiJudgePreviewResponse(
+        test_id=body.test_id,
+        system_prompt=system_prompt,
+        batches=batches,
+        chunk_count=len(chunks),
+    )
 
 
 @router.post(

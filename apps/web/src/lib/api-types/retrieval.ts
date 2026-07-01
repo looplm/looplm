@@ -159,6 +159,22 @@ export interface AiJudgeResponse {
   judged: number;
 }
 
+// One LLM call's user message: the full, untruncated chunk text for that batch.
+export interface AiJudgePromptBatch {
+  user_prompt: string;
+  chunk_count: number;
+}
+
+// The exact prompt(s) the AI judge would send for a case (no LLM call), rendered server-side so
+// the preview never drifts from what actually runs. Chunks go out in full; a large pool is split
+// across several batches (calls), each with the query + full chunk text folded in.
+export interface AiJudgePreviewResponse {
+  test_id: string;
+  system_prompt: string;
+  batches: AiJudgePromptBatch[];
+  chunk_count: number;
+}
+
 // --- Multi-head candidate pool (trace captures ∪ index search heads) ---
 
 export interface PooledChunkForLabeling {
