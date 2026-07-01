@@ -20,6 +20,32 @@ const RELEVANCE_ORDER: Record<string, number> = { core: 0, important: 1, minor: 
 
 const READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
 
+function FilterChip({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+        active
+          ? "bg-indigo-600 text-white"
+          : "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700"
+      }`}
+    >
+      {label}
+      <span className={`ml-1.5 ${active ? "text-indigo-200" : "text-gray-400 dark:text-slate-500"}`}>{count}</span>
+    </button>
+  );
+}
+
 export default function EvaluatorsPage() {
   const { canWrite } = usePermissions();
   const canEdit = canWrite("evaluators");
@@ -39,20 +65,27 @@ export default function EvaluatorsPage() {
   ]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ ids: string[] } | null>(null);
-  // Retrieval evaluators (did we fetch the right context) vs generation (did the model use it).
-  const [tab, setTab] = useState<"generation" | "retrieval">("generation");
+  // Filters, not tabs: type = how it's computed (LLM judge / Code / Hybrid); focus = which part of
+  // the pipeline it assesses (retrieval / generation). They compose.
+  const [typeFilter, setTypeFilter] = useState<"all" | "llm_judge" | "deterministic" | "hybrid">("all");
+  const [focusFilter, setFocusFilter] = useState<"all" | "retrieval" | "generation">("all");
 
   const evaluators = useMemo(() => resp?.data || [], [resp]);
   const evaluatorCategory = useCallback(
-    (e: EvaluatorItem) => (e.category ?? "generation") === "retrieval" ? "retrieval" : "generation",
+    (e: EvaluatorItem) => ((e.category ?? "generation") === "retrieval" ? "retrieval" : "generation"),
     [],
   );
-  const generationCount = evaluators.filter((e) => evaluatorCategory(e) === "generation").length;
-  const retrievalCount = evaluators.length - generationCount;
-  // The evaluators shown under the active tab; all counts/sorting/selection are scoped to these.
+  const typeCount = (t: string) => evaluators.filter((e) => e.type === t).length;
+  const focusCount = (f: string) => evaluators.filter((e) => evaluatorCategory(e) === f).length;
+  // Rows shown under the active filters; sorting/selection are scoped to these.
   const visibleEvaluators = useMemo(
-    () => evaluators.filter((e) => evaluatorCategory(e) === tab),
-    [evaluators, tab, evaluatorCategory],
+    () =>
+      evaluators.filter(
+        (e) =>
+          (typeFilter === "all" || e.type === typeFilter) &&
+          (focusFilter === "all" || evaluatorCategory(e) === focusFilter),
+      ),
+    [evaluators, typeFilter, focusFilter, evaluatorCategory],
   );
 
   const load = useCallback(async () => {
@@ -106,8 +139,8 @@ export default function EvaluatorsPage() {
     });
   }
 
-  // Clear selection when data or the active tab changes
-  useEffect(() => { setSelectedIds(new Set()); }, [resp, tab]);
+  // Clear selection when data or the active filters change
+  useEffect(() => { setSelectedIds(new Set()); }, [resp, typeFilter, focusFilter]);
 
   function handleDeleteClick(id: string) {
     setDeleteConfirm({ ids: [id] });
@@ -142,8 +175,8 @@ export default function EvaluatorsPage() {
     }
   }
 
-  const activeCount = visibleEvaluators.filter((e) => e.enabled).length;
-  const rated = visibleEvaluators.filter((e) => e.pass_rate != null);
+  const activeCount = evaluators.filter((e) => e.enabled).length;
+  const rated = evaluators.filter((e) => e.pass_rate != null);
   const avgPassRate =
     rated.length > 0 ? rated.reduce((sum, e) => sum + (e.pass_rate || 0), 0) / rated.length : null;
   const allSelected = visibleEvaluators.length > 0 && selectedIds.size === visibleEvaluators.length;
@@ -157,6 +190,8 @@ export default function EvaluatorsPage() {
           return (a.source || "").localeCompare(b.source || "");
         case "type":
           return a.type.localeCompare(b.type);
+        case "category":
+          return evaluatorCategory(a).localeCompare(evaluatorCategory(b));
         case "relevance":
           return (RELEVANCE_ORDER[a.relevance] ?? 9) - (RELEVANCE_ORDER[b.relevance] ?? 9);
         case "affects_pass":
@@ -182,7 +217,7 @@ export default function EvaluatorsPage() {
       }
       return 0;
     });
-  }, [visibleEvaluators, sorts]);
+  }, [visibleEvaluators, sorts, evaluatorCategory]);
 
   return (
     <div>
@@ -243,51 +278,52 @@ export default function EvaluatorsPage() {
         </div>
       )}
 
-      {/* Retrieval / Generation tabs */}
-      <div className="flex items-center gap-1 mb-5 border-b border-gray-100 dark:border-slate-800">
-        {[
-          { key: "generation" as const, label: "Generation", count: generationCount },
-          { key: "retrieval" as const, label: "Retrieval", count: retrievalCount },
-        ].map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t.key
-                ? "border-indigo-500 text-gray-900 dark:text-white"
-                : "border-transparent text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
-            }`}
-          >
-            {t.label}
-            <span className="ml-1.5 text-xs text-gray-400 dark:text-slate-500">{t.count}</span>
-          </button>
-        ))}
-      </div>
-
-      <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
-        {tab === "retrieval"
-          ? "Retrieval quality — did the pipeline fetch the right context? Set a target on each metric below to make it a pass/fail bar; the computed scores are shown on the Evaluations page. Retrieval-check evaluators (source retrieval, image checks) that run per test case are listed underneath."
-          : "Generation quality — given the retrieved context, did the model answer well? These evaluators grade each answer during an eval run."}
-      </p>
-
-      {tab === "retrieval" && (
-        <div className="mb-8">
-          <h2 className="text-sm font-semibold text-gray-500 dark:text-slate-400 mb-2">
-            Retrieval metric targets
-          </h2>
-          <RetrievalTargetsConfig canEdit={canEdit} />
-        </div>
-      )}
-
       {/* Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-        <StatCard label={tab === "retrieval" ? "Retrieval evaluators" : "Generation evaluators"} value={visibleEvaluators.length} />
-        <StatCard label="Active" value={activeCount} sub={`${visibleEvaluators.length - activeCount} disabled`} />
+        <StatCard label="Total Evaluators" value={evaluators.length} />
+        <StatCard label="Active" value={activeCount} sub={`${evaluators.length - activeCount} disabled`} />
         <StatCard
           label="Avg Pass Rate"
           value={avgPassRate != null ? `${(avgPassRate * 100).toFixed(1)}%` : "-"}
           sub="across evaluators with data"
         />
+      </div>
+
+      {/* Filters: type = how it's computed; focus = which pipeline stage it assesses. */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-medium text-gray-400 dark:text-slate-500 mr-0.5">Type</span>
+          {([
+            { v: "all", label: "All" },
+            { v: "llm_judge", label: "LLM judge" },
+            { v: "deterministic", label: "Code" },
+            { v: "hybrid", label: "Hybrid" },
+          ] as const).map((o) => (
+            <FilterChip
+              key={o.v}
+              active={typeFilter === o.v}
+              onClick={() => setTypeFilter(o.v)}
+              label={o.label}
+              count={o.v === "all" ? evaluators.length : typeCount(o.v)}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-medium text-gray-400 dark:text-slate-500 mr-0.5">Focus</span>
+          {([
+            { v: "all", label: "All" },
+            { v: "retrieval", label: "Retrieval" },
+            { v: "generation", label: "Generation" },
+          ] as const).map((o) => (
+            <FilterChip
+              key={o.v}
+              active={focusFilter === o.v}
+              onClick={() => setFocusFilter(o.v)}
+              label={o.label}
+              count={o.v === "all" ? evaluators.length : focusCount(o.v)}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Floating action bar */}
@@ -318,8 +354,27 @@ export default function EvaluatorsPage() {
         <p className="text-gray-500 dark:text-slate-400">Loading...</p>
       ) : visibleEvaluators.length === 0 ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
-          <p className="mb-2">No {tab} evaluators yet.</p>
-          <p className="text-sm">Create one with the + button, or import evaluators from a JSON file.</p>
+          {typeFilter !== "all" || focusFilter !== "all" ? (
+            <>
+              <p className="mb-2">No evaluators match these filters.</p>
+              <p className="text-sm">
+                <button
+                  onClick={() => {
+                    setTypeFilter("all");
+                    setFocusFilter("all");
+                  }}
+                  className="text-indigo-500 hover:underline"
+                >
+                  Clear filters
+                </button>
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mb-2">No evaluators defined yet.</p>
+              <p className="text-sm">Create one with the + button, or import evaluators from a JSON file.</p>
+            </>
+          )}
         </div>
       ) : (
         <EvaluatorTableBody
@@ -339,6 +394,17 @@ export default function EvaluatorsPage() {
           }}
         />
       )}
+
+      {/* Retrieval quality targets — config only; the computed scores live on the Evaluations page. */}
+      <div className="mt-12">
+        <h2 className="text-xl font-bold mb-1">Retrieval quality targets</h2>
+        <p className="text-sm text-gray-500 dark:text-slate-400 mb-4 max-w-3xl">
+          Run-level retrieval metrics (recall@k, nDCG@k, MRR, hit-rate@k, precision@k), measured
+          from your expected URLs or human chunk labels. Set a target on each to make it a pass/fail
+          bar; the scores against these targets are shown on the Evaluations page.
+        </p>
+        <RetrievalTargetsConfig canEdit={canEdit} />
+      </div>
 
       {/* Delete confirmation modal */}
       {deleteConfirm && (
@@ -360,7 +426,7 @@ export default function EvaluatorsPage() {
       {showModal && (
         <EvaluatorModal
           editingEvaluator={editingEvaluator}
-          defaultCategory={tab}
+          defaultCategory={focusFilter !== "all" ? focusFilter : "generation"}
           onClose={() => {
             setShowModal(false);
             setEditingEvaluator(null);

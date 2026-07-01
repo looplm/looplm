@@ -138,7 +138,7 @@ export function EvaluatorModal({
             <div className="space-y-3">
               <SectionHeader icon="&#9783;" label="Classification" />
               <div>
-                <label className="block text-sm font-medium mb-2">Category</label>
+                <label className="block text-sm font-medium mb-2">Pipeline focus</label>
                 <PillGroup
                   options={[
                     { value: "retrieval", label: "Retrieval" },
@@ -149,8 +149,8 @@ export function EvaluatorModal({
                   styles={CATEGORY_PILL_STYLES}
                 />
                 <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
-                  Retrieval evaluators assess whether the right context was fetched; generation
-                  evaluators assess how the model used it.
+                  Which part of the RAG pipeline this evaluator assesses — retrieval (was the right
+                  context fetched) or generation (how the model used it).
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -159,7 +159,7 @@ export function EvaluatorModal({
                   <PillGroup
                     options={[
                       { value: "llm_judge", label: "LLM Judge" },
-                      { value: "deterministic", label: "Deterministic" },
+                      { value: "deterministic", label: "Code" },
                       { value: "hybrid", label: "Hybrid" },
                     ]}
                     value={form.type}
@@ -248,7 +248,7 @@ export function EvaluatorModal({
                     <div className="space-y-3">
                       {form.type === "hybrid" && (
                         <p className="text-xs font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wide">
-                          Deterministic Check
+                          Code Check
                         </p>
                       )}
                       <div>

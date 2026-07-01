@@ -2,9 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import type { EvaluatorItem } from "@/lib/api";
-import { TypeBadge, SourceBadge, RelevanceBadge, timeAgo } from "./evaluator-badges";
+import { TypeBadge, SourceBadge, RelevanceBadge, CategoryBadge, timeAgo } from "./evaluator-badges";
 
-export type SortKey = "name" | "source" | "type" | "relevance" | "affects_pass" | "total_evaluations" | "pass_rate" | "last_seen_at" | "enabled";
+export type SortKey = "name" | "source" | "type" | "category" | "relevance" | "affects_pass" | "total_evaluations" | "pass_rate" | "last_seen_at" | "enabled";
 export type SortDir = "asc" | "desc";
 export type SortEntry = { key: SortKey; dir: SortDir };
 
@@ -91,6 +91,7 @@ export function EvaluatorTableBody({
             <SortableHeader label="Name" sortKey="name" sorts={sorts} onSort={handleSort} />
             <SortableHeader label="Source" sortKey="source" sorts={sorts} onSort={handleSort} />
             <SortableHeader label="Type" sortKey="type" sorts={sorts} onSort={handleSort} />
+            <SortableHeader label="Focus" sortKey="category" sorts={sorts} onSort={handleSort} />
             <SortableHeader label="Relevance" sortKey="relevance" sorts={sorts} onSort={handleSort} />
             <SortableHeader label="Pass/Fail" sortKey="affects_pass" sorts={sorts} onSort={handleSort} className="text-center" />
             <SortableHeader label="Evaluations" sortKey="total_evaluations" sorts={sorts} onSort={handleSort} className="text-center" />
@@ -133,6 +134,9 @@ export function EvaluatorTableBody({
               </td>
               <td className="px-4 py-3">
                 <TypeBadge type={ev.type} />
+              </td>
+              <td className="px-4 py-3">
+                <CategoryBadge category={ev.category} />
               </td>
               <td className="px-4 py-3">
                 <RelevanceBadge relevance={ev.relevance} />

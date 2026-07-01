@@ -6,12 +6,25 @@ export function TypeBadge({ type }: { type: string }) {
   };
   const labels: Record<string, string> = {
     llm_judge: "LLM Judge",
-    deterministic: "Deterministic",
+    deterministic: "Code",
     hybrid: "Hybrid",
   };
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[type] || "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400"}`}>
       {labels[type] || type}
+    </span>
+  );
+}
+
+export function CategoryBadge({ category }: { category: string | null | undefined }) {
+  const styles: Record<string, string> = {
+    retrieval: "bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400",
+    generation: "bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-400",
+  };
+  const c = category || "generation";
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium capitalize ${styles[c] || "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400"}`}>
+      {c}
     </span>
   );
 }
