@@ -16,12 +16,20 @@ export const EMPTY_FORM: EvaluatorFormData = {
   display_name: "",
   type: "llm_judge",
   source: "custom",
-  category: "generation",
+  category: "", // focus is optional; "" = unassigned
   description: "",
   relevance: "important",
   affects_pass: false,
   config: "{}",
 };
+
+// Derive a stable camelCase id from a display name, e.g. "Source Retrieval" -> "sourceRetrieval".
+export function slugifyId(displayName: string): string {
+  const words = displayName.trim().split(/[^A-Za-z0-9]+/).filter(Boolean);
+  return words
+    .map((w, i) => (i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))
+    .join("");
+}
 
 export interface StructuredConfig {
   prompt_template: string;

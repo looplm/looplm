@@ -21,10 +21,12 @@ export function CategoryBadge({ category }: { category: string | null | undefine
     retrieval: "bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400",
     generation: "bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-400",
   };
-  const c = category || "generation";
+  if (!category) {
+    return <span className="text-gray-300 dark:text-slate-600">&ndash;</span>;
+  }
   return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium capitalize ${styles[c] || "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400"}`}>
-      {c}
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium capitalize ${styles[category] || "bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400"}`}>
+      {category}
     </span>
   );
 }

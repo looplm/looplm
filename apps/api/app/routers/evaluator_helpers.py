@@ -75,7 +75,7 @@ async def _enrich_with_stats(
                 affects_pass=ev.affects_pass,
                 config=ev.config or {},
                 source=ev.source,
-                category=ev.category or "generation",
+                category=ev.category,
                 enabled=ev.enabled,
                 total_evaluations=total_evals,
                 pass_rate=pass_rate,
@@ -263,18 +263,19 @@ known_evaluators = {
 _RETRIEVAL_CHECK_TYPES = {"contains_urls", "contains_sources", "image_missing", "image_ordering"}
 
 
-def default_evaluator_category(name: str, config: dict | None) -> str:
-    """Best-guess category ("retrieval" | "generation") for an evaluator without an explicit one.
+def default_evaluator_category(name: str, config: dict | None) -> str | None:
+    """Best-guess focus ("retrieval" | "generation") for an evaluator without an explicit one.
 
-    Prefers the known-evaluator registry, then falls back to the deterministic check type; anything
-    else (notably LLM judges of the answer) is a generation evaluator.
+    Focus is optional. Known built-in evaluators get their registry focus (generation unless tagged
+    retrieval); a retrieval-flavoured check type maps to retrieval; anything else — a custom or
+    unrecognised evaluator — is left unassigned (``None``) rather than guessed.
     """
     known = known_evaluators.get(name)
-    if known and known.get("category"):
-        return str(known["category"])
+    if known is not None:
+        return str(known.get("category", "generation"))
     if (config or {}).get("check_type") in _RETRIEVAL_CHECK_TYPES:
         return "retrieval"
-    return "generation"
+    return None
 
 
 async def discover_and_sync_evaluators(

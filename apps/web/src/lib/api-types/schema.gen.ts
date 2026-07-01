@@ -5497,11 +5497,8 @@ export interface components {
         EvaluatorResponse: {
             /** Affects Pass */
             affects_pass: boolean;
-            /**
-             * Category
-             * @default generation
-             */
-            category: string;
+            /** Category */
+            category?: string | null;
             /** Config */
             config: {
                 [key: string]: unknown;

@@ -259,10 +259,10 @@ class Evaluator(Base):
     affects_pass = Column(Boolean, nullable=False, server_default=text("false"))
     config = Column(JSONB, nullable=False, server_default=text("'{}'"))
     source = Column(String(128))
-    # Which side of the RAG pipeline this evaluator assesses: "retrieval" (did we fetch the right
-    # context) or "generation" (did the model use it well). Drives the Retrieval/Generation split
-    # in the evaluators UI.
-    category = Column(String(32), nullable=False, server_default=text("'generation'"))
+    # Which part of the RAG pipeline this evaluator assesses: "retrieval" (did we fetch the right
+    # context) or "generation" (did the model use it well). Optional — NULL means unassigned. Drives
+    # the Focus badge/filter in the evaluators UI.
+    category = Column(String(32), nullable=True)
     enabled = Column(Boolean, nullable=False, server_default=text("true"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))

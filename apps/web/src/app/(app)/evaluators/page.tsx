@@ -68,13 +68,11 @@ export default function EvaluatorsPage() {
   // Filters, not tabs: type = how it's computed (LLM judge / Code / Hybrid); focus = which part of
   // the pipeline it assesses (retrieval / generation). They compose.
   const [typeFilter, setTypeFilter] = useState<"all" | "llm_judge" | "deterministic" | "hybrid">("all");
-  const [focusFilter, setFocusFilter] = useState<"all" | "retrieval" | "generation">("all");
+  const [focusFilter, setFocusFilter] = useState<"all" | "retrieval" | "generation" | "none">("all");
 
   const evaluators = useMemo(() => resp?.data || [], [resp]);
-  const evaluatorCategory = useCallback(
-    (e: EvaluatorItem) => ((e.category ?? "generation") === "retrieval" ? "retrieval" : "generation"),
-    [],
-  );
+  // Raw focus ("" = unassigned). Focus is optional, so we don't coerce to a default here.
+  const evaluatorCategory = useCallback((e: EvaluatorItem) => e.category ?? "", []);
   const typeCount = (t: string) => evaluators.filter((e) => e.type === t).length;
   const focusCount = (f: string) => evaluators.filter((e) => evaluatorCategory(e) === f).length;
   // Rows shown under the active filters; sorting/selection are scoped to these.
@@ -83,7 +81,8 @@ export default function EvaluatorsPage() {
       evaluators.filter(
         (e) =>
           (typeFilter === "all" || e.type === typeFilter) &&
-          (focusFilter === "all" || evaluatorCategory(e) === focusFilter),
+          (focusFilter === "all" ||
+            (focusFilter === "none" ? !e.category : evaluatorCategory(e) === focusFilter)),
       ),
     [evaluators, typeFilter, focusFilter, evaluatorCategory],
   );
@@ -311,16 +310,17 @@ export default function EvaluatorsPage() {
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-medium text-gray-400 dark:text-slate-500 mr-0.5">Focus</span>
           {([
-            { v: "all", label: "All" },
-            { v: "retrieval", label: "Retrieval" },
-            { v: "generation", label: "Generation" },
+            { v: "all", label: "All", count: evaluators.length },
+            { v: "retrieval", label: "Retrieval", count: focusCount("retrieval") },
+            { v: "generation", label: "Generation", count: focusCount("generation") },
+            { v: "none", label: "None", count: focusCount("") },
           ] as const).map((o) => (
             <FilterChip
               key={o.v}
               active={focusFilter === o.v}
               onClick={() => setFocusFilter(o.v)}
               label={o.label}
-              count={o.v === "all" ? evaluators.length : focusCount(o.v)}
+              count={o.count}
             />
           ))}
         </div>
@@ -426,7 +426,7 @@ export default function EvaluatorsPage() {
       {showModal && (
         <EvaluatorModal
           editingEvaluator={editingEvaluator}
-          defaultCategory={focusFilter !== "all" ? focusFilter : "generation"}
+          defaultCategory={focusFilter === "retrieval" || focusFilter === "generation" ? focusFilter : ""}
           onClose={() => {
             setShowModal(false);
             setEditingEvaluator(null);

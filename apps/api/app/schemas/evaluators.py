@@ -67,7 +67,7 @@ class EvaluatorResponse(BaseModel):
     affects_pass: bool
     config: dict[str, Any]
     source: Optional[str] = None
-    category: str = "generation"
+    category: Optional[str] = None
     enabled: bool
     total_evaluations: int = 0
     pass_rate: Optional[float] = None

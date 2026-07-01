@@ -18,6 +18,7 @@ import {
   EMPTY_STRUCTURED,
   parseStructuredConfig,
   mergeStructuredIntoRaw,
+  slugifyId,
 } from "./evaluator-modal-utils";
 
 export type { EvaluatorFormData } from "./evaluator-modal-utils";
@@ -28,12 +29,12 @@ const inputClass =
 
 export function EvaluatorModal({
   editingEvaluator,
-  defaultCategory = "generation",
+  defaultCategory = "",
   onClose,
   onSave,
 }: {
   editingEvaluator: EvaluatorItem | null;
-  // Category a newly-created evaluator starts in (the tab the user opened the modal from).
+  // Focus a newly-created evaluator starts with ("" = unassigned; optional).
   defaultCategory?: string;
   onClose: () => void;
   onSave: (data: EvaluatorFormData) => void;
@@ -50,7 +51,7 @@ export function EvaluatorModal({
         display_name: editingEvaluator.display_name || "",
         type: editingEvaluator.type,
         source: editingEvaluator.source || "custom",
-        category: editingEvaluator.category || "generation",
+        category: editingEvaluator.category || "",
         description: editingEvaluator.description || "",
         relevance: editingEvaluator.relevance,
         affects_pass: editingEvaluator.affects_pass,
@@ -110,25 +111,36 @@ export function EvaluatorModal({
             <div className="space-y-3">
               <SectionHeader icon="&#9868;" label="Identity" />
               <div>
-                <label className="block text-sm font-medium mb-1">Name</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  disabled={!!editingEvaluator}
-                  className={`${inputClass} disabled:opacity-50`}
-                  placeholder="e.g. faithfulness"
-                />
-              </div>
-              <div>
                 <label className="block text-sm font-medium mb-1">Display Name</label>
                 <input
                   type="text"
                   value={form.display_name}
-                  onChange={(e) => setForm({ ...form, display_name: e.target.value })}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      display_name: e.target.value,
+                      // The id is derived from the display name on create; fixed once saved.
+                      name: editingEvaluator ? f.name : slugifyId(e.target.value),
+                    }))
+                  }
                   className={inputClass}
                   placeholder="e.g. Faithfulness"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">ID</label>
+                <input
+                  type="text"
+                  value={form.name}
+                  disabled
+                  className={`${inputClass} font-mono opacity-60`}
+                  placeholder="auto-generated from the display name"
+                />
+                <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                  {editingEvaluator
+                    ? "The identifier can't be changed."
+                    : "Auto-generated from the display name — the stable identifier used in results."}
+                </p>
               </div>
             </div>
 
@@ -138,19 +150,22 @@ export function EvaluatorModal({
             <div className="space-y-3">
               <SectionHeader icon="&#9783;" label="Classification" />
               <div>
-                <label className="block text-sm font-medium mb-2">Pipeline focus</label>
+                <label className="block text-sm font-medium mb-2">
+                  Pipeline focus <span className="font-normal text-gray-400 dark:text-slate-500">(optional)</span>
+                </label>
                 <PillGroup
                   options={[
                     { value: "retrieval", label: "Retrieval" },
                     { value: "generation", label: "Generation" },
                   ]}
                   value={form.category}
-                  onChange={(v) => setForm({ ...form, category: v })}
+                  onChange={(v) => setForm({ ...form, category: form.category === v ? "" : v })}
                   styles={CATEGORY_PILL_STYLES}
                 />
                 <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
                   Which part of the RAG pipeline this evaluator assesses — retrieval (was the right
-                  context fetched) or generation (how the model used it).
+                  context fetched) or generation (how the model used it). Click again to clear; leave
+                  unset if it applies to neither.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -173,8 +188,6 @@ export function EvaluatorModal({
                     options={[
                       { value: "custom", label: "Custom" },
                       { value: "ragas", label: "RAGAS" },
-                      { value: "langfuse", label: "Langfuse" },
-                      { value: "discovered", label: "Discovered" },
                     ]}
                     value={form.source}
                     onChange={(v) => setForm({ ...form, source: v })}
