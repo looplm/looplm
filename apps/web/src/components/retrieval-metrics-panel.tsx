@@ -6,7 +6,6 @@ import {
   getEvalRuns,
   getRetrievalMetrics,
   getRetrievalTargets,
-  saveRetrievalTargets,
   type EvalRunListItem,
   type RetrievalRunMetrics,
   type RetrievalTargets,
@@ -22,106 +21,6 @@ import {
 } from "@/components/retrieval/retrieval-table";
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
-import { JudgeAllButton } from "@/components/retrieval/judge-all-button";
-
-function TargetsEditor({
-  targets,
-  largestK,
-  currentValues,
-  onSave,
-  onClose,
-}: {
-  targets: RetrievalTargets;
-  largestK: number;
-  currentValues: Partial<Record<keyof RetrievalTargets, number | null | undefined>>;
-  onSave: (t: RetrievalTargets) => Promise<void>;
-  onClose: () => void;
-}) {
-  const [draft, setDraft] = useState<RetrievalTargets>(targets);
-  const [saving, setSaving] = useState(false);
-
-  const setVal = (key: keyof RetrievalTargets, v: number) =>
-    setDraft((d) => ({ ...d, [key]: Math.max(0, Math.min(1, v)) }));
-
-  const useCurrentRun = () => {
-    const next = { ...draft };
-    for (const m of METRICS) {
-      const v = currentValues[m.key];
-      if (typeof v === "number") next[m.key] = v;
-    }
-    setDraft(next);
-  };
-
-  return (
-    <div className="mb-4 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900/60 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-semibold">Set targets</span>
-        <button
-          onClick={useCurrentRun}
-          className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-        >
-          Use this run&apos;s scores
-        </button>
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {METRICS.map((m) => (
-          <label key={m.key} className="block">
-            <span className="text-[11px] text-gray-500 dark:text-slate-400">{m.label(largestK)}</span>
-            <div className="mt-1 flex items-center gap-1">
-              {m.kind === "pct" ? (
-                <>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={Math.round(draft[m.key] * 100)}
-                    onChange={(e) => setVal(m.key, Number(e.target.value) / 100)}
-                    className="w-full rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm tabular-nums"
-                  />
-                  <span className="text-xs text-gray-400">%</span>
-                </>
-              ) : (
-                <input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={Number(draft[m.key].toFixed(2))}
-                  onChange={(e) => setVal(m.key, Number(e.target.value))}
-                  className="w-full rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm tabular-nums"
-                />
-              )}
-            </div>
-          </label>
-        ))}
-      </div>
-      <div className="flex items-center justify-end gap-2 mt-4">
-        <button
-          onClick={onClose}
-          className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800"
-        >
-          Cancel
-        </button>
-        <button
-          disabled={saving}
-          onClick={async () => {
-            setSaving(true);
-            try {
-              await onSave(draft);
-              onClose();
-            } finally {
-              setSaving(false);
-            }
-          }}
-          className="px-3 py-1.5 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60"
-        >
-          {saving ? "Saving..." : "Save targets"}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 export default function RetrievalMetricsPanel() {
   const { canWrite } = usePermissions();
@@ -140,11 +39,8 @@ export default function RetrievalMetricsPanel() {
   const [labelsView, setLabelsView] = useState<"overall" | "byStage">("overall");
   const [metrics, setMetrics] = useState<RetrievalRunMetrics | null>(null);
   const [targets, setTargets] = useState<RetrievalTargets | null>(null);
-  const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Bumped after a bulk AI-judge so the label-based views recompute against the new AI gold.
-  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     getEvalRuns({ limit: "50" })
@@ -187,7 +83,7 @@ export default function RetrievalMetricsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [runId, datasetIds, source, goldSource, labelsView, reloadKey]);
+  }, [runId, datasetIds, source, goldSource, labelsView]);
 
   const largestK = metrics?.ks.length ? Math.max(...metrics.ks) : 10;
   const lk = String(largestK);
@@ -274,14 +170,6 @@ export default function RetrievalMetricsPanel() {
               {metCount} / {METRICS.length} targets met
             </span>
           )}
-          {canEdit && targets && (
-            <button
-              onClick={() => setEditing((v) => !v)}
-              className="text-sm rounded-lg border border-gray-200 dark:border-slate-700 px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-slate-800"
-            >
-              Targets
-            </button>
-          )}
           {source === "labels"
             ? datasets.length > 0 && (
                 <>
@@ -330,19 +218,6 @@ export default function RetrievalMetricsPanel() {
           </>
         )}
       </p>
-
-      {editing && targets && (
-        <TargetsEditor
-          targets={targets}
-          largestK={largestK}
-          currentValues={Object.fromEntries(METRICS.map((m) => [m.key, cardValue(m)]))}
-          onSave={async (t) => {
-            const saved = await saveRetrievalTargets(t);
-            setTargets(saved);
-          }}
-          onClose={() => setEditing(false)}
-        />
-      )}
 
       {error && (
         <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
