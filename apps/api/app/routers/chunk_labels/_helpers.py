@@ -18,7 +18,7 @@ from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import LabelingDatasetOption
-from app.services.analysis_llm import merge_llm_settings
+from app.services.analysis_llm import AnalysisLlmService, merge_llm_settings
 from app.services.chunk_pool import (
     DEFAULT_POOL_DEPTH,
     SLICE_POOL_DEPTH,
@@ -27,7 +27,9 @@ from app.services.chunk_pool import (
     PoolResult,
     assemble_pool,
 )
+from app.services.llm_usage_tracker import record_llm_usage
 from app.services.query_embedding import embed_query
+from app.services.query_planner import DEFAULT_PLANNER_MAX_QUERIES, plan_queries
 
 # Key on the test case's metadata under which the planner's agentic queries are persisted, so the
 # pool folds them in on every later visit (and the multi-mode eval can reuse them) without
@@ -141,6 +143,60 @@ async def _persist_case_agentic_queries(
     meta[LABELING_QUERIES_META_KEY] = {"base": [base], "agentic": agentic}
     case.test_case_metadata = meta
     await db.flush()
+
+
+async def _case_planned(db: AsyncSession, dataset_id: UUID, test_id: str) -> bool:
+    """Whether the planner has already run for this case (the key is present, even if it planned
+    zero queries). Lets the auto-pool path plan exactly once and not re-spend an LLM call every
+    time a case with genuinely no useful sub-queries is opened.
+    """
+    meta = (
+        await db.execute(
+            select(TestCase.test_case_metadata).where(
+                TestCase.dataset_id == dataset_id, TestCase.test_id == test_id
+            )
+        )
+    ).scalar_one_or_none()
+    return isinstance(meta, dict) and LABELING_QUERIES_META_KEY in meta
+
+
+async def plan_and_persist_case_queries(
+    db: AsyncSession,
+    project: Project,
+    user: User,
+    *,
+    dataset_id: UUID,
+    test_id: str,
+    query: str,
+    instructions: str | None = None,
+    max_queries: int | None = None,
+) -> list[str]:
+    """Plan a case's agentic sub-queries with the LLM, record usage, persist them, and return them.
+
+    The single place planning happens — shared by the manual "plan queries" endpoint and the
+    auto-plan-on-first-pool path. Raises :class:`AnalysisLlmConfigError` when no LLM is configured
+    and propagates planner failures; the manual endpoint maps those to HTTP, the auto path swallows
+    them and falls back to base-only pooling.
+    """
+    llm = AnalysisLlmService(user_settings=user.settings, project_settings=project.settings)
+    queries, usage = await plan_queries(
+        llm,
+        query,
+        instructions=instructions,
+        max_queries=max_queries or DEFAULT_PLANNER_MAX_QUERIES,
+    )
+    await record_llm_usage(
+        db,
+        project_id=project.id,
+        service_name="chunk_labeling",
+        function_name="plan_queries",
+        provider=llm.provider,
+        model=llm.model,
+        usage=usage,
+        request_metadata={"test_id": test_id, "planned": len(queries)},
+    )
+    await _persist_case_agentic_queries(db, dataset_id, test_id, base=query, agentic=queries)
+    return queries
 
 
 async def _project_labels(

@@ -34,15 +34,14 @@ from app.services.chunk_ai_judge import (
     plan_ai_judge_prompts,
 )
 from app.services.llm_usage_tracker import record_llm_usage
-from app.services.query_planner import DEFAULT_PLANNER_MAX_QUERIES, plan_queries
 
 from ._helpers import (
     _as_uuid,
     _dataset_case_agentic_queries,
     _dataset_case_query,
-    _persist_case_agentic_queries,
     _resolve_dataset,
     assemble_case_pool,
+    plan_and_persist_case_queries,
 )
 
 logger = logging.getLogger(__name__)
@@ -252,14 +251,6 @@ async def plan_case_queries(
     folds their index hits in — raising the recall ceiling to what an agentic retriever would
     surface. Re-running re-plans and overwrites. Returns the base question + the planned queries.
     """
-    try:
-        llm = AnalysisLlmService(user_settings=user.settings, project_settings=project.settings)
-    except AnalysisLlmConfigError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"error": {"code": "LLM_NOT_CONFIGURED", "message": str(exc)}},
-        ) from exc
-
     dataset = await _resolve_dataset(db, project, _as_uuid(body.dataset_id))
     if dataset is None:
         raise HTTPException(
@@ -273,10 +264,16 @@ async def plan_case_queries(
             detail={"error": {"code": "NOT_FOUND", "message": "Test case not found in dataset"}},
         )
 
-    max_queries = body.max_queries or DEFAULT_PLANNER_MAX_QUERIES
     try:
-        queries, usage = await plan_queries(
-            llm, query, instructions=body.instructions, max_queries=max_queries
+        queries = await plan_and_persist_case_queries(
+            db,
+            project,
+            user,
+            dataset_id=dataset.id,
+            test_id=body.test_id,
+            query=query,
+            instructions=body.instructions,
+            max_queries=body.max_queries,
         )
     except AnalysisLlmConfigError as exc:
         raise HTTPException(
@@ -295,18 +292,4 @@ async def plan_case_queries(
             },
         ) from exc
 
-    await record_llm_usage(
-        db,
-        project_id=project.id,
-        service_name="chunk_labeling",
-        function_name="plan_queries",
-        provider=llm.provider,
-        model=llm.model,
-        usage=usage,
-        request_metadata={"test_id": body.test_id, "planned": len(queries)},
-    )
-
-    await _persist_case_agentic_queries(
-        db, dataset.id, body.test_id, base=query, agentic=queries
-    )
     return PlanQueriesResponse(test_id=body.test_id, base=[query], agentic=queries)

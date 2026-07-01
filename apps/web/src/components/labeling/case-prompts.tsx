@@ -11,8 +11,10 @@ import {
 
 // Per-case tools shown above the pooled chunks: the queries that were sent to the index (base
 // question + the agentic planner's sub-queries), an editable planner rubric to (re)plan them, and
-// the editable AI-judge rubric the header's "AI judge" button runs with. Keeping both editable
-// prompts here makes "what was sent" and "what graded it" inspectable in one place.
+// the editable AI-judge rubric with a "Run AI judge" button. The header's "AI judge" button opens
+// this judge panel (two-step: review/edit the prompt, then run) rather than grading immediately.
+// Keeping both editable prompts here makes "what was sent" and "what graded it" inspectable — and
+// runnable — in one place.
 export function CasePromptsPanel({
   testId,
   datasetId,
@@ -24,6 +26,9 @@ export function CasePromptsPanel({
   judgeInstructions,
   onJudgeInstructionsChange,
   onPlan,
+  judgeOpen,
+  onRunJudge,
+  aiJudging,
 }: {
   testId: string;
   datasetId?: string;
@@ -32,15 +37,20 @@ export function CasePromptsPanel({
   canEdit: boolean;
   indexConnected: boolean;
   planning: boolean;
-  // The AI-judge rubric (null = use the default). Owned by the parent so the header judge button
-  // runs with whatever is set here.
+  // The AI-judge rubric (null = use the default). Owned by the parent so the "Run AI judge" button
+  // and the header stay in sync.
   judgeInstructions: string | null;
   onJudgeInstructionsChange: (value: string | null) => void;
   // Plan (or re-plan) the agentic sub-queries. ``instructions`` undefined → server default rubric.
   onPlan: (instructions?: string) => void;
+  // Whether the judge panel is open — controlled by the parent so the header "AI judge" button
+  // opens it (the two-step: open the prompt, then a "Run AI judge" button appears).
+  judgeOpen: boolean;
+  // Run the AI judge with the current (possibly edited) rubric.
+  onRunJudge: (instructions?: string) => void;
+  aiJudging: boolean;
 }) {
   const [openPlanner, setOpenPlanner] = useState(false);
-  const [openJudge, setOpenJudge] = useState(false);
   const [plannerText, setPlannerText] = useState<string | null>(null);
   // The full prompt (system + user, with chunk text folded in) the judge would send, rendered
   // server-side on demand so it never drifts from what actually runs.
@@ -113,12 +123,6 @@ export function CasePromptsPanel({
           >
             {agentic.length > 0 ? "Re-plan queries" : "Plan queries"}
           </button>
-          <button
-            onClick={() => setOpenJudge((v) => !v)}
-            className="px-2 py-1 rounded-lg text-[11px] font-medium border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-gray-300"
-          >
-            {openJudge ? "Hide judge rubric" : "Judge rubric"}
-          </button>
         </div>
       </div>
 
@@ -153,10 +157,10 @@ export function CasePromptsPanel({
         </div>
       )}
 
-      {openJudge && (
+      {judgeOpen && (
         <div className="rounded-lg border border-violet-200 dark:border-violet-800/50 bg-white dark:bg-slate-900 p-2.5 space-y-2">
           <label className="block text-[11px] font-medium text-gray-500 dark:text-slate-400">
-            AI judge rubric — the header&apos;s ✦ AI judge button grades chunks with this prompt
+            AI judge rubric — review or edit the prompt, then run it to grade this case&apos;s chunks
           </label>
           <textarea
             value={judgeValue}
@@ -169,6 +173,15 @@ export function CasePromptsPanel({
             className="w-full rounded-md border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-[12px] font-mono leading-relaxed disabled:opacity-50"
           />
           <div className="flex items-center gap-2">
+            <button
+              disabled={!canEdit || aiJudging || !indexConnected}
+              onClick={() => onRunJudge(judgeInstructions ?? undefined)}
+              title="Grade this case's chunks with the LLM — a second opinion that shows up in annotator agreement"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-40"
+            >
+              <span aria-hidden className={aiJudging ? "animate-pulse" : ""}>✦</span>
+              {aiJudging ? "Judging…" : "Run AI judge"}
+            </button>
             <button
               onClick={() => {
                 onJudgeInstructionsChange(null);

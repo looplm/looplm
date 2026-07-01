@@ -1,61 +1,69 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   getLabelingView,
   getLabelingPool,
   getIndexProviders,
-  setLabelingComplete,
-  setLabelingSlice,
-  saveChunkLabels,
-  deleteChunkLabel,
   aiJudgeCase,
-  planCaseQueries,
-  getLabelingPrompts,
   type LabelingRunResponse,
-  type LabelingPoolResponse,
-  type LabelingPromptDefaults,
-  type PooledChunkForLabeling,
 } from "@/lib/api";
 import { usePermissions } from "@/components/permissions-context";
 import { AgreementPanel } from "@/components/labeling/agreement-panel";
-import { CaseCard } from "@/components/labeling/case-card";
 import { LabelingControls } from "@/components/labeling/labeling-controls";
 
-export default function LabelingPage() {
+const SLICE_BADGE: Record<string, string> = {
+  safety: "bg-red-500/10 text-red-600 dark:text-red-300 border-red-500/30",
+  adversarial: "bg-orange-500/10 text-orange-600 dark:text-orange-300 border-orange-500/30",
+  broad: "bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20",
+};
+
+// Run an async op over items with bounded concurrency, reporting progress as each settles.
+async function runBounded<T>(
+  items: T[],
+  concurrency: number,
+  op: (item: T) => Promise<void>,
+  onProgress: (done: number) => void,
+) {
+  let cursor = 0;
+  let done = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const item = items[cursor++];
+      try {
+        await op(item);
+      } catch {
+        // Skip failures; bulk actions are best-effort.
+      } finally {
+        onProgress(++done);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+}
+
+export default function LabelingIndexPage() {
   const { canWrite } = usePermissions();
   const canEdit = canWrite("labeling");
 
   const [view, setView] = useState<LabelingRunResponse | null>(null);
-  // The dataset the picker is on. Undefined until the first view resolves (backend picks the
-  // most-recent dataset and tells us which); after that it's the explicit selection.
+  // Undefined until the first view resolves (backend picks the most-recent dataset).
   const [datasetId, setDatasetId] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState<"in_progress" | "complete">("in_progress");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [indexConnected, setIndexConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Each case's chunks ARE its index pool — eager-loaded per case and graded in place. Cached
-  // server-side, so re-opening the page doesn't re-query the index.
-  const [poolByCase, setPoolByCase] = useState<Record<string, LabelingPoolResponse>>({});
-  const [poolLoading, setPoolLoading] = useState<Set<string>>(new Set());
-  const poolRequested = useRef<Set<string>>(new Set());
-  // Default judge + planner rubrics, loaded once and shown (editable) in each case's prompts panel.
-  const [promptDefaults, setPromptDefaults] = useState<LabelingPromptDefaults | null>(null);
-  // Cases whose agentic queries are currently being (re-)planned (per-case spinner).
-  const [planning, setPlanning] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<"recompute" | "judge" | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
 
   useEffect(() => {
     getIndexProviders()
       .then((res) => setIndexConnected(res.data.length > 0))
       .catch(() => setIndexConnected(false));
-    getLabelingPrompts()
-      .then(setPromptDefaults)
-      .catch(() => setPromptDefaults(null));
   }, []);
 
-  // Load the labeling view for a dataset (or the most-recent one when unspecified).
   const load = useCallback((dsId?: string) => {
     setLoading(true);
     setError(null);
@@ -63,11 +71,6 @@ export default function LabelingPage() {
       .then((v) => {
         setView(v);
         setDatasetId(v.dataset_id ?? undefined);
-        setCollapsed(new Set());
-        // Fresh dataset: drop pools so they're re-fetched against the new cases.
-        setPoolByCase({});
-        setPoolLoading(new Set());
-        poolRequested.current = new Set();
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -77,278 +80,68 @@ export default function LabelingPage() {
     load(datasetId);
   }, [datasetId, load]);
 
-  // Pool a set of cases through the index heads with bounded concurrency, writing each result
-  // into poolByCase as it lands. ``refresh`` forces a server-side recompute (bypassing the cache).
-  const loadPools = useCallback(
-    async (testIds: string[], dsId: string | undefined, refresh: boolean) => {
-      if (testIds.length === 0) return;
-      setPoolLoading((prev) => new Set([...prev, ...testIds]));
-      const settle = (id: string) =>
-        setPoolLoading((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < testIds.length) {
-          const testId = testIds[cursor++];
-          try {
-            const p = await getLabelingPool(testId, { datasetId: dsId, refresh });
-            setPoolByCase((prev) => ({ ...prev, [testId]: p }));
-          } catch {
-            // Leave this case without a pool; it'll show as "no candidates".
-          } finally {
-            settle(testId);
-          }
-        }
-      };
-      const POOL_CONCURRENCY = 4;
-      await Promise.all(Array.from({ length: Math.min(POOL_CONCURRENCY, testIds.length) }, worker));
-    },
-    [],
-  );
-
-  // Eager-pool every case once the view is in, so the chunks to judge appear without expanding.
-  // The server-side pool cache makes repeat loads cheap. Skipped entirely with no index.
-  useEffect(() => {
-    if (!view?.available || !indexConnected) return;
-    const todo = view.cases
-      .filter((c) => !poolRequested.current.has(c.test_id))
-      .map((c) => c.test_id);
-    if (todo.length === 0) return;
-    todo.forEach((id) => poolRequested.current.add(id));
-    void loadPools(todo, view.dataset_id ?? undefined, false);
-  }, [view, indexConnected, loadPools]);
-
-  // Explicit recompute: re-pool every case against the index, bypassing the cache.
-  const [recomputing, setRecomputing] = useState(false);
-  const recomputePools = useCallback(async () => {
+  const recomputeAll = useCallback(async () => {
     if (!view) return;
     const ids = view.cases.map((c) => c.test_id);
     if (ids.length === 0) return;
-    setRecomputing(true);
+    setBulkBusy("recompute");
+    setBulkProgress({ done: 0, total: ids.length });
     try {
-      await loadPools(ids, view.dataset_id ?? undefined, true);
+      await runBounded(
+        ids,
+        4,
+        (id) => getLabelingPool(id, { datasetId: view.dataset_id ?? undefined, refresh: true }).then(() => {}),
+        (done) => setBulkProgress({ done, total: ids.length }),
+      );
+      toast.success(`Recomputed ${ids.length} pool${ids.length === 1 ? "" : "s"}`);
     } finally {
-      setRecomputing(false);
+      setBulkBusy(null);
+      setBulkProgress(null);
     }
-  }, [view, loadPools]);
-
-  // Oldest pool timestamp across loaded cases — the freshness floor shown on the page.
-  const lastPooledAt = useMemo(() => {
-    const times = Object.values(poolByCase)
-      .map((p) => p.computed_at)
-      .filter((t): t is string => !!t);
-    return times.length ? times.reduce((a, b) => (a < b ? a : b)) : null;
-  }, [poolByCase]);
-
-  // Which index heads couldn't run (e.g. no vectorizer), aggregated across cases — so empty
-  // pools are explainable: if a head is unavailable, it can't contribute candidates.
-  const poolHeadsFailed = useMemo(() => {
-    const failed: Record<string, string> = {};
-    for (const p of Object.values(poolByCase)) {
-      for (const [h, reason] of Object.entries(p.heads_failed)) if (!(h in failed)) failed[h] = reason;
-    }
-    return failed;
-  }, [poolByCase]);
-
-  const toggleCase = useCallback((testId: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(testId)) next.delete(testId);
-      else next.add(testId);
-      return next;
-    });
-  }, []);
-
-  const collapseAll = useCallback(() => {
-    setCollapsed(new Set((view?.cases ?? []).map((c) => c.test_id)));
   }, [view]);
 
-  const expandAll = useCallback(() => setCollapsed(new Set()), []);
-
-  const onToggleComplete = useCallback(
-    async (testId: string, complete: boolean) => {
+  const aiJudgeAll = useCallback(async () => {
+    if (!view) return;
+    const ids = view.cases.map((c) => c.test_id);
+    if (ids.length === 0) return;
+    setBulkBusy("judge");
+    setBulkProgress({ done: 0, total: ids.length });
+    const judged = new Set<string>();
+    try {
+      await runBounded(
+        ids,
+        3,
+        (id) =>
+          aiJudgeCase(id, { datasetId: view.dataset_id ?? undefined }).then(() => {
+            judged.add(id);
+          }),
+        (done) => setBulkProgress({ done, total: ids.length }),
+      );
+      // Reflect the AI annotator now present on judged cases.
       setView((prev) =>
         prev
-          ? { ...prev, cases: prev.cases.map((c) => (c.test_id === testId ? { ...c, complete } : c)) }
-          : prev,
-      );
-      if (complete) setCollapsed((prev) => new Set(prev).add(testId));
-      try {
-        await setLabelingComplete(testId, complete);
-      } catch {
-        toast.error("Failed to update status");
-        load(datasetId);
-      }
-    },
-    [load, datasetId],
-  );
-
-  const onSetSlice = useCallback(
-    async (testId: string, slice: string | null) => {
-      setView((prev) =>
-        prev
-          ? { ...prev, cases: prev.cases.map((c) => (c.test_id === testId ? { ...c, slice } : c)) }
-          : prev,
-      );
-      try {
-        await setLabelingSlice(testId, slice);
-      } catch {
-        toast.error("Failed to set slice");
-        load(datasetId);
-      }
-    },
-    [load, datasetId],
-  );
-
-  // Patch one pooled chunk's fields in place (optimistic grading / clearing / AI overlay).
-  const patchPoolChunk = useCallback(
-    (testId: string, chunkId: string, patch: Partial<PooledChunkForLabeling>) =>
-      setPoolByCase((prev) => {
-        const p = prev[testId];
-        if (!p) return prev;
-        return {
-          ...prev,
-          [testId]: {
-            ...p,
-            chunks: p.chunks.map((ch) => (ch.chunk_id === chunkId ? { ...ch, ...patch } : ch)),
-          },
-        };
-      }),
-    [],
-  );
-
-  // Optimistic graded label on a pooled chunk: update local state, persist, reload on error.
-  const onGrade = useCallback(
-    async (testId: string, chunk: PooledChunkForLabeling, relevance: number) => {
-      patchPoolChunk(testId, chunk.chunk_id, { relevance });
-      try {
-        await saveChunkLabels([
-          {
-            test_id: testId,
-            chunk_id: chunk.chunk_id,
-            relevance,
-            content_preview: chunk.content_preview,
-            url: chunk.url,
-            title: chunk.title,
-          },
-        ]);
-      } catch {
-        toast.error("Failed to save label");
-        void loadPools([testId], view?.dataset_id ?? undefined, false);
-      }
-    },
-    [patchPoolChunk, loadPools, view],
-  );
-
-  const onClearGrade = useCallback(
-    async (testId: string, chunk: PooledChunkForLabeling) => {
-      patchPoolChunk(testId, chunk.chunk_id, { relevance: null, labeled_by: null });
-      try {
-        await deleteChunkLabel(testId, chunk.chunk_id);
-      } catch {
-        toast.error("Failed to remove label");
-        void loadPools([testId], view?.dataset_id ?? undefined, false);
-      }
-    },
-    [patchPoolChunk, loadPools, view],
-  );
-
-  // Cases currently being graded by the AI judge (per-case spinner).
-  const [aiJudging, setAiJudging] = useState<Set<string>>(new Set());
-
-  // Run the AI judge over a case's pooled chunks, then fold the grades in as a read-only second
-  // opinion (the human's own grades are untouched). "AI" joins the case's labelers.
-  const onAiJudge = useCallback(
-    async (testId: string, instructions?: string) => {
-      setAiJudging((prev) => new Set(prev).add(testId));
-      try {
-        const res = await aiJudgeCase(testId, {
-          datasetId: view?.dataset_id ?? undefined,
-          instructions,
-        });
-        setPoolByCase((prev) => {
-          const p = prev[testId];
-          if (!p) return prev;
-          return {
-            ...prev,
-            [testId]: {
-              ...p,
-              chunks: p.chunks.map((ch) =>
-                ch.chunk_id in res.grades ? { ...ch, ai_relevance: res.grades[ch.chunk_id] } : ch,
+          ? {
+              ...prev,
+              cases: prev.cases.map((c) =>
+                judged.has(c.test_id) && !c.labelers.includes("AI")
+                  ? { ...c, labelers: [...c.labelers, "AI"] }
+                  : c,
               ),
-            },
-          };
-        });
-        setView((prev) =>
-          prev
-            ? {
-                ...prev,
-                cases: prev.cases.map((c) =>
-                  c.test_id === testId && !c.labelers.includes("AI")
-                    ? { ...c, labelers: [...c.labelers, "AI"] }
-                    : c,
-                ),
-              }
-            : prev,
-        );
-        toast.success(`AI judged ${res.judged} chunk${res.judged === 1 ? "" : "s"}`);
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "AI judge failed");
-      } finally {
-        setAiJudging((prev) => {
-          const next = new Set(prev);
-          next.delete(testId);
-          return next;
-        });
-      }
-    },
-    [view],
-  );
-
-  // Plan (or re-plan) a case's agentic sub-queries with the LLM, then re-pool so their index hits
-  // fold in. The pool's cache key carries the query signature, so the re-fetch is a natural miss.
-  const onPlan = useCallback(
-    async (testId: string, instructions?: string) => {
-      setPlanning((prev) => new Set(prev).add(testId));
-      try {
-        const res = await planCaseQueries(testId, {
-          datasetId: view?.dataset_id ?? undefined,
-          instructions,
-        });
-        await loadPools([testId], view?.dataset_id ?? undefined, false);
-        toast.success(
-          res.agentic.length > 0
-            ? `Planned ${res.agentic.length} agentic quer${res.agentic.length === 1 ? "y" : "ies"}`
-            : "No agentic queries were planned for this case",
-        );
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Query planning failed");
-      } finally {
-        setPlanning((prev) => {
-          const next = new Set(prev);
-          next.delete(testId);
-          return next;
-        });
-      }
-    },
-    [view, loadPools],
-  );
-
-  // Progress: graded chunks over pooled chunks, across the pools loaded so far.
-  const progress = useMemo(() => {
-    let labeled = 0;
-    let total = 0;
-    for (const p of Object.values(poolByCase)) {
-      total += p.chunks.length;
-      labeled += p.chunks.filter((ch) => ch.relevance != null).length;
+            }
+          : prev,
+      );
+      toast.success(`AI judged ${judged.size} question${judged.size === 1 ? "" : "s"}`);
+    } finally {
+      setBulkBusy(null);
+      setBulkProgress(null);
     }
-    return { labeled, total };
-  }, [poolByCase]);
+  }, [view]);
 
   const datasets = view?.datasets ?? [];
+  const completeCount = useMemo(() => (view?.cases ?? []).filter((c) => c.complete).length, [view]);
+
+  const caseHref = (testId: string) =>
+    `/labeling/${encodeURIComponent(testId)}${datasetId ? `?dataset=${encodeURIComponent(datasetId)}` : ""}`;
 
   return (
     <div>
@@ -370,12 +163,10 @@ export default function LabelingPage() {
         )}
       </div>
       <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
-        Judge the chunks your index retrieves for each test case in this dataset. Grade each one
-        0 (irrelevant), 1 (marginally relevant), 2 (relevant), or 3 (highly relevant); these
-        labels are the ground truth for the chunk-level precision, recall and nDCG on the Pipeline
-        page (any grade ≥ 1 counts as relevant; nDCG weights by grade). Each case&apos;s candidates
-        are pooled live from the connected index (BM25/vector/hybrid); use the search box on a case
-        to pull in more.
+        Pick a question to judge the chunks your index retrieves for it. Grade each one 0
+        (irrelevant), 1 (marginally relevant), 2 (relevant), or 3 (highly relevant); these labels
+        are the ground truth for the chunk-level precision, recall and nDCG on the Pipeline page
+        (any grade ≥ 1 counts as relevant; nDCG weights by grade).
       </p>
 
       {error && (
@@ -386,8 +177,8 @@ export default function LabelingPage() {
 
       {indexConnected === false && !loading && (
         <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-600 dark:text-amber-400 text-sm">
-          No index provider is connected. Connect one in Settings → Integrations so candidate
-          chunks can be pooled from the index for each query.
+          No index provider is connected. Connect one in Settings → Integrations so candidate chunks
+          can be pooled from the index for each query.
         </div>
       )}
 
@@ -397,8 +188,8 @@ export default function LabelingPage() {
         </div>
       ) : datasets.length === 0 ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
-          No datasets yet. Create a dataset (Datasets) with the queries you want to label, then
-          come back here.
+          No datasets yet. Create a dataset (Datasets) with the queries you want to label, then come
+          back here.
         </div>
       ) : !view || !view.available ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
@@ -407,16 +198,14 @@ export default function LabelingPage() {
       ) : (
         <>
           <LabelingControls
-            progress={progress}
+            complete={completeCount}
+            total={view.cases.length}
             canEdit={canEdit}
             indexConnected={indexConnected}
-            pooling={poolLoading.size > 0}
-            lastPooledAt={lastPooledAt}
-            poolHeadsFailed={poolHeadsFailed}
-            recomputing={recomputing}
-            onRecompute={recomputePools}
-            onCollapseAll={collapseAll}
-            onExpandAll={expandAll}
+            bulkBusy={bulkBusy}
+            bulkProgress={bulkProgress}
+            onRecomputeAll={recomputeAll}
+            onAiJudgeAll={aiJudgeAll}
           />
 
           <AgreementPanel canEdit={canEdit} />
@@ -449,28 +238,43 @@ export default function LabelingPage() {
                 </div>
 
                 {active.length > 0 ? (
-                  <div className="space-y-4">
+                  <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden divide-y divide-gray-100 dark:divide-slate-800">
                     {active.map((c) => (
-                      <CaseCard
+                      <Link
                         key={c.test_id}
-                        c={c}
-                        canEdit={canEdit}
-                        indexConnected={indexConnected}
-                        datasetId={view.dataset_id ?? undefined}
-                        pool={poolByCase[c.test_id] ?? null}
-                        poolLoading={poolLoading.has(c.test_id)}
-                        collapsed={collapsed.has(c.test_id)}
-                        onToggleCollapse={() => toggleCase(c.test_id)}
-                        onToggleComplete={(v) => onToggleComplete(c.test_id, v)}
-                        onSetSlice={(s) => onSetSlice(c.test_id, s)}
-                        onGrade={onGrade}
-                        onClearGrade={onClearGrade}
-                        onAiJudge={(instructions) => onAiJudge(c.test_id, instructions)}
-                        aiJudging={aiJudging.has(c.test_id)}
-                        onPlan={(instructions) => onPlan(c.test_id, instructions)}
-                        planning={planning.has(c.test_id)}
-                        promptDefaults={promptDefaults}
-                      />
+                        href={caseHref(c.test_id)}
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors"
+                      >
+                        <span className="min-w-0 flex-1 text-[14px] text-gray-900 dark:text-white truncate">
+                          {c.input || c.test_id}
+                        </span>
+                        {c.labelers.length > 0 && (
+                          <span
+                            className="hidden md:inline text-[11px] italic text-gray-400 dark:text-slate-500 truncate max-w-[160px]"
+                            title={`Labeled by ${c.labelers.join(", ")}`}
+                          >
+                            by {c.labelers.join(", ")}
+                          </span>
+                        )}
+                        <span className="shrink-0 text-[11px] text-gray-400 dark:text-slate-500 tabular-nums">
+                          {c.labeled_count} labeled · {c.relevant_count} relevant
+                        </span>
+                        <span
+                          className={`shrink-0 rounded-lg border px-2 py-0.5 text-[11px] font-medium capitalize ${
+                            SLICE_BADGE[c.slice ?? "broad"]
+                          }`}
+                        >
+                          {c.slice ?? "broad"}
+                        </span>
+                        {c.complete && (
+                          <span className="shrink-0 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-[11px] font-medium">
+                            ✓ Complete
+                          </span>
+                        )}
+                        <span aria-hidden className="shrink-0 text-gray-300 dark:text-slate-600">
+                          →
+                        </span>
+                      </Link>
                     ))}
                   </div>
                 ) : (

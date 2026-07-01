@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,6 +24,7 @@ from app.schemas.retrieval import (
     LabelingQueries,
     LabelingRunResponse,
 )
+from app.services.analysis_llm import AnalysisLlmConfigError
 from app.services.chunk_ai_judge import DEFAULT_AI_JUDGE_INSTRUCTIONS
 from app.services.chunk_labeling import (
     build_labeling_cases,
@@ -32,13 +34,17 @@ from app.services.chunk_labeling import (
 from app.services.query_planner import DEFAULT_QUERY_PLANNER_INSTRUCTIONS
 
 from ._helpers import (
+    _case_planned,
     _dataset_case_agentic_queries,
     _dataset_case_query,
     _list_dataset_options,
     _project_labels,
     _resolve_dataset,
     assemble_case_pool,
+    plan_and_persist_case_queries,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -131,7 +137,23 @@ async def get_labeling_pool(
     query = (q if manual else str(case_query or "")).strip()
 
     # Fold the case's planned agentic sub-queries into the auto pool (not a manual one-off search).
-    agentic = [] if manual else await _dataset_case_agentic_queries(db, dataset.id, test_id)
+    # The planner runs automatically the first time a case is pooled, so the agentic retrieval path
+    # is judged alongside the base heads without a separate click. It runs exactly once (the result
+    # is persisted, even when it plans nothing); the "Re-plan queries" button overrides later. When
+    # no LLM is configured or the planner fails, we fall back to base-only pooling.
+    agentic: list[str] = []
+    if not manual:
+        agentic = await _dataset_case_agentic_queries(db, dataset.id, test_id)
+        if not agentic and not await _case_planned(db, dataset.id, test_id):
+            try:
+                agentic = await plan_and_persist_case_queries(
+                    db, project, user, dataset_id=dataset.id, test_id=test_id, query=query
+                )
+            except AnalysisLlmConfigError:
+                agentic = []  # no LLM yet — pool base-only, auto-plan once one is configured
+            except Exception:  # noqa: BLE001
+                logger.exception("Auto query-planning failed for test_id=%s", test_id)
+                agentic = []
 
     pool, computed_at, provider_connected = await assemble_case_pool(
         db, project, test_id, query, depth=depth, manual=manual, refresh=refresh,
