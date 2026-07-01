@@ -38,7 +38,10 @@ from app.services.retrieval_metrics import (
 logger = logging.getLogger(__name__)
 
 # Richer k grid than the grader default so the run view can draw a recall curve.
-AGG_KS: tuple[int, ...] = (1, 3, 5, 10)
+# Extends past 10 because the live probe fetches max(AGG_KS) chunks: deeper cutoffs
+# reveal how much recall is left on the table when a query's gold set is larger than 10
+# (recall@10 is hard-capped at min(10, #relevant) / #relevant).
+AGG_KS: tuple[int, ...] = (1, 3, 5, 10, 20, 50)
 
 # Retrieval pipeline stages, in pipeline order, mapping each pool head to a display label.
 STAGE_LABELS: tuple[tuple[str, str], ...] = (

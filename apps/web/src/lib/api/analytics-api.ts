@@ -4,6 +4,7 @@
 
 import { request } from "./client";
 import type {
+  MultiHopResponse,
   RequestClustersResponse,
   RetrievalActivityResponse,
   RetrievalSource,
@@ -59,3 +60,6 @@ export const getRetrievalActivity = (filters: AnalyticsFilters) =>
 
 export const getSpanNames = () =>
   request<SpanNameCount[]>("/api/analytics/span-names");
+
+export const getMultiHopStats = (filters: AnalyticsFilters) =>
+  request<MultiHopResponse>(`/api/analytics/multi-hop${buildQuery(filters)}`);

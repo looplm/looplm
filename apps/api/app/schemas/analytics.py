@@ -90,3 +90,57 @@ class SpanNameCount(BaseModel):
 
     name: str
     count: int
+
+
+# --- Multi-hop retrieval ---
+
+
+class MultiHopDefinition(BaseModel):
+    """One way of calling a request "multi-hop", with its rate over the window.
+
+    ``total`` is the *observable* denominator (requests where the signal could be
+    measured at all), so a rate isn't diluted by traces that never carried the
+    signal. ``rate`` is ``multi_hop / total`` (0..1), or None when nothing was
+    observable.
+    """
+
+    key: str  # "complexity" | "drill_down" | "expansion" | "search_calls"
+    label: str
+    description: str
+    multi_hop: int
+    total: int
+    rate: Optional[float] = None
+
+
+class ComplexityBucket(BaseModel):
+    """Count of requests at one logged query-complexity level."""
+
+    level: str  # "simple" | "moderate" | "complex" | "unclassified"
+    count: int
+
+
+class HistogramBin(BaseModel):
+    """One bar of a per-request distribution. ``value`` is the (tail-capped)
+    count; ``label`` renders it (e.g. ``"5+"`` for the capped upper bin)."""
+
+    value: int
+    count: int
+    label: str
+
+
+class MultiHopResponse(BaseModel):
+    """How many requests took more than one retrieval hop, by each definition.
+
+    Derived on read from already-synced trace metadata (``queryComplexity``,
+    ``expandedQueryCount``) plus the search span's funnel output
+    (``searchCallCount``, ``summaryPages``) — no schema change or re-sync.
+    """
+
+    requests_total: int
+    requests_analyzed: int  # requests carrying at least one observable signal
+    definitions: list[MultiHopDefinition]
+    complexity: list[ComplexityBucket]
+    queries_per_request: list[HistogramBin]
+    search_calls_per_request: list[HistogramBin]
+    avg_queries_per_request: Optional[float] = None
+    avg_search_calls_per_request: Optional[float] = None

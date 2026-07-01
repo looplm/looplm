@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import { HeatmapMatrix } from "./heatmap-matrix";
+import { MultiHopPanel } from "./multi-hop-panel";
 
 export default function AnalyticsPage() {
   const {
@@ -266,6 +267,18 @@ export default function AnalyticsPage() {
             Cluster user requests into intent themes to see which request types are succeeding or failing. Uses the current date/environment filters.
           </div>
         ) : null}
+      </section>
+
+      {/* Multi-hop retrieval */}
+      <section className="mb-10">
+        <div className="mb-3">
+          <h2 className="text-lg font-semibold">Multi-hop retrieval</h2>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">
+            How many requests took more than one retrieval hop, by four definitions — complexity,
+            a drill-down hop, query expansion, and multiple search calls.
+          </p>
+        </div>
+        <MultiHopPanel filters={filters} />
       </section>
 
       {/* Retrieval insights */}

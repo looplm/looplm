@@ -21,7 +21,7 @@ export const EXPLAIN = {
   precision:
     "Of the documents that were returned, this is the share that were actually relevant. Higher means less noise in the results.",
   recallCurve:
-    "How many of the correct documents appear as you widen the window from the top 1 result out to the top 10. The bars normally rise as k grows.",
+    "How many of the correct documents appear as you widen the window from the top 1 result out to the deepest cutoff shown. The bars normally rise as k grows.",
   expected: "How many documents this question was expected to find (the ground truth).",
   retrieved: "How many documents the search actually returned for this question.",
   caseRecall: "The share of the expected documents that were found for this single question.",

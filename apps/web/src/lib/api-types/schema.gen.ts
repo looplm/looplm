@@ -156,6 +156,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analytics/multi-hop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Multi Hop
+         * @description How many requests took more than one retrieval hop, by four definitions.
+         *
+         *     Reconstructed on read from already-synced signals: the ``queryComplexity`` and
+         *     ``expandedQueryCount`` the agent writes onto trace metadata, plus the search
+         *     span's funnel output (``searchCallCount``, ``summaryPages``). See
+         *     :mod:`app.services.multi_hop_analytics` for how each definition is computed.
+         */
+        get: operations["get_multi_hop_api_analytics_multi_hop_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analytics/request-clusters": {
         parameters: {
             query?: never;
@@ -2724,11 +2749,12 @@ export interface paths {
          * Get Retrieval Metrics
          * @description Retrieval-quality metrics (recall@k / precision@k / MRR / nDCG).
          *
-         *     ``source=labels`` measures pooled human chunk labels against a *live retrieval probe* of the
-         *     connected index, over a dataset's test cases (``dataset_id``, default most-recent). This is
-         *     the data-labeling lens and needs no eval run. ``source=urls`` measures each case's
-         *     ground-truth URLs via the ``contains_urls`` evaluator captures of an eval run (``run_id``,
-         *     default most-recent). Returns ``available=False`` when there is nothing to measure against.
+         *     ``source=labels`` measures pooled chunk labels against a *live retrieval probe* of the
+         *     connected index, over one or more datasets' test cases (``dataset_ids``; ``dataset_id`` is the
+         *     single-dataset alias; default most-recent). This is the data-labeling lens and needs no eval
+         *     run. ``source=urls`` measures each case's ground-truth URLs via the ``contains_urls`` evaluator
+         *     captures of an eval run (``run_id``, default most-recent). Returns ``available=False`` when
+         *     there is nothing to measure against.
          */
         get: operations["get_retrieval_metrics_api_pipeline_retrieval_metrics_get"];
         put?: never;
@@ -2750,9 +2776,10 @@ export interface paths {
          * Get Retrieval Metrics By Stage
          * @description Deterministic retrieval metrics per pipeline stage (sparse/dense/RRF/reranked/agentic).
          *
-         *     For each of a dataset's cases we assemble the candidate pool (which records each chunk's rank
-         *     per head), reconstruct each stage's ranked list, and score it against the chunk-label gold
-         *     (``gold_source`` = human | ai | both). Stages are compared side by side, with a per-case grid.
+         *     For each case (pooled across ``dataset_ids``; ``dataset_id`` is the single-dataset alias) we
+         *     assemble the candidate pool (which records each chunk's rank per head), reconstruct each
+         *     stage's ranked list, and score it against the chunk-label gold (``gold_source`` = human | ai |
+         *     both). Stages are compared side by side, with a per-case grid.
          */
         get: operations["get_retrieval_metrics_by_stage_api_pipeline_retrieval_metrics_by_stage_get"];
         put?: never;
@@ -4505,6 +4532,8 @@ export interface components {
             available: boolean;
             /** Cases */
             cases?: components["schemas"]["ByStageCaseMetrics"][];
+            /** Computed At */
+            computed_at?: string | null;
             /** Dataset Id */
             dataset_id?: string | null;
             /** Dataset Name */
@@ -4817,6 +4846,16 @@ export interface components {
              * @description applied or dismissed
              */
             status: string;
+        };
+        /**
+         * ComplexityBucket
+         * @description Count of requests at one logged query-complexity level.
+         */
+        ComplexityBucket: {
+            /** Count */
+            count: number;
+            /** Level */
+            level: string;
         };
         /** ConfirmExtractionRequest */
         ConfirmExtractionRequest: {
@@ -6514,6 +6553,19 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HistogramBin
+         * @description One bar of a per-request distribution. ``value`` is the (tail-capped)
+         *     count; ``label`` renders it (e.g. ``"5+"`` for the capped upper bin).
+         */
+        HistogramBin: {
+            /** Count */
+            count: number;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+        };
         /** HitRateSummary */
         HitRateSummary: {
             /** Count */
@@ -7419,6 +7471,55 @@ export interface components {
             provider: string;
             /** Request Count */
             request_count: number;
+        };
+        /**
+         * MultiHopDefinition
+         * @description One way of calling a request "multi-hop", with its rate over the window.
+         *
+         *     ``total`` is the *observable* denominator (requests where the signal could be
+         *     measured at all), so a rate isn't diluted by traces that never carried the
+         *     signal. ``rate`` is ``multi_hop / total`` (0..1), or None when nothing was
+         *     observable.
+         */
+        MultiHopDefinition: {
+            /** Description */
+            description: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Multi Hop */
+            multi_hop: number;
+            /** Rate */
+            rate?: number | null;
+            /** Total */
+            total: number;
+        };
+        /**
+         * MultiHopResponse
+         * @description How many requests took more than one retrieval hop, by each definition.
+         *
+         *     Derived on read from already-synced trace metadata (``queryComplexity``,
+         *     ``expandedQueryCount``) plus the search span's funnel output
+         *     (``searchCallCount``, ``summaryPages``) — no schema change or re-sync.
+         */
+        MultiHopResponse: {
+            /** Avg Queries Per Request */
+            avg_queries_per_request?: number | null;
+            /** Avg Search Calls Per Request */
+            avg_search_calls_per_request?: number | null;
+            /** Complexity */
+            complexity: components["schemas"]["ComplexityBucket"][];
+            /** Definitions */
+            definitions: components["schemas"]["MultiHopDefinition"][];
+            /** Queries Per Request */
+            queries_per_request: components["schemas"]["HistogramBin"][];
+            /** Requests Analyzed */
+            requests_analyzed: number;
+            /** Requests Total */
+            requests_total: number;
+            /** Search Calls Per Request */
+            search_calls_per_request: components["schemas"]["HistogramBin"][];
         };
         /** MultiRunReportRequest */
         MultiRunReportRequest: {
@@ -8503,6 +8604,8 @@ export interface components {
             bpref?: number | null;
             /** Cases */
             cases?: components["schemas"]["RetrievalCaseMetrics"][];
+            /** Computed At */
+            computed_at?: string | null;
             /** Condensed Ndcg At K */
             condensed_ndcg_at_k?: {
                 [key: string]: number;
@@ -10294,6 +10397,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdvisorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_multi_hop_api_analytics_multi_hop_get: {
+        parameters: {
+            query?: {
+                from_date?: string | null;
+                to_date?: string | null;
+                environment?: string | null;
+                include_user_ids?: string[];
+                exclude_user_ids?: string[];
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MultiHopResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15417,6 +15557,7 @@ export interface operations {
             query?: {
                 run_id?: string | null;
                 dataset_id?: string | null;
+                dataset_ids?: string[] | null;
                 source?: string;
                 refresh?: boolean;
                 gold_source?: string;
@@ -15453,6 +15594,7 @@ export interface operations {
         parameters: {
             query?: {
                 dataset_id?: string | null;
+                dataset_ids?: string[] | null;
                 gold_source?: string;
                 refresh?: boolean;
             };

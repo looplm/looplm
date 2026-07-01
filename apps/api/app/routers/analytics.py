@@ -28,6 +28,7 @@ from app.routers.request_clusters_worker import (
 )
 from app.routers.top_questions import _extract_user_question
 from app.schemas.analytics import (
+    MultiHopResponse,
     RequestClusterTheme,
     RequestClustersRequest,
     RequestClustersResponse,
@@ -37,8 +38,9 @@ from app.schemas.analytics import (
     RetrievalSource,
     SpanNameCount,
 )
+from app.services.multi_hop_analytics import build_multi_hop_response
 from app.services.observe_filter import get_observe_trace_names
-from app.services.retrieval_config import get_retrieval_span_name
+from app.services.retrieval_config import get_rag_span_names, get_retrieval_span_name
 
 logger = logging.getLogger(__name__)
 
@@ -398,6 +400,60 @@ async def get_retrieval_activity(
             for date, count in sorted(daily_counts.items())
         ],
     )
+
+
+@router.get(
+    "/multi-hop",
+    response_model=MultiHopResponse,
+    dependencies=[require_section("observe", "analytics")],
+)
+async def get_multi_hop(
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    environment: str | None = None,
+    include_user_ids: list[str] = Query(None),
+    exclude_user_ids: list[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """How many requests took more than one retrieval hop, by four definitions.
+
+    Reconstructed on read from already-synced signals: the ``queryComplexity`` and
+    ``expandedQueryCount`` the agent writes onto trace metadata, plus the search
+    span's funnel output (``searchCallCount``, ``summaryPages``). See
+    :mod:`app.services.multi_hop_analytics` for how each definition is computed.
+    """
+    base_filter = _trace_base_filter(
+        project,
+        environment=environment,
+        include_user_ids=include_user_ids,
+        exclude_user_ids=exclude_user_ids,
+        start=from_date,
+        end=to_date,
+    )
+    search_span_name = get_rag_span_names(project).get("search")
+
+    trace_rows = (
+        await db.execute(select(Trace.id, Trace.trace_metadata).where(*base_filter))
+    ).all()
+
+    # Search span input (holds the expanded ``queries``) + output funnel, keyed by trace.
+    search_by_trace: dict[str, tuple[dict, dict]] = {}
+    if search_span_name:
+        span_rows = (
+            await db.execute(
+                select(Span.trace_id, Span.input, Span.output)
+                .join(Trace, Span.trace_id == Trace.id)
+                .where(*base_filter, Span.name == search_span_name)
+            )
+        ).all()
+        for tid, span_input, span_output in span_rows:
+            search_by_trace[str(tid)] = (
+                span_input if isinstance(span_input, dict) else {},
+                span_output if isinstance(span_output, dict) else {},
+            )
+
+    return build_multi_hop_response(trace_rows, search_by_trace)
 
 
 @router.get(

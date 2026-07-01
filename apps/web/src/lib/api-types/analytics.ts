@@ -16,3 +16,7 @@ export type RetrievalSource = S["RetrievalSource"];
 export type RetrievalActivityPoint = S["RetrievalActivityPoint"];
 export type RetrievalActivityResponse = S["RetrievalActivityResponse"];
 export type SpanNameCount = S["SpanNameCount"];
+export type MultiHopDefinition = S["MultiHopDefinition"];
+export type ComplexityBucket = S["ComplexityBucket"];
+export type HistogramBin = S["HistogramBin"];
+export type MultiHopResponse = S["MultiHopResponse"];

@@ -147,6 +147,91 @@ async def test_retrieval_respects_configured_span_name(
     assert {s["url"] for s in sources} == {"https://kb.example.com/article"}
 
 
+async def _seed_multi_hop(db_session, integration):
+    """Three traces: a full multi-hop request, a single-pass request, and an
+    unclassified one (no metadata, no search span)."""
+    t1 = Trace(
+        id=uuid4(), integration_id=integration.id, external_id="mh1", name="chat",
+        trace_metadata={"queryComplexity": "complex", "expandedQueryCount": 3},
+        start_time=datetime(2025, 2, 1, tzinfo=timezone.utc), status=TraceStatus.success,
+    )
+    t2 = Trace(
+        id=uuid4(), integration_id=integration.id, external_id="mh2", name="chat",
+        trace_metadata={"queryComplexity": "simple", "expandedQueryCount": 1},
+        start_time=datetime(2025, 2, 2, tzinfo=timezone.utc), status=TraceStatus.success,
+    )
+    t3 = Trace(
+        id=uuid4(), integration_id=integration.id, external_id="mh3", name="chat",
+        trace_metadata={}, start_time=datetime(2025, 2, 3, tzinfo=timezone.utc),
+        status=TraceStatus.success,
+    )
+    db_session.add_all([t1, t2, t3])
+    await db_session.flush()
+
+    db_session.add_all([
+        Span(
+            id=uuid4(), trace_id=t1.id, name="mandatory-search", type=SpanType.tool,
+            input={"queries": ["a", "b", "c"]},
+            output={"searchCallCount": 4, "summaryPages": 2},
+            created_at=datetime(2025, 2, 1, tzinfo=timezone.utc),
+        ),
+        Span(
+            id=uuid4(), trace_id=t2.id, name="mandatory-search", type=SpanType.tool,
+            input={"queries": ["a"]},
+            output={"searchCallCount": 1, "summaryPages": 0},
+            created_at=datetime(2025, 2, 2, tzinfo=timezone.utc),
+        ),
+    ])
+    await db_session.commit()
+    return [t1, t2, t3]
+
+
+@pytest.mark.asyncio
+async def test_multi_hop(client, db_session, test_integration, headers):
+    await _seed_multi_hop(db_session, test_integration)
+
+    resp = await client.get("/api/analytics/multi-hop", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["requests_total"] == 3
+    assert data["requests_analyzed"] == 2  # t3 has no observable signal
+
+    defs = {d["key"]: d for d in data["definitions"]}
+    # complex query: t1 multi, t2 simple → 1/2
+    assert (defs["complexity"]["multi_hop"], defs["complexity"]["total"]) == (1, 2)
+    assert defs["complexity"]["rate"] == 0.5
+    # drill-down: both searching requests count; only t1 drilled → 1/2
+    assert (defs["drill_down"]["multi_hop"], defs["drill_down"]["total"]) == (1, 2)
+    # expansion (>1 query): t1 only → 1/2
+    assert (defs["expansion"]["multi_hop"], defs["expansion"]["total"]) == (1, 2)
+    # multiple search calls: t1 only → 1/2
+    assert (defs["search_calls"]["multi_hop"], defs["search_calls"]["total"]) == (1, 2)
+
+    complexity = {c["level"]: c["count"] for c in data["complexity"]}
+    assert complexity == {"simple": 1, "complex": 1, "unclassified": 1}
+
+    assert data["avg_queries_per_request"] == 2.0  # (3 + 1) / 2
+    assert data["avg_search_calls_per_request"] == 2.5  # (4 + 1) / 2
+
+    q_bins = {b["value"]: b["count"] for b in data["queries_per_request"]}
+    assert q_bins == {1: 1, 3: 1}
+
+
+@pytest.mark.asyncio
+async def test_multi_hop_empty(client, headers):
+    """No traces in the window → zeroed response, no error."""
+    resp = await client.get("/api/analytics/multi-hop", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["requests_total"] == 0
+    assert data["requests_analyzed"] == 0
+    assert {d["key"] for d in data["definitions"]} == {
+        "complexity", "drill_down", "expansion", "search_calls",
+    }
+    assert all(d["rate"] is None for d in data["definitions"])
+
+
 @pytest.mark.asyncio
 async def test_request_clusters_requires_minimum(client, db_session, test_integration, headers):
     """With fewer than 5 extractable requests, the POST is rejected (before any LLM call)."""
