@@ -15,6 +15,7 @@ import { ConfirmModal } from "@/components/confirm-modal";
 import { RelevanceFilterDropdown } from "@/components/relevance-filter-dropdown";
 import { CompareRunsModal } from "@/components/compare-runs-modal";
 import { usePermissions } from "@/components/permissions-context";
+import RetrievalMetricsPanel from "@/components/retrieval-metrics-panel";
 
 export default function EvaluationsPage() {
   const { canWrite } = usePermissions();
@@ -355,6 +356,10 @@ export default function EvaluationsPage() {
           )}
         </>
       )}
+
+      {/* Retrieval quality — computed scores vs. the targets configured under Evaluators. */}
+      <RetrievalMetricsPanel />
+
       {/* Report modal */}
       {showReportModal && reportMarkdown && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">

@@ -14,7 +14,7 @@ import { EvaluatorTableBody, type SortKey, type SortEntry } from "./evaluator-ta
 import { useEvaluatorActions } from "./evaluator-actions";
 import Tooltip from "@/components/tooltip";
 import { usePermissions } from "@/components/permissions-context";
-import RetrievalMetricsPanel from "@/components/retrieval-metrics-panel";
+import { RetrievalTargetsConfig } from "@/components/retrieval/targets-config";
 
 const RELEVANCE_ORDER: Record<string, number> = { core: 0, important: 1, minor: 2 };
 
@@ -266,13 +266,16 @@ export default function EvaluatorsPage() {
 
       <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
         {tab === "retrieval"
-          ? "Retrieval quality — did the pipeline fetch the right context? The metrics below are computed from your expected URLs or human chunk labels; set a target on each to make it a pass/fail bar. Retrieval-check evaluators (source retrieval, image checks) that run per test case are listed underneath."
+          ? "Retrieval quality — did the pipeline fetch the right context? Set a target on each metric below to make it a pass/fail bar; the computed scores are shown on the Evaluations page. Retrieval-check evaluators (source retrieval, image checks) that run per test case are listed underneath."
           : "Generation quality — given the retrieved context, did the model answer well? These evaluators grade each answer during an eval run."}
       </p>
 
       {tab === "retrieval" && (
         <div className="mb-8">
-          <RetrievalMetricsPanel />
+          <h2 className="text-sm font-semibold text-gray-500 dark:text-slate-400 mb-2">
+            Retrieval metric targets
+          </h2>
+          <RetrievalTargetsConfig canEdit={canEdit} />
         </div>
       )}
 
