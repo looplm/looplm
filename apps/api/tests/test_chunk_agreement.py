@@ -124,7 +124,7 @@ def test_agreement_report_reflects_gold_override():
 async def test_agreement_and_gold_endpoints(
     client: AsyncClient, auth_headers, db_session, test_project, monkeypatch
 ):
-    import app.routers.retrieval as retrieval_router
+    import app.services.retrieval_labels_metrics as retrieval_router
 
     dataset = TestDataset(id=uuid4(), project_id=test_project.id, name="set")
     db_session.add(dataset)

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  createRetrievalRun,
   getDatasets,
   getEvalRuns,
   getRetrievalByStageMetrics,
@@ -10,8 +11,10 @@ import {
   type ByStageMetricsResponse,
   type EvalRunListItem,
   type RetrievalRunMetrics,
+  type RetrievalRunRecord,
   type RetrievalTargets,
 } from "@/lib/api";
+import { usePermissions } from "@/components/permissions-context";
 import { EXPLAIN, METRICS, statusOf, type MetricDef } from "@/components/retrieval/constants";
 import { Info, MetricCard } from "@/components/retrieval/metric-card";
 import { RecallCurve } from "@/components/retrieval/recall-curve";
@@ -23,6 +26,7 @@ import {
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
 import { ComputedAt } from "@/components/retrieval/computed-at";
+import { RunMetadataEditor } from "@/components/retrieval/run-metadata-editor";
 
 type Source = "urls" | "labels";
 type GoldSource = "human" | "ai" | "both";
@@ -48,7 +52,10 @@ const sameSettings = (a: Draft, b: Draft): boolean =>
   a.datasetIds.length === b.datasetIds.length &&
   a.datasetIds.every((id) => b.datasetIds.includes(id));
 
-export default function RetrievalMetricsPanel() {
+export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () => void } = {}) {
+  const { canWrite } = usePermissions();
+  const canEdit = canWrite("pipeline");
+
   const [runs, setRuns] = useState<EvalRunListItem[]>([]);
   const [datasets, setDatasets] = useState<{ id: string; name: string }[]>([]);
   const [targets, setTargets] = useState<RetrievalTargets | null>(null);
@@ -70,6 +77,12 @@ export default function RetrievalMetricsPanel() {
   const [byStage, setByStage] = useState<ByStageMetricsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The run auto-snapshotted from the current Overall compute, for inline metadata annotation.
+  const [savedRun, setSavedRun] = useState<RetrievalRunRecord | null>(null);
+  const savedNonceRef = useRef<number | null>(null);
+  // Keep the latest onRunSaved without making it an effect dependency (would re-run on each render).
+  const onRunSavedRef = useRef(onRunSaved);
+  onRunSavedRef.current = onRunSaved;
 
   useEffect(() => {
     getEvalRuns({ limit: "50" })
@@ -99,6 +112,7 @@ export default function RetrievalMetricsPanel() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
+    setSavedRun(null);
     const run = async () => {
       if (isByStage) {
         const d = await getRetrievalByStageMetrics(
@@ -122,6 +136,22 @@ export default function RetrievalMetricsPanel() {
         setOverall(m);
         if (applied.source !== "labels" && !applied.runId && m.run_id) {
           setDraftField("runId", m.run_id);
+        }
+        // Auto-snapshot the labels-path result into durable history (once per Compute/Recompute).
+        if (applied.source === "labels" && m.available && savedNonceRef.current !== applied.nonce) {
+          savedNonceRef.current = applied.nonce;
+          try {
+            const rec = await createRetrievalRun(
+              { dataset_ids: applied.datasetIds, gold_source: applied.goldSource },
+              controller.signal,
+            );
+            if (!controller.signal.aborted) {
+              setSavedRun(rec);
+              onRunSavedRef.current?.();
+            }
+          } catch {
+            /* history snapshot is best-effort; the metrics still render */
+          }
         }
       }
     };
@@ -327,6 +357,17 @@ export default function RetrievalMetricsPanel() {
         </div>
       ) : (
         <>
+          {savedRun && applied.source === "labels" && (
+            <RunMetadataEditor
+              run={savedRun}
+              canEdit={canEdit}
+              onSaved={(u) => {
+                setSavedRun(u);
+                onRunSaved?.();
+              }}
+            />
+          )}
+
           <div className="text-xs text-gray-400 dark:text-slate-500 mb-3">
             {overall.evaluated_cases} of {overall.total_cases} cases have{" "}
             {applied.source === "labels" ? "relevance labels" : "ground-truth URLs"}

@@ -233,7 +233,7 @@ async def test_ai_judge_stores_labels_under_ai_annotator(
 async def test_labels_metrics_use_live_probe(
     client: AsyncClient, auth_headers, db_session, test_project, monkeypatch
 ):
-    import app.routers.retrieval as retrieval_router
+    import app.services.retrieval_labels_metrics as labels_metrics
 
     await _seed_dataset(db_session, test_project)
     await client.post(
@@ -262,8 +262,8 @@ async def test_labels_metrics_use_live_probe(
     async def _fake_probe(provider, project_id, test_id, query, k, *, embedder=None, refresh=False):
         return ["c1", "c2"]  # the system retrieves the relevant chunk at rank 1
 
-    monkeypatch.setattr(retrieval_router, "build_index_provider", lambda row: _FakeProvider())
-    monkeypatch.setattr(retrieval_router, "cached_probe_chunk_ids", _fake_probe)
+    monkeypatch.setattr(labels_metrics, "build_index_provider", lambda row: _FakeProvider())
+    monkeypatch.setattr(labels_metrics, "cached_probe_chunk_ids", _fake_probe)
 
     metrics = await client.get(
         "/api/pipeline/retrieval-metrics?source=labels", headers=auth_headers

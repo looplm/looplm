@@ -311,3 +311,48 @@ export interface RetrievalRunMetrics {
   // ISO-8601 UTC time the metrics were computed (present once cached).
   computed_at?: string | null;
 }
+
+// --- Saved retrieval runs (durable, annotatable, comparable history) ---
+
+export interface RetrievalRunSummary {
+  id: string;
+  created_at: string;
+  gold_source: string;
+  dataset_ids: string[];
+  dataset_names: string[];
+  ks: number[];
+  total_cases: number;
+  evaluated_cases: number;
+  has_by_stage: boolean;
+  name?: string | null;
+  pipeline_version?: string | null;
+  index_name?: string | null;
+  index_version?: string | null;
+  notes?: string | null;
+  max_k?: number | null;
+  recall?: number | null;
+  ndcg?: number | null;
+  precision?: number | null;
+  hit_rate?: number | null;
+  mrr?: number | null;
+  bpref?: number | null;
+}
+
+export interface RetrievalRunRecord extends RetrievalRunSummary {
+  metrics: RetrievalRunMetrics;
+  by_stage?: ByStageMetricsResponse | null;
+}
+
+export interface RetrievalRunCreateBody {
+  dataset_ids: string[];
+  gold_source: "human" | "ai" | "both";
+  name?: string | null;
+}
+
+export interface RetrievalRunMetadataUpdate {
+  name?: string | null;
+  pipeline_version?: string | null;
+  index_name?: string | null;
+  index_version?: string | null;
+  notes?: string | null;
+}

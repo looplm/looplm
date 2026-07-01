@@ -15,7 +15,7 @@ from app.routers import (
     admin, analysis, analytics, advisor, auth_router, chunk_quality, costs_overview, dashboard, datasets, evaluations,
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
     index_explorer, ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent,
-    permissions, project_members, projects, prompts, rag_coverage, retrieval, route_analysis, source_registry, trace_detail,
+    permissions, project_members, projects, prompts, rag_coverage, retrieval, retrieval_runs, route_analysis, source_registry, trace_detail,
     traces, user_settings, version, chunk_labels,
 )
 
@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         TestCaseLabelingStatus,
     )
     from app.models.chunk_quality import ChunkQualityRun  # noqa: F401 — ensure table is created
+    from app.models.retrieval_runs import RetrievalRun  # noqa: F401 — ensure table is created
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -217,6 +218,7 @@ app.include_router(experiments.router)
 app.include_router(datasets.router)
 app.include_router(rag_coverage.router)
 app.include_router(retrieval.router)
+app.include_router(retrieval_runs.router)
 app.include_router(chunk_labels.router)
 app.include_router(index_explorer.router)
 app.include_router(source_registry.router)

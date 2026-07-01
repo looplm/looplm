@@ -18,6 +18,10 @@ import type {
   AiJudgePreviewResponse,
   PlanQueriesResponse,
   LabelingPromptDefaults,
+  RetrievalRunSummary,
+  RetrievalRunRecord,
+  RetrievalRunCreateBody,
+  RetrievalRunMetadataUpdate,
 } from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
@@ -71,6 +75,30 @@ export const getRetrievalByStageMetrics = (
     { signal },
   );
 };
+
+// --- Saved retrieval runs (durable history) ---
+
+export const createRetrievalRun = (body: RetrievalRunCreateBody, signal?: AbortSignal) =>
+  request<RetrievalRunRecord>(`/api/pipeline/retrieval-runs`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    signal,
+  });
+
+export const listRetrievalRuns = (signal?: AbortSignal) =>
+  request<{ data: RetrievalRunSummary[] }>(`/api/pipeline/retrieval-runs`, { signal });
+
+export const getRetrievalRun = (runId: string, signal?: AbortSignal) =>
+  request<RetrievalRunRecord>(`/api/pipeline/retrieval-runs/${runId}`, { signal });
+
+export const updateRetrievalRunMeta = (runId: string, meta: RetrievalRunMetadataUpdate) =>
+  request<RetrievalRunRecord>(`/api/pipeline/retrieval-runs/${runId}`, {
+    method: "PATCH",
+    body: JSON.stringify(meta),
+  });
+
+export const deleteRetrievalRun = (runId: string) =>
+  request<{ deleted: boolean }>(`/api/pipeline/retrieval-runs/${runId}`, { method: "DELETE" });
 
 export const getLabelingView = (datasetId?: string) =>
   request<LabelingRunResponse>(

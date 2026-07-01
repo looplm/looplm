@@ -459,3 +459,63 @@ class ByStageMetricsResponse(BaseModel):
     cases: list[ByStageCaseMetrics] = Field(default_factory=list)
     # ISO-8601 UTC time the metrics were computed (set when cached).
     computed_at: str | None = None
+
+
+# --- Saved retrieval runs (durable, annotatable, comparable history) ---
+
+
+class RetrievalRunCreate(BaseModel):
+    """Request to snapshot the current labels-path metrics as a saved run."""
+
+    dataset_ids: list[str] = Field(default_factory=list)
+    gold_source: str = "human"
+    name: str | None = None
+
+
+class RetrievalRunMetadataUpdate(BaseModel):
+    """Editable metadata on a saved run. Unset fields are left unchanged."""
+
+    name: str | None = None
+    pipeline_version: str | None = None
+    index_name: str | None = None
+    index_version: str | None = None
+    notes: str | None = None
+
+
+class RetrievalRunSummary(BaseModel):
+    """List-item view of a saved run: metadata + headline metrics (at the run's own max k)."""
+
+    id: str
+    created_at: str
+    gold_source: str = "human"
+    dataset_ids: list[str] = Field(default_factory=list)
+    dataset_names: list[str] = Field(default_factory=list)
+    ks: list[int] = Field(default_factory=list)
+    total_cases: int = 0
+    evaluated_cases: int = 0
+    has_by_stage: bool = False
+    # Metadata.
+    name: str | None = None
+    pipeline_version: str | None = None
+    index_name: str | None = None
+    index_version: str | None = None
+    notes: str | None = None
+    # Headline metrics at max(ks): recall / ndcg / precision / hit-rate, plus mrr and bpref.
+    max_k: int | None = None
+    recall: float | None = None
+    ndcg: float | None = None
+    precision: float | None = None
+    hit_rate: float | None = None
+    mrr: float | None = None
+    bpref: float | None = None
+
+
+class RetrievalRunRecord(RetrievalRunSummary):
+    """Full detail of a saved run, including the metric blobs for charts/compare."""
+
+    metrics: RetrievalRunMetrics
+    by_stage: ByStageMetricsResponse | None = None
+
+
+class RetrievalRunListResponse(BaseModel):
+    data: list[RetrievalRunSummary] = Field(default_factory=list)
