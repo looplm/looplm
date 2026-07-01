@@ -6,7 +6,7 @@
  * and export the result as a markdown report for the indexing-pipeline owners.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   deleteSourceExpectation,
@@ -20,6 +20,8 @@ import type {
 } from "@/lib/api-types/source-registry";
 
 import { SourceExpectationList } from "./source-expectation-list";
+import { WantedSourcesInfo } from "./wanted-sources-info";
+import { WantedSourcesToolbar } from "./wanted-sources-toolbar";
 import {
   ALL_BUCKETS,
   bucketOf,
@@ -42,7 +44,6 @@ export function WantedSourcesPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   // View controls: which statuses to show, what to cluster by, collapsed groups.
   const [visibleStatuses, setVisibleStatuses] = useState<Set<FilterBucket>>(
@@ -50,6 +51,7 @@ export function WantedSourcesPanel({
   );
   const [groupBy, setGroupBy] = useState<string>(""); // "" = auto, "none" = flat
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const [showInfo, setShowInfo] = useState(false);
 
   const loadExpectations = useCallback(async () => {
     setLoading(true);
@@ -64,7 +66,7 @@ export function WantedSourcesPanel({
     }
   }, [providerId]);
 
-  const { run, running, handleImport, handleRun, handleDownloadReport } =
+  const { run, running, handleImport, handleRun, handleCancel, handleDownloadReport } =
     useSourceGapAnalysis(providerId, loadExpectations, setError, setNotice);
 
   useEffect(() => {
@@ -205,55 +207,44 @@ export function WantedSourcesPanel({
     <div className="rounded-xl border border-gray-100 dark:border-slate-800 p-4 mt-8">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
         <div>
-          <h2 className="text-lg font-semibold">Wanted sources</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-lg font-semibold">Wanted sources</h2>
+            <button
+              onClick={() => setShowInfo((v) => !v)}
+              aria-expanded={showInfo}
+              aria-label="How matching works"
+              title="How matching works"
+              className={`flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-semibold leading-none transition-colors ${
+                showInfo
+                  ? "border-indigo-500 bg-indigo-600 text-white"
+                  : "border-gray-300 dark:border-slate-600 text-gray-500 dark:text-slate-400 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400"
+              }`}
+            >
+              i
+            </button>
+          </div>
           <p className="text-xs text-gray-500 dark:text-slate-400">
             The sources that should be retrievable from this index. Import the source list as
             CSV, then run a gap analysis to compare it against what is actually indexed.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {canEdit && (
-            <>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleImport(f);
-                  e.target.value = "";
-                }}
-              />
-              <button
-                onClick={() => fileRef.current?.click()}
-                className="px-3 py-2 rounded-lg text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700"
-              >
-                Import CSV
-              </button>
-            </>
-          )}
-          {canEdit && expectations.length > 0 && (
-            <button
-              onClick={handleRun}
-              disabled={running}
-              className="px-3 py-2 rounded-lg text-sm bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {running
-                ? `Analyzing… ${run?.processed ?? 0}/${run?.total ?? expectations.length}`
-                : "Run gap analysis"}
-            </button>
-          )}
-          {run?.status === "completed" && (
-            <button
-              onClick={handleDownloadReport}
-              className="px-3 py-2 rounded-lg text-sm bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700"
-            >
-              Download report
-            </button>
-          )}
-        </div>
+        <WantedSourcesToolbar
+          canEdit={canEdit}
+          hasExpectations={expectations.length > 0}
+          running={running}
+          run={run}
+          onImport={handleImport}
+          onRun={handleRun}
+          onCancel={handleCancel}
+          onDownloadReport={handleDownloadReport}
+        />
       </div>
+
+      {showInfo && (
+        <div className="mt-3">
+          <WantedSourcesInfo />
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg px-4 py-2 my-3">
@@ -263,6 +254,11 @@ export function WantedSourcesPanel({
       {notice && (
         <div className="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 text-sm rounded-lg px-4 py-2 my-3">
           {notice}
+        </div>
+      )}
+      {run?.status === "cancelled" && (
+        <div className="bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 text-sm rounded-lg px-4 py-2 my-3">
+          Gap analysis was stopped before it finished. Run it again to get a full result.
         </div>
       )}
       {run?.status === "failed" && (

@@ -47,6 +47,11 @@ export const listGapRuns = (providerId: string) =>
 export const getGapRun = (runId: string) =>
   request<GapRunDetail>(`/api/source-registry/gap-runs/${runId}`);
 
+export const cancelGapRun = (runId: string) =>
+  request<GapRunDetail>(`/api/source-registry/gap-runs/${runId}/cancel`, {
+    method: "POST",
+  });
+
 // Markdown report (text/markdown) — `request` is JSON-only, so fetch the text
 // directly with the same auth/project headers.
 export const fetchGapRunReport = async (runId: string): Promise<string> => {

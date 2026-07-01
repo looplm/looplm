@@ -372,6 +372,31 @@ async def get_gap_run(
     return await _run_or_404(db, run_id, project)
 
 
+@router.post(
+    "/gap-runs/{run_id}/cancel",
+    response_model=GapRunResponse,
+    dependencies=[require_write("observe", "data-sources")],
+)
+async def cancel_gap_run(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Stop a pending/running gap analysis. No-op if it already finished."""
+    run = await _run_or_404(db, run_id, project)
+    if run.status not in ("pending", "running"):
+        return run
+    task = _gap_tasks.get(run_id)
+    if task is not None and not task.done():
+        # CancelledError (BaseException) unwinds the worker past its
+        # `except Exception`, so it won't overwrite the status we set below.
+        task.cancel()
+    run.status = "cancelled"
+    run.error = "Cancelled by user"
+    run.completed_at = datetime.now(timezone.utc)
+    return run
+
+
 @router.get("/gap-runs/{run_id}/report", response_class=PlainTextResponse)
 async def get_gap_run_report(
     run_id: UUID,

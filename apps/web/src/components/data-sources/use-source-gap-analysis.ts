@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  cancelGapRun,
   fetchGapRunReport,
   getGapRun,
   importSourceCsv,
@@ -58,7 +59,11 @@ export function useSourceGapAnalysis(
       try {
         const detail = await getGapRun(run.id);
         setRun(detail);
-        if (detail.status === "completed" || detail.status === "failed") {
+        if (
+          detail.status === "completed" ||
+          detail.status === "failed" ||
+          detail.status === "cancelled"
+        ) {
           setRunning(false);
         }
       } catch {
@@ -99,6 +104,18 @@ export function useSourceGapAnalysis(
     }
   }
 
+  async function handleCancel() {
+    if (!run) return;
+    setError(null);
+    try {
+      const detail = await cancelGapRun(run.id);
+      setRun(detail);
+      setRunning(false);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   async function handleDownloadReport() {
     if (!run) return;
     try {
@@ -120,6 +137,7 @@ export function useSourceGapAnalysis(
     running,
     handleImport,
     handleRun,
+    handleCancel,
     handleDownloadReport,
   };
 }
