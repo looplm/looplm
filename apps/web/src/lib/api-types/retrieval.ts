@@ -260,6 +260,8 @@ export interface ByStageMetricsResponse {
   evaluated_cases: number;
   stages: StageMetrics[];
   cases: ByStageCaseMetrics[];
+  // ISO-8601 UTC time the metrics were computed (present once cached).
+  computed_at?: string | null;
 }
 
 // --- Quantitative retrieval-quality metrics (eval-run based) ---
@@ -306,4 +308,6 @@ export interface RetrievalRunMetrics {
   condensed_ndcg_at_k?: Record<string, number>;
   slices?: SliceMetrics[];
   cases: RetrievalCaseMetrics[];
+  // ISO-8601 UTC time the metrics were computed (present once cached).
+  computed_at?: string | null;
 }

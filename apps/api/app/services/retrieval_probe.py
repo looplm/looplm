@@ -17,6 +17,7 @@ from uuid import UUID
 
 from app.cache import cache_get_json, cache_set_json
 from app.index_providers.base import BaseIndexProvider
+from app.services.query_embedding import QueryEmbedder, embed_query_with
 
 # Preference order for the single "system" head, richest first: semantic rerank (the true final
 # ranking) → hybrid (RRF) → vector → keyword. The first head the index can serve wins (others
@@ -62,15 +63,21 @@ async def cached_probe_chunk_ids(
     query: str,
     k: int,
     *,
-    query_vector: list[float] | None = None,
+    embedder: QueryEmbedder | None = None,
     refresh: bool = False,
 ) -> list[str]:
-    """``probe_retrieved_chunk_ids`` with a Redis cache keyed by (project, test_id, k)."""
+    """``probe_retrieved_chunk_ids`` with a Redis cache keyed by (project, test_id, k).
+
+    The query is embedded lazily — only on a cache miss — using the reusable ``embedder``, so a
+    warm cache serves entirely from Redis without touching the embedding API.
+    """
     cache_key = _probe_cache_key(project_id, test_id, k)
     if not refresh:
         cached = await cache_get_json(cache_key)
         if cached is not None and isinstance(cached.get("chunk_ids"), list):
             return [c for c in cached["chunk_ids"] if isinstance(c, str)]
+    # Embed only now that we know we must hit the index; falls back to text/keyword when absent.
+    query_vector = await embed_query_with(embedder, query)
     chunk_ids, _mode = await probe_retrieved_chunk_ids(
         provider, query, k, query_vector=query_vector
     )

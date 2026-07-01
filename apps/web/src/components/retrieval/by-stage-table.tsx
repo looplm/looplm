@@ -1,37 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { getRetrievalByStageMetrics, type ByStageMetricsResponse } from "@/lib/api";
+import { useMemo, useState } from "react";
+import { type ByStageMetricsResponse } from "@/lib/api";
 import { pct, dec } from "@/components/retrieval/constants";
 
 // Side-by-side deterministic retrieval metrics for each pipeline stage (sparse/dense/RRF/reranked/
-// agentic), scored against the chunk-label gold, plus a per-case drilldown. Self-contained: fetches
-// on dataset/gold-source change.
+// agentic), scored against the chunk-label gold, plus a per-case drilldown. Presentational: the
+// parent panel owns fetching (gated behind Compute), this just renders the result.
 export function ByStageComparison({
-  datasetIds,
+  data,
+  loading,
   goldSource,
 }: {
-  datasetIds: string[];
+  data: ByStageMetricsResponse | null;
+  loading: boolean;
   goldSource: "human" | "ai" | "both";
 }) {
-  const [data, setData] = useState<ByStageMetricsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [drillMetric, setDrillMetric] = useState<"recall" | "ndcg">("recall");
   const [showCases, setShowCases] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    getRetrievalByStageMetrics({ datasetIds, goldSource })
-      .then((d) => !cancelled && setData(d))
-      .catch((e) => !cancelled && setError(e.message))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [datasetIds, goldSource]);
 
   const lk = useMemo(() => (data?.ks.length ? String(Math.max(...data.ks)) : "10"), [data]);
 
@@ -39,13 +25,6 @@ export function ByStageComparison({
     return (
       <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
         Scoring each stage…
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
-        {error}
       </div>
     );
   }

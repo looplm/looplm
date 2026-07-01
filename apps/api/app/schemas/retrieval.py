@@ -417,6 +417,9 @@ class RetrievalRunMetrics(BaseModel):
     # deep-rank miss on the safety slice isn't averaged away by the broad slice.
     slices: list[SliceMetrics] = Field(default_factory=list)
     cases: list[RetrievalCaseMetrics] = Field(default_factory=list)
+    # ISO-8601 UTC time the metrics were computed (set when cached). None for a fresh, uncached
+    # response and for the eval-run snapshot path.
+    computed_at: str | None = None
 
 
 class StageMetrics(BaseModel):
@@ -454,3 +457,5 @@ class ByStageMetricsResponse(BaseModel):
     evaluated_cases: int = 0
     stages: list[StageMetrics] = Field(default_factory=list)
     cases: list[ByStageCaseMetrics] = Field(default_factory=list)
+    # ISO-8601 UTC time the metrics were computed (set when cached).
+    computed_at: str | None = None

@@ -80,11 +80,29 @@ def build_query_embedder(merged_settings: dict | None) -> QueryEmbedder | None:
     return QueryEmbedder(AsyncOpenAI(api_key=api_key, timeout=60.0), model, dims)
 
 
+async def embed_query_with(embedder: QueryEmbedder | None, query: str) -> list[float] | None:
+    """Embed ``query`` with an already-built embedder, or None. Never raises.
+
+    Lets a caller build the embedder once and reuse it across many queries (the probe path),
+    instead of constructing and tearing down a client per call. A failed or absent embedder
+    returns None so callers fall back to text-based vector search (or keyword-only).
+    """
+    if embedder is None or not query.strip():
+        return None
+    try:
+        return await embedder.embed(query)
+    except Exception:  # noqa: BLE001 — embedding is best-effort; degrade to no-vector search
+        logger.warning("Query embedding failed; falling back to non-vector search", exc_info=True)
+        return None
+
+
 async def embed_query(merged_settings: dict | None, query: str) -> list[float] | None:
     """Embed ``query`` if an embedder is configured, else None. Never raises.
 
     A failed or unconfigured embedding returns None so callers fall back to text-based vector
-    search (or keyword-only) instead of breaking the whole pool/probe.
+    search (or keyword-only) instead of breaking the whole pool/probe. Builds and closes a
+    one-shot client; for many queries prefer :func:`build_query_embedder` +
+    :func:`embed_query_with` to reuse one client.
     """
     if not query.strip():
         return None
@@ -92,9 +110,6 @@ async def embed_query(merged_settings: dict | None, query: str) -> list[float] |
     if embedder is None:
         return None
     try:
-        return await embedder.embed(query)
-    except Exception:  # noqa: BLE001 — embedding is best-effort; degrade to no-vector search
-        logger.warning("Query embedding failed; falling back to non-vector search", exc_info=True)
-        return None
+        return await embed_query_with(embedder, query)
     finally:
         await embedder.aclose()

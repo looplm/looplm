@@ -42,7 +42,7 @@ from app.schemas.retrieval import (
 )
 from app.services.analysis_llm import merge_llm_settings
 from app.services.chunk_agreement import resolve_gold
-from app.services.query_embedding import embed_query
+from app.services.query_embedding import build_query_embedder
 from app.services.retrieval_config import get_rag_span_names
 from app.services.retrieval_metrics_aggregate import (
     AGG_KS,
@@ -51,6 +51,7 @@ from app.services.retrieval_metrics_aggregate import (
     aggregate_run_retrieval_metrics,
     build_by_stage_metrics,
 )
+from app.services.retrieval_metrics_cache import get_cached, result_cache_key, store
 from app.services.retrieval_pipeline_aggregate import build_retrieval_pipeline_aggregate
 from app.services.retrieval_probe import cached_probe_chunk_ids
 from app.services.retrieval_targets import (
@@ -179,18 +180,31 @@ async def _resolve_project_gold(
     ``annotator=None`` (keyed by user); the AI judge carries ``annotator="AI"``. Adjudicated gold
     overrides always win. Returns ``(relevant_by_test, nonrelevant_by_test, grade_by_test)``.
     """
+    # Select only the scalar fields gold resolution needs — not full ORM rows. The label table
+    # carries Text snapshots (content_preview/url/title) that would otherwise load the whole
+    # project's judged-chunk text into memory on every metrics request.
     labels = (
         await db.execute(
-            select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
+            select(
+                ChunkRelevanceLabel.test_id,
+                ChunkRelevanceLabel.chunk_id,
+                ChunkRelevanceLabel.relevance,
+                ChunkRelevanceLabel.annotator,
+                ChunkRelevanceLabel.labeled_by,
+            ).where(ChunkRelevanceLabel.project_id == project.id)
         )
-    ).scalars().all()
+    ).all()
     golds = (
-        await db.execute(select(ChunkGoldLabel).where(ChunkGoldLabel.project_id == project.id))
-    ).scalars().all()
-    overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
+        await db.execute(
+            select(
+                ChunkGoldLabel.test_id, ChunkGoldLabel.chunk_id, ChunkGoldLabel.relevance
+            ).where(ChunkGoldLabel.project_id == project.id)
+        )
+    ).all()
+    overrides = {(test_id, chunk_id): relevance for test_id, chunk_id, relevance in golds}
 
-    def _included(lbl: ChunkRelevanceLabel) -> bool:
-        is_ai = lbl.annotator is not None
+    def _included(annotator: str | None) -> bool:
+        is_ai = annotator is not None
         if gold_source == "ai":
             return is_ai
         if gold_source == "both":
@@ -199,14 +213,9 @@ async def _resolve_project_gold(
 
     return resolve_gold(
         (
-            (
-                lbl.test_id,
-                lbl.chunk_id,
-                lbl.relevance,
-                lbl.labeled_by if lbl.annotator is None else lbl.annotator,
-            )
-            for lbl in labels
-            if _included(lbl)
+            (test_id, chunk_id, relevance, labeled_by if annotator is None else annotator)
+            for test_id, chunk_id, relevance, annotator, labeled_by in labels
+            if _included(annotator)
         ),
         overrides,
     )
@@ -278,6 +287,14 @@ async def _labels_metrics(
     if not datasets:
         return RetrievalRunMetrics(available=False, ks=list(AGG_KS))
 
+    # Serve a previously computed result unless the caller forces a recompute. Keyed by the exact
+    # dataset set + gold source, so pressing Compute on the same settings is instant.
+    cache_key = result_cache_key(project.id, "overall", [d.id for d in datasets], gold_source)
+    if not refresh:
+        cached = await get_cached(cache_key, RetrievalRunMetrics)
+        if cached is not None:
+            return cached
+
     cases = await _dataset_cases(db, [d.id for d in datasets])
     ds_id, ds_name = _datasets_label(datasets)
 
@@ -308,15 +325,15 @@ async def _labels_metrics(
     provider = build_index_provider(provider_row)
     sem = asyncio.Semaphore(_PROBE_CONCURRENCY)
     embed_settings = merge_llm_settings(project.settings, None)
+    # Build the embedder once and reuse it across every probe. The probe embeds lazily on cache
+    # miss only, so a warm cache does zero embedding-API work.
+    embedder = build_query_embedder(embed_settings)
 
     async def _probe(test_id: str, query: str) -> tuple[str, list[str]]:
         async with sem:
-            # Embed the query so the probe can run vector/hybrid even without a server-side
-            # vectorizer; None falls back to text-based vector search.
-            query_vector = await embed_query(embed_settings, str(query or ""))
             ids = await cached_probe_chunk_ids(
                 provider, project.id, test_id, str(query or ""), k,
-                query_vector=query_vector, refresh=refresh,
+                embedder=embedder, refresh=refresh,
             )
             return test_id, ids
 
@@ -327,9 +344,11 @@ async def _labels_metrics(
         )
     finally:
         await provider.aclose()
+        if embedder is not None:
+            await embedder.aclose()
     retrieved_by_test = dict(probed)
 
-    return aggregate_retrieval_metrics_from_labels(
+    result = aggregate_retrieval_metrics_from_labels(
         cases,
         retrieved_by_test,
         relevant_by_test,
@@ -339,6 +358,11 @@ async def _labels_metrics(
         dataset_id=ds_id,
         dataset_name=ds_name,
     )
+    # Only cache a result that actually measured something; caching an "unavailable" (no gold / no
+    # index) result would hide labeling or index-connection progress for the whole TTL.
+    if result.available:
+        return await store(cache_key, result)
+    return result
 
 
 @router.get("/retrieval-metrics/by-stage", response_model=ByStageMetricsResponse)
@@ -362,6 +386,13 @@ async def get_retrieval_metrics_by_stage(
     if not datasets:
         return ByStageMetricsResponse(available=False, gold_source=gold_source, ks=list(AGG_KS))
     dataset_uuids = [d.id for d in datasets]
+
+    cache_key = result_cache_key(project.id, "by-stage", dataset_uuids, gold_source)
+    if not refresh:
+        cached = await get_cached(cache_key, ByStageMetricsResponse)
+        if cached is not None:
+            return cached
+
     ds_id, ds_name = _datasets_label(datasets)
     cases = await _dataset_cases(db, dataset_uuids)
 
@@ -414,7 +445,7 @@ async def get_retrieval_metrics_by_stage(
         grade_by_test,
         slice_by_test,
     )
-    return ByStageMetricsResponse(
+    result = ByStageMetricsResponse(
         available=evaluated > 0,
         dataset_id=ds_id,
         dataset_name=ds_name,
@@ -425,6 +456,9 @@ async def get_retrieval_metrics_by_stage(
         stages=stages,
         cases=case_rows_out,
     )
+    if result.available:
+        return await store(cache_key, result)
+    return result
 
 
 @router.get("/targets", response_model=RetrievalTargets)

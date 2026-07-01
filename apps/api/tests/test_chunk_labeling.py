@@ -259,7 +259,7 @@ async def test_labels_metrics_use_live_probe(
         async def aclose(self):
             pass
 
-    async def _fake_probe(provider, project_id, test_id, query, k, *, query_vector=None, refresh=False):
+    async def _fake_probe(provider, project_id, test_id, query, k, *, embedder=None, refresh=False):
         return ["c1", "c2"]  # the system retrieves the relevant chunk at rank 1
 
     monkeypatch.setattr(retrieval_router, "build_index_provider", lambda row: _FakeProvider())
