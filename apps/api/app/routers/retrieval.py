@@ -115,6 +115,7 @@ _PROBE_CONCURRENCY = 4
 async def get_retrieval_metrics(
     run_id: UUID | None = None,
     dataset_id: UUID | None = None,
+    dataset_ids: list[UUID] | None = Query(None),
     source: str = "urls",
     refresh: bool = False,
     gold_source: str = "human",
@@ -123,11 +124,12 @@ async def get_retrieval_metrics(
 ):
     """Retrieval-quality metrics (recall@k / precision@k / MRR / nDCG).
 
-    ``source=labels`` measures pooled human chunk labels against a *live retrieval probe* of the
-    connected index, over a dataset's test cases (``dataset_id``, default most-recent). This is
-    the data-labeling lens and needs no eval run. ``source=urls`` measures each case's
-    ground-truth URLs via the ``contains_urls`` evaluator captures of an eval run (``run_id``,
-    default most-recent). Returns ``available=False`` when there is nothing to measure against.
+    ``source=labels`` measures pooled chunk labels against a *live retrieval probe* of the
+    connected index, over one or more datasets' test cases (``dataset_ids``; ``dataset_id`` is the
+    single-dataset alias; default most-recent). This is the data-labeling lens and needs no eval
+    run. ``source=urls`` measures each case's ground-truth URLs via the ``contains_urls`` evaluator
+    captures of an eval run (``run_id``, default most-recent). Returns ``available=False`` when
+    there is nothing to measure against.
     """
     # Risk slice per test case, for the per-slice metric breakdown (shared by both sources).
     statuses = (
@@ -141,7 +143,8 @@ async def get_retrieval_metrics(
     slice_by_test = {test_id: slice_ for test_id, slice_ in statuses}
 
     if source == "labels":
-        return await _labels_metrics(db, project, dataset_id, slice_by_test, refresh, gold_source)
+        ids = dataset_ids or ([dataset_id] if dataset_id else None)
+        return await _labels_metrics(db, project, ids, slice_by_test, refresh, gold_source)
 
     run_filter = [EvalRun.project_id == project.id]
     if run_id is not None:
@@ -209,37 +212,74 @@ async def _resolve_project_gold(
     )
 
 
+async def _resolve_datasets(
+    db: AsyncSession, project: Project, dataset_ids: list[UUID] | None
+) -> list[TestDataset]:
+    """The selected datasets (newest first), or the single most-recent one when none are given."""
+    base = [TestDataset.project_id == project.id]
+    if dataset_ids:
+        rows = (
+            await db.execute(
+                select(TestDataset)
+                .where(*base, TestDataset.id.in_(dataset_ids))
+                .order_by(TestDataset.updated_at.desc())
+            )
+        ).scalars().all()
+        return list(rows)
+    row = (
+        await db.execute(
+            select(TestDataset).where(*base).order_by(TestDataset.updated_at.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    return [row] if row is not None else []
+
+
+def _datasets_label(datasets: list[TestDataset]) -> tuple[str | None, str]:
+    """(id, name) for the metrics header: the dataset's own when one, else an "N datasets" label."""
+    if len(datasets) == 1:
+        return str(datasets[0].id), datasets[0].name
+    return None, f"{len(datasets)} datasets"
+
+
+async def _dataset_cases(
+    db: AsyncSession, dataset_ids: list[UUID]
+) -> list[tuple[str, str | None]]:
+    """(test_id, prompt) across the given datasets, deduped by test_id (labels carry over)."""
+    rows = (
+        await db.execute(
+            select(TestCase.test_id, TestCase.prompt).where(TestCase.dataset_id.in_(dataset_ids))
+        )
+    ).all()
+    seen: set[str] = set()
+    cases: list[tuple[str, str | None]] = []
+    for tid, prompt in rows:
+        if tid not in seen:
+            seen.add(tid)
+            cases.append((tid, prompt))
+    return cases
+
+
 async def _labels_metrics(
     db: AsyncSession,
     project: Project,
-    dataset_id: UUID | None,
+    dataset_ids: list[UUID] | None,
     slice_by_test: dict[str, str],
     refresh: bool,
     gold_source: str = "human",
 ) -> RetrievalRunMetrics:
-    """Labels-vs-live-probe metrics over a dataset's cases.
+    """Labels-vs-live-probe metrics over one or more datasets' cases.
 
     ``gold_source`` selects which annotators' chunk labels resolve the gold: ``human`` (default,
     human labels only), ``ai`` (the AI judge's labels only), or ``both`` (union — AI counts as one
-    more annotator). Gold overrides (adjudicated) always win regardless.
+    more annotator). Gold overrides (adjudicated) always win regardless. Multiple datasets pool
+    their cases (deduped by test_id) and are aggregated together.
     """
-    ds_filter = [TestDataset.project_id == project.id]
-    if dataset_id is not None:
-        ds_filter.append(TestDataset.id == dataset_id)
-    dataset = (
-        await db.execute(
-            select(TestDataset).where(*ds_filter).order_by(TestDataset.updated_at.desc()).limit(1)
-        )
-    ).scalar_one_or_none()
-    if dataset is None:
+    datasets = await _resolve_datasets(db, project, dataset_ids)
+    if not datasets:
         return RetrievalRunMetrics(available=False, ks=list(AGG_KS))
 
-    case_rows = (
-        await db.execute(
-            select(TestCase.test_id, TestCase.prompt).where(TestCase.dataset_id == dataset.id)
-        )
-    ).all()
-    cases = [(tid, prompt) for tid, prompt in case_rows]
+    cases = await _dataset_cases(db, [d.id for d in datasets])
+    ds_id, ds_name = _datasets_label(datasets)
 
     relevant_by_test, nonrelevant_by_test, grade_by_test = await _resolve_project_gold(
         db, project, gold_source
@@ -258,8 +298,8 @@ async def _labels_metrics(
     if provider_row is None:
         return RetrievalRunMetrics(
             available=False,
-            run_id=str(dataset.id),
-            run_name=dataset.name,
+            run_id=ds_id,
+            run_name=ds_name,
             total_cases=len(cases),
             ks=list(AGG_KS),
         )
@@ -296,14 +336,15 @@ async def _labels_metrics(
         nonrelevant_by_test,
         slice_by_test,
         grade_by_test=grade_by_test,
-        dataset_id=str(dataset.id),
-        dataset_name=dataset.name,
+        dataset_id=ds_id,
+        dataset_name=ds_name,
     )
 
 
 @router.get("/retrieval-metrics/by-stage", response_model=ByStageMetricsResponse)
 async def get_retrieval_metrics_by_stage(
     dataset_id: UUID | None = None,
+    dataset_ids: list[UUID] | None = Query(None),
     gold_source: str = "human",
     refresh: bool = False,
     db: AsyncSession = Depends(get_db),
@@ -311,30 +352,18 @@ async def get_retrieval_metrics_by_stage(
 ):
     """Deterministic retrieval metrics per pipeline stage (sparse/dense/RRF/reranked/agentic).
 
-    For each of a dataset's cases we assemble the candidate pool (which records each chunk's rank
-    per head), reconstruct each stage's ranked list, and score it against the chunk-label gold
-    (``gold_source`` = human | ai | both). Stages are compared side by side, with a per-case grid.
+    For each case (pooled across ``dataset_ids``; ``dataset_id`` is the single-dataset alias) we
+    assemble the candidate pool (which records each chunk's rank per head), reconstruct each
+    stage's ranked list, and score it against the chunk-label gold (``gold_source`` = human | ai |
+    both). Stages are compared side by side, with a per-case grid.
     """
-    dataset = (
-        await db.execute(
-            select(TestDataset)
-            .where(
-                TestDataset.project_id == project.id,
-                *([TestDataset.id == dataset_id] if dataset_id is not None else []),
-            )
-            .order_by(TestDataset.updated_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if dataset is None:
+    ids = dataset_ids or ([dataset_id] if dataset_id else None)
+    datasets = await _resolve_datasets(db, project, ids)
+    if not datasets:
         return ByStageMetricsResponse(available=False, gold_source=gold_source, ks=list(AGG_KS))
-
-    case_rows = (
-        await db.execute(
-            select(TestCase.test_id, TestCase.prompt).where(TestCase.dataset_id == dataset.id)
-        )
-    ).all()
-    cases = [(tid, prompt) for tid, prompt in case_rows]
+    dataset_uuids = [d.id for d in datasets]
+    ds_id, ds_name = _datasets_label(datasets)
+    cases = await _dataset_cases(db, dataset_uuids)
 
     relevant_by_test, nonrelevant_by_test, grade_by_test = await _resolve_project_gold(
         db, project, gold_source
@@ -357,7 +386,12 @@ async def get_retrieval_metrics_by_stage(
 
     async def _pool_case(test_id: str, query: str) -> None:
         async with sem:
-            agentic = await _dataset_case_agentic_queries(db, dataset.id, test_id)
+            # A test_id lives in one of the selected datasets; use the first with planned queries.
+            agentic: list[str] = []
+            for dsid in dataset_uuids:
+                agentic = await _dataset_case_agentic_queries(db, dsid, test_id)
+                if agentic:
+                    break
             pool, _computed, connected = await assemble_case_pool(
                 db, project, test_id, str(query or ""), agentic_queries=agentic, refresh=refresh
             )
@@ -382,8 +416,8 @@ async def get_retrieval_metrics_by_stage(
     )
     return ByStageMetricsResponse(
         available=evaluated > 0,
-        dataset_id=str(dataset.id),
-        dataset_name=dataset.name,
+        dataset_id=ds_id,
+        dataset_name=ds_name,
         gold_source=gold_source,
         ks=list(AGG_KS),
         total_cases=len(cases),

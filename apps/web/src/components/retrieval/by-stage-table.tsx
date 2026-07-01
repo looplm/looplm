@@ -8,10 +8,10 @@ import { pct, dec } from "@/components/retrieval/constants";
 // agentic), scored against the chunk-label gold, plus a per-case drilldown. Self-contained: fetches
 // on dataset/gold-source change.
 export function ByStageComparison({
-  datasetId,
+  datasetIds,
   goldSource,
 }: {
-  datasetId?: string;
+  datasetIds: string[];
   goldSource: "human" | "ai" | "both";
 }) {
   const [data, setData] = useState<ByStageMetricsResponse | null>(null);
@@ -24,14 +24,14 @@ export function ByStageComparison({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getRetrievalByStageMetrics({ datasetId, goldSource })
+    getRetrievalByStageMetrics({ datasetIds, goldSource })
       .then((d) => !cancelled && setData(d))
       .catch((e) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [datasetId, goldSource]);
+  }, [datasetIds, goldSource]);
 
   const lk = useMemo(() => (data?.ks.length ? String(Math.max(...data.ks)) : "10"), [data]);
 

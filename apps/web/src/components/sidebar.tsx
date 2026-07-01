@@ -15,7 +15,9 @@ import {
 import LoopLMIcon from "@/components/looplm-icon";
 import { usePermissions } from "@/components/permissions-context";
 
-const NAV_GROUPS = [
+type NavItem = { href: string; label: string; icon: string; page?: string };
+
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "OBSERVE",
     items: [
@@ -35,6 +37,7 @@ const NAV_GROUPS = [
       { href: "/datasets", label: "Datasets", icon: "\u{1F4CB}" },
       { href: "/coverage", label: "Coverage", icon: "\u{1F4E1}" },
       { href: "/pipeline", label: "Pipeline", icon: "\u{1F9ED}" },
+      { href: "/retrieval", label: "Retrieval", icon: "\u{1F3AF}", page: "pipeline" },
       { href: "/labeling", label: "Labeling", icon: "\u{1F3F7}️" },
     ],
   },
@@ -202,7 +205,7 @@ export default function Sidebar({ onNavigate, collapsed, onToggleCollapse }: { o
       <nav className="flex flex-col gap-1">
         {NAV_GROUPS.filter((g) => allowedSections.includes(g.label.toLowerCase())).map((group, groupIdx) => {
           const visibleItems = group.items.filter((item) =>
-            canAccessPage(item.href.slice(1)),
+            canAccessPage(item.page ?? item.href.slice(1)),
           );
           if (visibleItems.length === 0) return null;
           return (

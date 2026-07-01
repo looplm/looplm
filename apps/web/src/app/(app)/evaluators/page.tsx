@@ -14,7 +14,6 @@ import { EvaluatorTableBody, type SortKey, type SortEntry } from "./evaluator-ta
 import { useEvaluatorActions } from "./evaluator-actions";
 import Tooltip from "@/components/tooltip";
 import { usePermissions } from "@/components/permissions-context";
-import { RetrievalTargetsConfig } from "@/components/retrieval/targets-config";
 
 const RELEVANCE_ORDER: Record<string, number> = { core: 0, important: 1, minor: 2 };
 
@@ -394,17 +393,6 @@ export default function EvaluatorsPage() {
           }}
         />
       )}
-
-      {/* Retrieval quality targets — config only; the computed scores live on the Evaluations page. */}
-      <div className="mt-12">
-        <h2 className="text-xl font-bold mb-1">Retrieval quality targets</h2>
-        <p className="text-sm text-gray-500 dark:text-slate-400 mb-4 max-w-3xl">
-          Run-level retrieval metrics (recall@k, nDCG@k, MRR, hit-rate@k, precision@k), measured
-          from your expected URLs or human chunk labels. Set a target on each to make it a pass/fail
-          bar; the scores against these targets are shown on the Evaluations page.
-        </p>
-        <RetrievalTargetsConfig canEdit={canEdit} />
-      </div>
 
       {/* Delete confirmation modal */}
       {deleteConfirm && (

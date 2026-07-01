@@ -13,36 +13,13 @@ import {
 import { usePermissions } from "@/components/permissions-context";
 import { AgreementPanel } from "@/components/labeling/agreement-panel";
 import { LabelingControls } from "@/components/labeling/labeling-controls";
+import { runBounded } from "@/lib/run-bounded";
 
 const SLICE_BADGE: Record<string, string> = {
   safety: "bg-red-500/10 text-red-600 dark:text-red-300 border-red-500/30",
   adversarial: "bg-orange-500/10 text-orange-600 dark:text-orange-300 border-orange-500/30",
   broad: "bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20",
 };
-
-// Run an async op over items with bounded concurrency, reporting progress as each settles.
-async function runBounded<T>(
-  items: T[],
-  concurrency: number,
-  op: (item: T) => Promise<void>,
-  onProgress: (done: number) => void,
-) {
-  let cursor = 0;
-  let done = 0;
-  const worker = async () => {
-    while (cursor < items.length) {
-      const item = items[cursor++];
-      try {
-        await op(item);
-      } catch {
-        // Skip failures; bulk actions are best-effort.
-      } finally {
-        onProgress(++done);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-}
 
 export default function LabelingIndexPage() {
   const { canWrite } = usePermissions();

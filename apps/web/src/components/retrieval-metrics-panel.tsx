@@ -21,6 +21,8 @@ import {
   SliceBreakdown,
 } from "@/components/retrieval/retrieval-table";
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
+import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
+import { JudgeAllButton } from "@/components/retrieval/judge-all-button";
 
 function TargetsEditor({
   targets,
@@ -129,7 +131,8 @@ export default function RetrievalMetricsPanel() {
   const [runId, setRunId] = useState<string | null>(null);
   // Datasets drive the "Human labels" source (labels vs a live retrieval probe, per dataset).
   const [datasets, setDatasets] = useState<{ id: string; name: string }[]>([]);
-  const [datasetId, setDatasetId] = useState<string | null>(null);
+  // Datasets to aggregate the label-based views over ([] = most recent, the backend default).
+  const [datasetIds, setDatasetIds] = useState<string[]>([]);
   const [source, setSource] = useState<"urls" | "labels">("urls");
   // Which chunk labels resolve the gold (labels source only): human only, AI judge only, or both.
   const [goldSource, setGoldSource] = useState<"human" | "ai" | "both">("human");
@@ -140,6 +143,8 @@ export default function RetrievalMetricsPanel() {
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Bumped after a bulk AI-judge so the label-based views recompute against the new AI gold.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     getEvalRuns({ limit: "50" })
@@ -164,18 +169,14 @@ export default function RetrievalMetricsPanel() {
     setError(null);
     const req =
       source === "labels"
-        ? getRetrievalMetrics({ datasetId: datasetId ?? undefined, source: "labels", goldSource })
+        ? getRetrievalMetrics({ datasetIds, source: "labels", goldSource })
         : getRetrievalMetrics({ runId: runId ?? undefined, source: "urls" });
     req
       .then((m) => {
         if (cancelled) return;
         setMetrics(m);
-        // The labels path returns the dataset id/name in run_id/run_name; seed the right picker.
-        if (source === "labels") {
-          if (!datasetId && m.run_id) setDatasetId(m.run_id);
-        } else if (!runId && m.run_id) {
-          setRunId(m.run_id);
-        }
+        // On the URLs path the response reports the run it defaulted to; seed the run picker.
+        if (source !== "labels" && !runId && m.run_id) setRunId(m.run_id);
       })
       .catch((e) => {
         if (!cancelled) setError(e.message);
@@ -186,7 +187,7 @@ export default function RetrievalMetricsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [runId, datasetId, source, goldSource, labelsView]);
+  }, [runId, datasetIds, source, goldSource, labelsView, reloadKey]);
 
   const largestK = metrics?.ks.length ? Math.max(...metrics.ks) : 10;
   const lk = String(largestK);
@@ -283,17 +284,20 @@ export default function RetrievalMetricsPanel() {
           )}
           {source === "labels"
             ? datasets.length > 0 && (
-                <select
-                  value={datasetId ?? ""}
-                  onChange={(e) => setDatasetId(e.target.value || null)}
-                  className="text-sm rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5 max-w-[260px]"
-                >
-                  {datasets.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  {canEdit && (
+                    <JudgeAllButton
+                      datasets={datasets}
+                      selectedIds={datasetIds}
+                      onDone={() => setReloadKey((k) => k + 1)}
+                    />
+                  )}
+                  <DatasetMultiSelect
+                    datasets={datasets}
+                    selected={datasetIds}
+                    onChange={setDatasetIds}
+                  />
+                </>
               )
             : runs.length > 0 && (
                 <select
@@ -347,7 +351,7 @@ export default function RetrievalMetricsPanel() {
       )}
 
       {source === "labels" && labelsView === "byStage" ? (
-        <ByStageComparison datasetId={datasetId ?? undefined} goldSource={goldSource} />
+        <ByStageComparison key={reloadKey} datasetIds={datasetIds} goldSource={goldSource} />
       ) : loading ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
           Computing retrieval metrics...

@@ -38,6 +38,7 @@ export const getRetrievalMetrics = (
   opts: {
     runId?: string;
     datasetId?: string;
+    datasetIds?: string[];
     source?: "urls" | "labels";
     refresh?: boolean;
     goldSource?: "human" | "ai" | "both";
@@ -46,6 +47,7 @@ export const getRetrievalMetrics = (
   const params = new URLSearchParams({ source: opts.source ?? "urls" });
   if (opts.runId) params.set("run_id", opts.runId);
   if (opts.datasetId) params.set("dataset_id", opts.datasetId);
+  for (const id of opts.datasetIds ?? []) params.append("dataset_ids", id);
   if (opts.refresh) params.set("refresh", "true");
   if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
   return request<RetrievalRunMetrics>(`/api/pipeline/retrieval-metrics?${params.toString()}`);
@@ -53,10 +55,10 @@ export const getRetrievalMetrics = (
 
 // Per-stage deterministic retrieval metrics (sparse/dense/RRF/reranked/agentic) vs chunk-label gold.
 export const getRetrievalByStageMetrics = (
-  opts: { datasetId?: string; goldSource?: "human" | "ai" | "both"; refresh?: boolean } = {},
+  opts: { datasetIds?: string[]; goldSource?: "human" | "ai" | "both"; refresh?: boolean } = {},
 ) => {
   const params = new URLSearchParams();
-  if (opts.datasetId) params.set("dataset_id", opts.datasetId);
+  for (const id of opts.datasetIds ?? []) params.append("dataset_ids", id);
   if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
   if (opts.refresh) params.set("refresh", "true");
   const qs = params.toString();
