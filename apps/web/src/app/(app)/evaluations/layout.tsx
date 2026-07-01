@@ -42,6 +42,7 @@ export default function EvaluationsLayout({ children }: { children: React.ReactN
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [selectedExperiments, setSelectedExperiments] = useState<Set<string>>(new Set());
   const [useBatch, setUseBatch] = useState(false);
+  const [retrievalOnly, setRetrievalOnly] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,7 +126,7 @@ export default function EvaluationsLayout({ children }: { children: React.ReactN
         );
       } else {
         // Legacy single-run trigger
-        await triggerEval(datasetIds, concurrency, filterMode, useBatch);
+        await triggerEval(datasetIds, concurrency, filterMode, useBatch, retrievalOnly);
       }
       setShowTriggerMenu(false);
       router.push("/evaluations/jobs");
@@ -340,6 +341,22 @@ export default function EvaluationsLayout({ children }: { children: React.ReactN
                           <span className="text-[10px] text-gray-400 dark:text-slate-500">50% cost, up to 24h</span>
                         </label>
                       </div>
+
+                      {/* Retrieval-only toggle (hidden for experiment sessions) */}
+                      {selectedExperiments.size === 0 && (
+                        <div className="mt-3 pt-2 border-t border-gray-100 dark:border-slate-800">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={retrievalOnly}
+                              onChange={(e) => setRetrievalOnly(e.target.checked)}
+                              className="rounded border-gray-300 dark:border-slate-600"
+                            />
+                            <span className="text-xs font-medium text-gray-600 dark:text-slate-300">Retrieval only</span>
+                            <span className="text-[10px] text-gray-400 dark:text-slate-500">skip generation evaluators</span>
+                          </label>
+                        </div>
+                      )}
 
                       <div className="mt-3 pt-2 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between">
                         <span className="text-xs text-gray-400 dark:text-slate-500">

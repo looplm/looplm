@@ -115,6 +115,7 @@ async def trigger_eval(
             "concurrency": concurrency,
             "max_turns": max_turns,
             "use_batch": body.use_batch,
+            "retrieval_only": body.retrieval_only,
         },
     )
     db.add(job)
@@ -133,6 +134,7 @@ async def trigger_eval(
             filter_mode=body.filter_mode,
             max_turns=max_turns,
             use_batch=body.use_batch,
+            retrieval_only=body.retrieval_only,
         )
     )
     _eval_tasks[job.id] = task

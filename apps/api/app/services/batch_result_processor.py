@@ -196,6 +196,11 @@ async def process_batch_results(
         if vals
     }
 
+    # Retrieval-quality snapshot for the finished batch run (URLs path).
+    from app.services.retrieval_metrics_aggregate import compute_and_store_run_retrieval_summary
+
+    await compute_and_store_run_retrieval_summary(db, run, batch_eval_job.project_id)
+
     # Update eval job
     job_result = await db.execute(select(EvalJob).where(EvalJob.id == batch_eval_job.eval_job_id))
     job = job_result.scalar_one()

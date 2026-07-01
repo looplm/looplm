@@ -28,6 +28,7 @@ from app.models.models import (
     TestCase,
     TestDataset,
 )
+from app.services.retrieval_metrics_aggregate import compute_and_store_run_retrieval_summary
 from app.routers.eval_helpers import _compute_summaries
 from app.schemas.evaluations import EvalResultImport
 from app.services.analysis_llm import AnalysisLlmService
@@ -60,6 +61,7 @@ async def run_eval(
     session_id: UUID | None = None,
     experiment_id: UUID | None = None,
     experiment_name: str | None = None,
+    retrieval_only: bool = False,
     include_test_ids: list[str] | None = None,
     rerun_of: UUID | None = None,
     rerun_scope: str | None = None,
@@ -122,15 +124,19 @@ async def run_eval(
             + (f", skipped {skipped} marked needs-work" if skipped else "")
         )
 
-        # Load enabled evaluators
-        ev_result = await db.execute(
-            select(Evaluator).where(
-                Evaluator.project_id == project_id,
-                Evaluator.enabled == True,  # noqa: E712
-            )
-        )
+        # Load enabled evaluators (retrieval-only runs skip generation evaluators)
+        ev_filter = [
+            Evaluator.project_id == project_id,
+            Evaluator.enabled == True,  # noqa: E712
+        ]
+        if retrieval_only:
+            ev_filter.append(Evaluator.category == "retrieval")
+        ev_result = await db.execute(select(Evaluator).where(*ev_filter))
         evaluators = list(ev_result.scalars().all())
-        _log(f"Loaded {len(evaluators)} enabled evaluators")
+        _log(
+            f"Loaded {len(evaluators)} enabled evaluators"
+            + (" (retrieval only)" if retrieval_only else "")
+        )
         affects_pass_map = {e.name: e.affects_pass for e in evaluators}
 
         # Initialize LLM service if needed
@@ -438,6 +444,10 @@ async def run_eval(
                 **(run.run_metadata or {}),
                 "root_cause_summary": root_cause_summary,
             }
+
+        # Retrieval-quality snapshot (URLs path), computed once at completion so the run carries
+        # its recall@k/nDCG/etc. without a later recompute.
+        await compute_and_store_run_retrieval_summary(db, run, project_id)
 
         # Update job
         _log(f"Completed: {passed}/{total} passed ({passed/total*100:.0f}%)" if total else "Completed: 0 test cases")

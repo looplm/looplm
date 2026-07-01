@@ -342,6 +342,7 @@ async def _run_eval_background(
     experiment_id: UUID | None = None,
     experiment_name: str | None = None,
     use_batch: bool = False,
+    retrieval_only: bool = False,
     include_test_ids: list[str] | None = None,
     rerun_of: UUID | None = None,
     rerun_scope: str | None = None,
@@ -365,6 +366,7 @@ async def _run_eval_background(
                     session_id=session_id,
                     experiment_id=experiment_id,
                     experiment_name=experiment_name,
+                    retrieval_only=retrieval_only,
                 )
             else:
                 from app.services.eval_executor import run_eval
@@ -377,6 +379,7 @@ async def _run_eval_background(
                     session_id=session_id,
                     experiment_id=experiment_id,
                     experiment_name=experiment_name,
+                    retrieval_only=retrieval_only,
                     include_test_ids=include_test_ids,
                     rerun_of=rerun_of,
                     rerun_scope=rerun_scope,

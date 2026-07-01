@@ -9733,6 +9733,12 @@ export interface components {
              */
             max_turns?: number | null;
             /**
+             * Retrieval Only
+             * @description Run only retrieval-focus evaluators (skip generation/LLM-judge evaluators).
+             * @default false
+             */
+            retrieval_only: boolean;
+            /**
              * Use Batch
              * @description Use Azure OpenAI Batch API for LLM judge evaluators (50% cost, up to 24h).
              * @default false
@@ -15282,6 +15288,7 @@ export interface operations {
                 dataset_id?: string | null;
                 source?: string;
                 refresh?: boolean;
+                include_ai?: boolean;
             };
             header?: {
                 "x-project-id"?: string | null;

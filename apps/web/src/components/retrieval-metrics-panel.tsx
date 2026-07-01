@@ -130,6 +130,8 @@ export default function RetrievalMetricsPanel() {
   const [datasets, setDatasets] = useState<{ id: string; name: string }[]>([]);
   const [datasetId, setDatasetId] = useState<string | null>(null);
   const [source, setSource] = useState<"urls" | "labels">("urls");
+  // Fold the AI judge's chunk labels into the gold (labels source only).
+  const [includeAi, setIncludeAi] = useState(false);
   const [metrics, setMetrics] = useState<RetrievalRunMetrics | null>(null);
   const [targets, setTargets] = useState<RetrievalTargets | null>(null);
   const [editing, setEditing] = useState(false);
@@ -154,7 +156,7 @@ export default function RetrievalMetricsPanel() {
     setError(null);
     const req =
       source === "labels"
-        ? getRetrievalMetrics({ datasetId: datasetId ?? undefined, source: "labels" })
+        ? getRetrievalMetrics({ datasetId: datasetId ?? undefined, source: "labels", includeAi })
         : getRetrievalMetrics({ runId: runId ?? undefined, source: "urls" });
     req
       .then((m) => {
@@ -176,7 +178,7 @@ export default function RetrievalMetricsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [runId, datasetId, source]);
+  }, [runId, datasetId, source, includeAi]);
 
   const largestK = metrics?.ks.length ? Math.max(...metrics.ks) : 10;
   const lk = String(largestK);
@@ -212,6 +214,20 @@ export default function RetrievalMetricsPanel() {
               </button>
             ))}
           </div>
+          {source === "labels" && (
+            <label
+              className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-slate-400 cursor-pointer"
+              title="Fold the AI judge's chunk labels into the gold as one more annotator"
+            >
+              <input
+                type="checkbox"
+                checked={includeAi}
+                onChange={(e) => setIncludeAi(e.target.checked)}
+                className="rounded border-gray-300 dark:border-slate-600"
+              />
+              Include AI judge
+            </label>
+          )}
           {metrics?.available && targets && (
             <span
               className={`text-xs font-medium px-2 py-1 rounded-full ${

@@ -34,6 +34,7 @@ from app.routers.eval_helpers import _compute_summaries
 from app.schemas.evaluations import EvalResultImport
 from app.services.batch_eval_helpers import _evaluate_single_test_case_batch
 from app.services.retrieval_config import get_retrieval_payload_key_from_settings
+from app.services.retrieval_metrics_aggregate import compute_and_store_run_retrieval_summary
 from app.services.batch_llm_service import BatchLlmService
 from app.services.batch_result_processor import process_batch_results  # re-export for batch_poller
 
@@ -60,6 +61,7 @@ async def run_eval_batch(
     session_id: UUID | None = None,
     experiment_id: UUID | None = None,
     experiment_name: str | None = None,
+    retrieval_only: bool = False,
 ) -> None:
     """Execute a batch eval: Phase 1 runs immediately, Phase 2 submits Azure batch."""
     ps = project_settings or {}
@@ -99,15 +101,19 @@ async def run_eval_batch(
 
         _log(f"[Batch mode] Loaded {len(test_cases)} test cases (concurrency: {concurrency})")
 
-        # Load evaluators
-        ev_result = await db.execute(
-            select(Evaluator).where(
-                Evaluator.project_id == project_id,
-                Evaluator.enabled == True,  # noqa: E712
-            )
-        )
+        # Load evaluators (retrieval-only runs skip generation evaluators)
+        ev_filter = [
+            Evaluator.project_id == project_id,
+            Evaluator.enabled == True,  # noqa: E712
+        ]
+        if retrieval_only:
+            ev_filter.append(Evaluator.category == "retrieval")
+        ev_result = await db.execute(select(Evaluator).where(*ev_filter))
         evaluators = list(ev_result.scalars().all())
-        _log(f"Loaded {len(evaluators)} enabled evaluators")
+        _log(
+            f"Loaded {len(evaluators)} enabled evaluators"
+            + (" (retrieval only)" if retrieval_only else "")
+        )
 
         has_llm_evaluators = any(
             e.type in (EvaluatorType.llm_judge, EvaluatorType.hybrid) for e in evaluators
@@ -313,6 +319,7 @@ async def run_eval_batch(
             run.failed = total - passed
             run.grader_summary = grader_summary
             run.score_summary = score_summary
+            await compute_and_store_run_retrieval_summary(db, run, project_id)
             job.status = EvalJobStatus.completed
             job.completed_at = datetime.now(timezone.utc)
             job.log = "\n".join(log_lines)

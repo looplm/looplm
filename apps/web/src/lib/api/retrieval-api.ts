@@ -34,12 +34,19 @@ export const getRetrievalPipeline = (filters: AnalyticsFilters = {}) =>
   request<RetrievalPipelineResponse>(`/api/pipeline/graph${buildQuery(filters)}`);
 
 export const getRetrievalMetrics = (
-  opts: { runId?: string; datasetId?: string; source?: "urls" | "labels"; refresh?: boolean } = {},
+  opts: {
+    runId?: string;
+    datasetId?: string;
+    source?: "urls" | "labels";
+    refresh?: boolean;
+    includeAi?: boolean;
+  } = {},
 ) => {
   const params = new URLSearchParams({ source: opts.source ?? "urls" });
   if (opts.runId) params.set("run_id", opts.runId);
   if (opts.datasetId) params.set("dataset_id", opts.datasetId);
   if (opts.refresh) params.set("refresh", "true");
+  if (opts.includeAi) params.set("include_ai", "true");
   return request<RetrievalRunMetrics>(`/api/pipeline/retrieval-metrics?${params.toString()}`);
 };
 

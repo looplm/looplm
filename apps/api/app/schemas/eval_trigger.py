@@ -33,6 +33,10 @@ class TriggerEvalRequest(BaseModel):
         False,
         description="Use Azure OpenAI Batch API for LLM judge evaluators (50% cost, up to 24h).",
     )
+    retrieval_only: bool = Field(
+        False,
+        description="Run only retrieval-focus evaluators (skip generation/LLM-judge evaluators).",
+    )
 
 
 RerunScope = Literal["failed", "filtered", "selected"]

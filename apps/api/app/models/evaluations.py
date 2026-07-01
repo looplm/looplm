@@ -128,6 +128,10 @@ class EvalRun(Base):
     failed = Column(Integer, nullable=False, server_default=text("0"))
     grader_summary = Column(JSONB, nullable=False, server_default=text("'{}'"))
     score_summary = Column(JSONB, nullable=False, server_default=text("'{}'"))
+    # Point-in-time retrieval-quality metrics (URLs path) computed when the run finishes, so the
+    # run carries its recall@k/nDCG/etc. without a later recompute. NULL for runs before this
+    # feature or runs with no retrieval ground truth.
+    retrieval_summary = Column(JSONB, nullable=True)
     session_id = Column(
         UUID(as_uuid=True), ForeignKey("eval_sessions.id", ondelete="SET NULL"), nullable=True
     )

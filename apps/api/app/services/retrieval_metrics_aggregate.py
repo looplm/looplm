@@ -12,9 +12,14 @@ expects, which is the standard way to report recall@k across a test set.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Iterable
+from uuid import UUID
 
-from app.models.chunk_labels import DEFAULT_SLICE
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.chunk_labels import DEFAULT_SLICE, TestCaseLabelingStatus
 from app.models.evaluations import EvalResult, EvalRun
 from app.schemas.retrieval import RetrievalCaseMetrics, RetrievalRunMetrics, SliceMetrics
 from app.services.retrieval_metrics import (
@@ -24,8 +29,38 @@ from app.services.retrieval_metrics import (
     compute_retrieval_metrics,
 )
 
+logger = logging.getLogger(__name__)
+
 # Richer k grid than the grader default so the run view can draw a recall curve.
 AGG_KS: tuple[int, ...] = (1, 3, 5, 10)
+
+
+async def compute_and_store_run_retrieval_summary(
+    db: AsyncSession, run: EvalRun, project_id: UUID
+) -> None:
+    """Compute a finished run's URLs-path retrieval metrics and store them on ``run``.
+
+    Best-effort: any failure is logged and swallowed so it never blocks run completion. The caller
+    commits the run afterwards.
+    """
+    try:
+        slice_rows = (
+            await db.execute(
+                select(TestCaseLabelingStatus.test_id, TestCaseLabelingStatus.slice).where(
+                    TestCaseLabelingStatus.project_id == project_id,
+                    TestCaseLabelingStatus.slice.is_not(None),
+                )
+            )
+        ).all()
+        slice_by_test = {tid: s for tid, s in slice_rows}
+        results = (
+            await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
+        ).scalars().all()
+        run.retrieval_summary = aggregate_run_retrieval_metrics(
+            run, results, slice_by_test
+        ).model_dump(mode="json")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Retrieval snapshot failed for run %s: %s", run.id, exc)
 
 
 def _find_retrieval_details(graders: Any) -> dict[str, Any] | None:

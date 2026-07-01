@@ -110,6 +110,7 @@ async def get_retrieval_metrics(
     dataset_id: UUID | None = None,
     source: str = "urls",
     refresh: bool = False,
+    include_ai: bool = False,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
@@ -133,7 +134,7 @@ async def get_retrieval_metrics(
     slice_by_test = {test_id: slice_ for test_id, slice_ in statuses}
 
     if source == "labels":
-        return await _labels_metrics(db, project, dataset_id, slice_by_test, refresh)
+        return await _labels_metrics(db, project, dataset_id, slice_by_test, refresh, include_ai)
 
     run_filter = [EvalRun.project_id == project.id]
     if run_id is not None:
@@ -148,6 +149,10 @@ async def get_retrieval_metrics(
             status_code=404,
             detail={"error": {"code": "NOT_FOUND", "message": "Eval run not found"}},
         )
+    # Prefer the point-in-time snapshot stored when the run finished; recompute only on refresh or
+    # for older runs that predate the snapshot.
+    if run.retrieval_summary and not refresh:
+        return RetrievalRunMetrics.model_validate(run.retrieval_summary)
     results = (
         await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
     ).scalars().all()
@@ -160,8 +165,13 @@ async def _labels_metrics(
     dataset_id: UUID | None,
     slice_by_test: dict[str, str],
     refresh: bool,
+    include_ai: bool = False,
 ) -> RetrievalRunMetrics:
-    """Labels-vs-live-probe metrics over a dataset's cases."""
+    """Labels-vs-live-probe metrics over a dataset's cases.
+
+    ``include_ai`` folds the AI judge's chunk labels into the gold as one more annotator; by default
+    they are a read-only second opinion and excluded.
+    """
     ds_filter = [TestDataset.project_id == project.id]
     if dataset_id is not None:
         ds_filter.append(TestDataset.id == dataset_id)
@@ -181,7 +191,8 @@ async def _labels_metrics(
     cases = [(tid, prompt) for tid, prompt in case_rows]
 
     # Resolve per-annotator labels into a single gold verdict per chunk (majority vote / adjudicated
-    # override). AI judge labels (annotator set) are a second opinion only — excluded from the gold.
+    # override). AI judge labels (annotator set) are a read-only second opinion — excluded from gold
+    # unless ``include_ai`` is set, in which case they count as one more annotator.
     labels = (
         await db.execute(
             select(ChunkRelevanceLabel).where(ChunkRelevanceLabel.project_id == project.id)
@@ -193,9 +204,14 @@ async def _labels_metrics(
     overrides = {(g.test_id, g.chunk_id): g.relevance for g in golds}
     relevant_by_test, nonrelevant_by_test, grade_by_test = resolve_gold(
         (
-            (lbl.test_id, lbl.chunk_id, lbl.relevance, lbl.labeled_by)
+            (
+                lbl.test_id,
+                lbl.chunk_id,
+                lbl.relevance,
+                lbl.labeled_by if lbl.annotator is None else lbl.annotator,
+            )
             for lbl in labels
-            if lbl.annotator is None
+            if lbl.annotator is None or include_ai
         ),
         overrides,
     )

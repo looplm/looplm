@@ -90,10 +90,22 @@ export const deleteEvalReport = (id: string) =>
 export const getDatasetsPicker = () =>
   request<DatasetPickerResponse>("/api/evals/trigger/datasets");
 
-export const triggerEval = (datasetIds?: string[], concurrency?: number, filterMode?: string, useBatch?: boolean) =>
+export const triggerEval = (
+  datasetIds?: string[],
+  concurrency?: number,
+  filterMode?: string,
+  useBatch?: boolean,
+  retrievalOnly?: boolean,
+) =>
   request<TriggerEvalResponse>("/api/evals/trigger", {
     method: "POST",
-    body: JSON.stringify({ dataset_ids: datasetIds || null, concurrency, filter_mode: filterMode, use_batch: useBatch }),
+    body: JSON.stringify({
+      dataset_ids: datasetIds || null,
+      concurrency,
+      filter_mode: filterMode,
+      use_batch: useBatch,
+      retrieval_only: retrievalOnly,
+    }),
   });
 
 export type RerunScope = "failed" | "filtered" | "selected";
