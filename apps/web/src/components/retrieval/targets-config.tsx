@@ -87,19 +87,16 @@ export function RetrievalTargetsConfig({ canEdit }: { canEdit: boolean }) {
             <label className="shrink-0 flex items-center gap-1">
               <span className="text-[11px] text-gray-400 dark:text-slate-500 mr-1">target</span>
               {isPct ? (
-                <>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={5}
-                    disabled={!canEdit}
-                    value={Math.round(v * 100)}
-                    onChange={(e) => setVal(m.key, Number(e.target.value) / 100)}
-                    className="w-20 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm tabular-nums disabled:opacity-50"
-                  />
-                  <span className="text-xs text-gray-400">%</span>
-                </>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={5}
+                  disabled={!canEdit}
+                  value={Math.round(v * 100)}
+                  onChange={(e) => setVal(m.key, Number(e.target.value) / 100)}
+                  className="w-20 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm tabular-nums disabled:opacity-50"
+                />
               ) : (
                 <input
                   type="number"
@@ -112,6 +109,8 @@ export function RetrievalTargetsConfig({ canEdit }: { canEdit: boolean }) {
                   className="w-20 rounded-lg border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm tabular-nums disabled:opacity-50"
                 />
               )}
+              {/* Fixed-width suffix slot so every input box lines up, %-suffix or not. */}
+              <span className="w-3 text-xs text-gray-400">{isPct ? "%" : ""}</span>
             </label>
           </div>
         );
