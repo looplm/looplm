@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
 
-from openai import AsyncAzureOpenAI, AsyncOpenAI
+from openai import AsyncAzureOpenAI, AsyncOpenAI, BadRequestError
 
 from app.config import settings
 from app.services.llm_pricing import calculate_cost
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -124,7 +127,22 @@ class AnalysisLlmService:
             kwargs["response_format"] = response_format
 
         t0 = time.monotonic()
-        response = await self._client.chat.completions.create(**kwargs)
+        try:
+            response = await self._client.chat.completions.create(**kwargs)
+        except BadRequestError:
+            # Some Azure/OpenAI deployments reject the JSON response_format ("The requested
+            # operation is unsupported."). Every caller here parses JSON tolerantly (extracting
+            # the first object, ignoring fences/prose), so drop the hint and retry once rather
+            # than failing the whole call. A genuine 400 (context length, content filter) will
+            # simply 400 again and propagate.
+            if "response_format" not in kwargs:
+                raise
+            logger.warning(
+                "response_format unsupported by %s deployment; retrying without JSON mode",
+                self.provider,
+            )
+            kwargs.pop("response_format", None)
+            response = await self._client.chat.completions.create(**kwargs)
         duration_ms = round((time.monotonic() - t0) * 1000)
 
         content = response.choices[0].message.content or ""
