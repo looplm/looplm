@@ -75,6 +75,7 @@ async def _enrich_with_stats(
                 affects_pass=ev.affects_pass,
                 config=ev.config or {},
                 source=ev.source,
+                category=ev.category or "generation",
                 enabled=ev.enabled,
                 total_evaluations=total_evals,
                 pass_rate=pass_rate,
