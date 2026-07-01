@@ -26,7 +26,6 @@ export default function EvaluatorsPage() {
   const highlightName = searchParams.get("highlight") || undefined;
   const [resp, setResp] = useState<EvaluatorListResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<EvaluatorItem | null>(null);
@@ -60,7 +59,6 @@ export default function EvaluatorsPage() {
 
   const {
     fileInputRef,
-    handleSync,
     handleImportFile,
     handleExport,
     handleSave,
@@ -69,9 +67,7 @@ export default function EvaluatorsPage() {
   } = useEvaluatorActions({
     evaluators,
     editingEvaluator,
-    setResp,
     setError,
-    setSyncing,
     setImporting,
     setShowModal,
     setEditingEvaluator,
@@ -212,20 +208,6 @@ export default function EvaluatorsPage() {
               )}
             </button>
           </Tooltip>
-          <Tooltip content={canEdit ? "Sync evaluators from evaluation results" : READ_ONLY_TITLE}>
-            <button
-              onClick={handleSync}
-              disabled={syncing || !canEdit}
-              className="p-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              aria-label="Sync from Results"
-            >
-              {syncing ? (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 animate-spin" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" /></svg>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" /></svg>
-              )}
-            </button>
-          </Tooltip>
           <Tooltip content={canEdit ? "Create a new evaluator" : READ_ONLY_TITLE}>
             <button
               onClick={() => {
@@ -289,7 +271,7 @@ export default function EvaluatorsPage() {
       ) : evaluators.length === 0 ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
           <p className="mb-2">No evaluators defined yet.</p>
-          <p className="text-sm">Click &quot;Sync from Results&quot; to discover evaluators from existing eval runs, or create one manually.</p>
+          <p className="text-sm">Create one with the + button, or import evaluators from a JSON file.</p>
         </div>
       ) : (
         <EvaluatorTableBody

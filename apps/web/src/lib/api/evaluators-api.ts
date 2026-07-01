@@ -39,8 +39,5 @@ export const importEvaluators = (evaluators: EvaluatorCreateBody[]) =>
     body: JSON.stringify({ evaluators }),
   });
 
-export const syncEvaluators = () =>
-  request<EvaluatorListResponse>("/api/evaluators/sync", { method: "POST" });
-
 export const bulkDeleteEvaluators = (ids: string[]) =>
   Promise.all(ids.map((id) => deleteEvaluator(id)));

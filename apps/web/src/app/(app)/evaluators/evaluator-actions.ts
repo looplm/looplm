@@ -1,22 +1,18 @@
 import { useCallback, useRef } from "react";
 import {
-  syncEvaluators,
   importEvaluators,
   updateEvaluator,
   deleteEvaluator,
   bulkDeleteEvaluators,
   createEvaluator,
   type EvaluatorItem,
-  type EvaluatorListResponse,
 } from "@/lib/api";
 import type { EvaluatorFormData } from "./evaluator-modal";
 
 interface UseEvaluatorActionsOptions {
   evaluators: EvaluatorItem[];
   editingEvaluator: EvaluatorItem | null;
-  setResp: (resp: EvaluatorListResponse) => void;
   setError: (error: string | null) => void;
-  setSyncing: (syncing: boolean) => void;
   setImporting: (importing: boolean) => void;
   setShowModal: (show: boolean) => void;
   setEditingEvaluator: (ev: EvaluatorItem | null) => void;
@@ -26,28 +22,13 @@ interface UseEvaluatorActionsOptions {
 export function useEvaluatorActions({
   evaluators,
   editingEvaluator,
-  setResp,
   setError,
-  setSyncing,
   setImporting,
   setShowModal,
   setEditingEvaluator,
   load,
 }: UseEvaluatorActionsOptions) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleSync = useCallback(async () => {
-    setSyncing(true);
-    setError(null);
-    try {
-      const data = await syncEvaluators();
-      setResp(data);
-    } catch (err: any) {
-      setError(err.message || "Sync failed");
-    } finally {
-      setSyncing(false);
-    }
-  }, [setSyncing, setError, setResp]);
 
   const handleImportFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -158,7 +139,6 @@ export function useEvaluatorActions({
 
   return {
     fileInputRef,
-    handleSync,
     handleImportFile,
     handleExport,
     handleSave,
