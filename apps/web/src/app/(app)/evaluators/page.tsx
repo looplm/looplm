@@ -9,11 +9,12 @@ import {
 } from "@/lib/api";
 import { StatCard } from "@/components/eval-shared";
 import { ConfirmModal } from "@/components/confirm-modal";
-import { EvaluatorModal, type EvaluatorFormData } from "./evaluator-modal";
-import { EvaluatorTableBody, type SortKey, type SortDir, type SortEntry } from "./evaluator-table";
+import { EvaluatorModal } from "./evaluator-modal";
+import { EvaluatorTableBody, type SortKey, type SortEntry } from "./evaluator-table";
 import { useEvaluatorActions } from "./evaluator-actions";
 import Tooltip from "@/components/tooltip";
 import { usePermissions } from "@/components/permissions-context";
+import RetrievalMetricsPanel from "@/components/retrieval-metrics-panel";
 
 const RELEVANCE_ORDER: Record<string, number> = { core: 0, important: 1, minor: 2 };
 
@@ -38,8 +39,21 @@ export default function EvaluatorsPage() {
   ]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ ids: string[] } | null>(null);
+  // Retrieval evaluators (did we fetch the right context) vs generation (did the model use it).
+  const [tab, setTab] = useState<"generation" | "retrieval">("generation");
 
-  const evaluators = resp?.data || [];
+  const evaluators = useMemo(() => resp?.data || [], [resp]);
+  const evaluatorCategory = useCallback(
+    (e: EvaluatorItem) => (e.category ?? "generation") === "retrieval" ? "retrieval" : "generation",
+    [],
+  );
+  const generationCount = evaluators.filter((e) => evaluatorCategory(e) === "generation").length;
+  const retrievalCount = evaluators.length - generationCount;
+  // The evaluators shown under the active tab; all counts/sorting/selection are scoped to these.
+  const visibleEvaluators = useMemo(
+    () => evaluators.filter((e) => evaluatorCategory(e) === tab),
+    [evaluators, tab, evaluatorCategory],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,8 +106,8 @@ export default function EvaluatorsPage() {
     });
   }
 
-  // Clear selection when data changes
-  useEffect(() => { setSelectedIds(new Set()); }, [resp]);
+  // Clear selection when data or the active tab changes
+  useEffect(() => { setSelectedIds(new Set()); }, [resp, tab]);
 
   function handleDeleteClick(id: string) {
     setDeleteConfirm({ ids: [id] });
@@ -121,20 +135,18 @@ export default function EvaluatorsPage() {
   }
 
   function toggleSelectAll() {
-    if (selectedIds.size === evaluators.length) {
+    if (selectedIds.size === visibleEvaluators.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(evaluators.map((e) => e.id)));
+      setSelectedIds(new Set(visibleEvaluators.map((e) => e.id)));
     }
   }
 
-  const activeCount = evaluators.filter((e) => e.enabled).length;
+  const activeCount = visibleEvaluators.filter((e) => e.enabled).length;
+  const rated = visibleEvaluators.filter((e) => e.pass_rate != null);
   const avgPassRate =
-    evaluators.filter((e) => e.pass_rate != null).length > 0
-      ? evaluators.filter((e) => e.pass_rate != null).reduce((sum, e) => sum + (e.pass_rate || 0), 0) /
-        evaluators.filter((e) => e.pass_rate != null).length
-      : null;
-  const allSelected = evaluators.length > 0 && selectedIds.size === evaluators.length;
+    rated.length > 0 ? rated.reduce((sum, e) => sum + (e.pass_rate || 0), 0) / rated.length : null;
+  const allSelected = visibleEvaluators.length > 0 && selectedIds.size === visibleEvaluators.length;
 
   const sortedEvaluators = useMemo(() => {
     function compareByKey(a: EvaluatorItem, b: EvaluatorItem, key: SortKey): number {
@@ -163,14 +175,14 @@ export default function EvaluatorsPage() {
       }
     }
 
-    return [...evaluators].sort((a, b) => {
+    return [...visibleEvaluators].sort((a, b) => {
       for (const { key, dir } of sorts) {
         const cmp = compareByKey(a, b, key);
         if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
       }
       return 0;
     });
-  }, [evaluators, sorts]);
+  }, [visibleEvaluators, sorts]);
 
   return (
     <div>
@@ -231,10 +243,43 @@ export default function EvaluatorsPage() {
         </div>
       )}
 
+      {/* Retrieval / Generation tabs */}
+      <div className="flex items-center gap-1 mb-5 border-b border-gray-100 dark:border-slate-800">
+        {[
+          { key: "generation" as const, label: "Generation", count: generationCount },
+          { key: "retrieval" as const, label: "Retrieval", count: retrievalCount },
+        ].map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t.key
+                ? "border-indigo-500 text-gray-900 dark:text-white"
+                : "border-transparent text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
+            }`}
+          >
+            {t.label}
+            <span className="ml-1.5 text-xs text-gray-400 dark:text-slate-500">{t.count}</span>
+          </button>
+        ))}
+      </div>
+
+      <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
+        {tab === "retrieval"
+          ? "Retrieval quality — did the pipeline fetch the right context? The metrics below are computed from your expected URLs or human chunk labels; set a target on each to make it a pass/fail bar. Retrieval-check evaluators (source retrieval, image checks) that run per test case are listed underneath."
+          : "Generation quality — given the retrieved context, did the model answer well? These evaluators grade each answer during an eval run."}
+      </p>
+
+      {tab === "retrieval" && (
+        <div className="mb-8">
+          <RetrievalMetricsPanel />
+        </div>
+      )}
+
       {/* Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-        <StatCard label="Total Evaluators" value={evaluators.length} />
-        <StatCard label="Active" value={activeCount} sub={`${evaluators.length - activeCount} disabled`} />
+        <StatCard label={tab === "retrieval" ? "Retrieval evaluators" : "Generation evaluators"} value={visibleEvaluators.length} />
+        <StatCard label="Active" value={activeCount} sub={`${visibleEvaluators.length - activeCount} disabled`} />
         <StatCard
           label="Avg Pass Rate"
           value={avgPassRate != null ? `${(avgPassRate * 100).toFixed(1)}%` : "-"}
@@ -268,9 +313,9 @@ export default function EvaluatorsPage() {
       {/* Table */}
       {loading ? (
         <p className="text-gray-500 dark:text-slate-400">Loading...</p>
-      ) : evaluators.length === 0 ? (
+      ) : visibleEvaluators.length === 0 ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
-          <p className="mb-2">No evaluators defined yet.</p>
+          <p className="mb-2">No {tab} evaluators yet.</p>
           <p className="text-sm">Create one with the + button, or import evaluators from a JSON file.</p>
         </div>
       ) : (
@@ -312,6 +357,7 @@ export default function EvaluatorsPage() {
       {showModal && (
         <EvaluatorModal
           editingEvaluator={editingEvaluator}
+          defaultCategory={tab}
           onClose={() => {
             setShowModal(false);
             setEditingEvaluator(null);

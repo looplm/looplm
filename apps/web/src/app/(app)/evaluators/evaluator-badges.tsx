@@ -166,6 +166,17 @@ export const CHECK_TYPE_PILL_STYLES: Record<string, { active: string; inactive: 
   },
 };
 
+export const CATEGORY_PILL_STYLES: Record<string, { active: string; inactive: string }> = {
+  retrieval: {
+    active: "bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 ring-1 ring-sky-300 dark:ring-sky-700",
+    inactive: "bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 ring-1 ring-gray-200 dark:ring-slate-700",
+  },
+  generation: {
+    active: "bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-400 ring-1 ring-fuchsia-300 dark:ring-fuchsia-700",
+    inactive: "bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 ring-1 ring-gray-200 dark:ring-slate-700",
+  },
+};
+
 export const RELEVANCE_PILL_STYLES: Record<string, { active: string; inactive: string }> = {
   core: {
     active: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 ring-1 ring-red-300 dark:ring-red-700",

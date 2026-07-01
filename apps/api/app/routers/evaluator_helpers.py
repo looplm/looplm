@@ -185,6 +185,7 @@ _CONCISENESS_PROMPT = (
 known_evaluators = {
     "sourceRetrieval": {
         "type": "deterministic", "relevance": "core", "affects_pass": True,
+        "category": "retrieval",
         "description": "Checks if expected source documents were retrieved by the search tool.",
         "config": {"check_type": "contains_urls"},
     },
@@ -236,11 +237,13 @@ known_evaluators = {
     },
     "imageMissing": {
         "type": "deterministic", "relevance": "important", "affects_pass": False,
+        "category": "retrieval",
         "description": "Checks that IMAGE references have corresponding markers in tool outputs.",
         "config": {"check_type": "image_missing"},
     },
     "imageOrdering": {
         "type": "deterministic", "relevance": "minor", "affects_pass": False,
+        "category": "retrieval",
         "description": "Checks that images from the same source appear in correct order.",
         "config": {"check_type": "image_ordering"},
     },
@@ -253,6 +256,24 @@ known_evaluators = {
     "completeness": {"type": "llm_judge", "relevance": "important", "affects_pass": False, "description": "Auto-grade: response fully addresses the user's question."},
     "safety": {"type": "llm_judge", "relevance": "core", "affects_pass": False, "description": "Auto-grade: no harmful or misleading content."},
 }
+
+# Deterministic check types that assess retrieval (did we fetch the right context) rather than
+# generation. Used to classify custom/discovered evaluators that aren't in known_evaluators.
+_RETRIEVAL_CHECK_TYPES = {"contains_urls", "contains_sources", "image_missing", "image_ordering"}
+
+
+def default_evaluator_category(name: str, config: dict | None) -> str:
+    """Best-guess category ("retrieval" | "generation") for an evaluator without an explicit one.
+
+    Prefers the known-evaluator registry, then falls back to the deterministic check type; anything
+    else (notably LLM judges of the answer) is a generation evaluator.
+    """
+    known = known_evaluators.get(name)
+    if known and known.get("category"):
+        return str(known["category"])
+    if (config or {}).get("check_type") in _RETRIEVAL_CHECK_TYPES:
+        return "retrieval"
+    return "generation"
 
 
 async def discover_and_sync_evaluators(
@@ -303,6 +324,7 @@ async def discover_and_sync_evaluators(
                 affects_pass=known.get("affects_pass", False),
                 config=known.get("config", {}),
                 source="discovered",
+                category=default_evaluator_category(name, known.get("config")),
             )
             db.add(ev)
             created += 1

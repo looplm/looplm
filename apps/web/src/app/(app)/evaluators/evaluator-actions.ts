@@ -93,6 +93,7 @@ export function useEvaluatorActions({
           relevance: form.relevance,
           affects_pass: form.affects_pass,
           source: form.source as "custom" | "ragas" | "langfuse" | "discovered",
+          category: form.category as "retrieval" | "generation",
           config,
         });
       } else {
@@ -101,6 +102,7 @@ export function useEvaluatorActions({
           display_name: form.display_name || undefined,
           type: form.type,
           source: form.source as "custom" | "ragas" | "langfuse" | "discovered",
+          category: form.category as "retrieval" | "generation",
           description: form.description || undefined,
           relevance: form.relevance,
           affects_pass: form.affects_pass,

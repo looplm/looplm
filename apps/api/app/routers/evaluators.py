@@ -26,6 +26,7 @@ from app.schemas.evaluators import (
 from .evaluator_helpers import (
     _enrich_with_stats,
     _evaluator_type_value,
+    default_evaluator_category,
     discover_and_sync_evaluators,
 )
 
@@ -106,6 +107,7 @@ async def create_evaluator(
         affects_pass=body.affects_pass,
         config=body.config,
         source=body.source,
+        category=body.category.value if body.category else default_evaluator_category(body.name, body.config),
     )
     db.add(ev)
     await db.flush()
@@ -208,6 +210,7 @@ async def import_evaluators(
             affects_pass=item.affects_pass,
             config=item.config,
             source=item.source,
+            category=item.category.value if item.category else default_evaluator_category(item.name, item.config),
         )
         db.add(ev)
         created_evaluators.append(ev)

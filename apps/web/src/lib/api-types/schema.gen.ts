@@ -343,6 +343,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chunk-quality/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runs */
+        get: operations["list_runs_api_chunk_quality_runs_get"];
+        put?: never;
+        /** Create Run */
+        post: operations["create_run_api_chunk_quality_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chunk-quality/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_api_chunk_quality_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/code-agent/suggestions/{suggestion_id}": {
         parameters: {
             query?: never;
@@ -2346,6 +2381,364 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipeline/chunk-metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Chunk Metadata
+         * @description All index fields for a chunk, fetched live from the project's index provider.
+         *
+         *     Returns ``provider_connected=False`` when the project has no index provider, so the UI
+         *     can hide the feature; ``available=False`` when the chunk is not found in the index.
+         */
+        get: operations["get_chunk_metadata_api_pipeline_chunk_metadata_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Retrieval Pipeline
+         * @description Aggregate retrieval pipeline flow chart for the project's recent traces.
+         */
+        get: operations["get_retrieval_pipeline_api_pipeline_graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Labeling View
+         * @description A dataset's test cases, grouped per case, with the viewer's own label tallies merged in.
+         *
+         *     Labeling operates on a dataset (chosen with ``dataset_id``; defaults to the most recently
+         *     updated one). Each case is a query to judge; the chunks themselves are pooled live per case
+         *     from the connected index via ``/labeling/pool``. Labels and per-case status are keyed by
+         *     ``test_id`` and re-merged live, so judgments made under any dataset that shares a test_id
+         *     carry over. ``datasets`` lists every dataset for the picker.
+         */
+        get: operations["get_labeling_view_api_pipeline_labeling_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling/agreement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agreement
+         * @description Inter-annotator agreement (Cohen's kappa) over chunks judged by more than one person.
+         *
+         *     Documents how consistently the relevance criteria are applied and lists the chunks where
+         *     annotators disagree, with the current gold verdict, for adjudication. ``available`` is False
+         *     until at least two annotators have an overlapping judgment.
+         */
+        get: operations["get_agreement_api_pipeline_labeling_agreement_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling/ai-judge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ai Judge Case
+         * @description Grade a test case's retrieved chunks with the LLM, stored under the ``AI`` annotator.
+         *
+         *     A one-click second opinion: the model judges each chunk's relevance to the query on the same
+         *     0..3 scale a human uses. The grades become labels attributed to the AI annotator — a distinct
+         *     annotator in the agreement panel (so a lone human reviewer gets a Cohen's kappa against the
+         *     model) but excluded from the gold that feeds the retrieval metrics. Re-running re-grades the
+         *     same chunks (the AI annotator owns one label per chunk).
+         */
+        post: operations["ai_judge_case_api_pipeline_labeling_ai_judge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling/ai-judge/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ai Judge Preview
+         * @description Render the exact prompt the AI judge would send for a case, without calling the LLM.
+         *
+         *     Assembles the *same* pooled chunks and applies the *same* rubric the ``ai-judge`` endpoint
+         *     uses, then returns the full system + user message — including the chunk text folded into it —
+         *     so a reviewer can inspect precisely what will be sent before spending a judge call.
+         */
+        post: operations["ai_judge_preview_api_pipeline_labeling_ai_judge_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling/gold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Gold
+         * @description Adjudicate a chunk's gold relevance grade (0..3), overriding the annotator consensus.
+         */
+        put: operations["set_gold_api_pipeline_labeling_gold_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling/plan-queries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan Case Queries
+         * @description Decompose a case's question into focused agentic sub-queries with the LLM, and persist them.
+         *
+         *     The planned queries are stored on the case (``metadata.labeling_queries``) so every later pool
+         *     folds their index hits in — raising the recall ceiling to what an agentic retriever would
+         *     surface. Re-running re-plans and overwrites. Returns the base question + the planned queries.
+         */
+        post: operations["plan_case_queries_api_pipeline_labeling_plan_queries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling/pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Labeling Pool
+         * @description Multi-head candidate pool for one dataset test case: the chunks to judge.
+         *
+         *     Runs the connected index's heads (keyword/vector/hybrid) for the case's query and merges
+         *     them, deduped by chunk id — this *is* the set of chunks the labeler judges. ``q`` overrides
+         *     the query (the manual "find more candidates" box); without it the dataset case's prompt is
+         *     used. ``depth`` tunes per-head top-k (otherwise slice-driven). With no index provider
+         *     connected the pool is empty (nothing to label).
+         */
+        get: operations["get_labeling_pool_api_pipeline_labeling_pool_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Labeling Prompts
+         * @description Default rubrics for the AI judge and query planner, so the UI shows the real text.
+         *
+         *     The reviewer can edit these before running either; the defaults are sourced from the services
+         *     so the displayed text never drifts from what actually runs.
+         */
+        get: operations["get_labeling_prompts_api_pipeline_labeling_prompts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling/slice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Labeling Slice
+         * @description Assign a test case to a risk slice (broad | safety | adversarial), or clear it.
+         */
+        put: operations["set_labeling_slice_api_pipeline_labeling_slice_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labeling/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Labeling Status
+         * @description Manually mark a test case's chunk labeling as complete or not.
+         */
+        put: operations["set_labeling_status_api_pipeline_labeling_status_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upsert Labels
+         * @description Create or update the current user's graded relevance labels for (test_id, chunk_id) pairs.
+         *
+         *     Labels are per-annotator: each user owns their own row for a chunk, so two annotators can
+         *     disagree (the rows inter-annotator agreement and gold resolution are built from). Saving
+         *     only ever touches the calling user's own label. ``relevance`` is the graded 0..3 score.
+         */
+        post: operations["upsert_labels_api_pipeline_labels_post"];
+        /**
+         * Delete Label
+         * @description Remove the calling user's relevance label for a (test_id, chunk_id) pair.
+         *
+         *     Lets an annotator un-judge a chunk (clear its 0..3 grade). Only the caller's own label is
+         *     deleted; other annotators' rows and any gold override are untouched. Idempotent: deleting a
+         *     label that doesn't exist still succeeds, with ``deleted=False``.
+         */
+        delete: operations["delete_label_api_pipeline_labels_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/retrieval-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Retrieval Metrics
+         * @description Retrieval-quality metrics (recall@k / precision@k / MRR / nDCG).
+         *
+         *     ``source=labels`` measures pooled human chunk labels against a *live retrieval probe* of the
+         *     connected index, over a dataset's test cases (``dataset_id``, default most-recent). This is
+         *     the data-labeling lens and needs no eval run. ``source=urls`` measures each case's
+         *     ground-truth URLs via the ``contains_urls`` evaluator captures of an eval run (``run_id``,
+         *     default most-recent). Returns ``available=False`` when there is nothing to measure against.
+         */
+        get: operations["get_retrieval_metrics_api_pipeline_retrieval_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Targets
+         * @description The project's retrieval-metric targets, merged over defaults.
+         */
+        get: operations["get_targets_api_pipeline_targets_get"];
+        /**
+         * Update Targets
+         * @description Save the project's retrieval-metric targets (clamped to [0, 1]).
+         */
+        put: operations["update_targets_api_pipeline_targets_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -2446,6 +2839,30 @@ export interface paths {
         head?: never;
         /** Update Member */
         patch: operations["update_member_api_projects__project_id__members__member_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/test-embedding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Embedding
+         * @description Embed a tiny probe string with the project's saved embedding config.
+         *
+         *     Owner-only. Confirms the embedding deployment/model + credentials actually work and reports
+         *     the vector dimensions returned (so the user can verify they match their index's vector field).
+         *     Save settings before testing — this reads the persisted project settings.
+         */
+        post: operations["test_embedding_api_projects__project_id__test_embedding_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/projects/{project_id}/transfer-ownership": {
@@ -3687,6 +4104,100 @@ export interface components {
              */
             total_traces_analyzed: number;
         };
+        /**
+         * AgreementReport
+         * @description Inter-annotator agreement over the chunks judged by more than one person.
+         *
+         *     ``available`` is False when fewer than two annotators have overlapping judgments — kappa
+         *     needs a double-judged sample. ``average_kappa`` is the mean of the pairwise scores.
+         */
+        AgreementReport: {
+            /** Annotators */
+            annotators?: components["schemas"]["AnnotatorAgreement"][];
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /** Average Kappa */
+            average_kappa?: number | null;
+            /** Disagreements */
+            disagreements?: components["schemas"]["Disagreement"][];
+            /**
+             * Double Judged Pct
+             * @default 0
+             */
+            double_judged_pct: number;
+            /**
+             * Judged Items
+             * @default 0
+             */
+            judged_items: number;
+            /**
+             * Overlap Count
+             * @default 0
+             */
+            overlap_count: number;
+            /** Pairwise */
+            pairwise?: components["schemas"]["PairwiseKappa"][];
+        };
+        /**
+         * AiJudgePreviewResponse
+         * @description The exact prompt(s) the AI judge would send for a case — no LLM call, no grading.
+         *
+         *     Rendered server-side from the same pool, rubric and batching the judge uses, so the reviewer
+         *     sees the full chunk text (never truncated) and how the pool splits across calls before
+         *     spending a judge call. The system prompt is shared by every batch.
+         */
+        AiJudgePreviewResponse: {
+            /** Batches */
+            batches?: components["schemas"]["AiJudgePromptBatch"][];
+            /**
+             * Chunk Count
+             * @default 0
+             */
+            chunk_count: number;
+            /** System Prompt */
+            system_prompt: string;
+            /** Test Id */
+            test_id: string;
+        };
+        /**
+         * AiJudgePromptBatch
+         * @description One LLM call's user message: the full, untruncated chunk text for that batch.
+         */
+        AiJudgePromptBatch: {
+            /**
+             * Chunk Count
+             * @default 0
+             */
+            chunk_count: number;
+            /** User Prompt */
+            user_prompt: string;
+        };
+        /** AiJudgeRequest */
+        AiJudgeRequest: {
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Instructions */
+            instructions?: string | null;
+            /** Test Id */
+            test_id: string;
+        };
+        /** AiJudgeResponse */
+        AiJudgeResponse: {
+            /** Grades */
+            grades?: {
+                [key: string]: number;
+            };
+            /**
+             * Judged
+             * @default 0
+             */
+            judged: number;
+            /** Test Id */
+            test_id: string;
+        };
         /** AnalysisPreviewRequest */
         AnalysisPreviewRequest: {
             /**
@@ -3773,6 +4284,16 @@ export interface components {
              * @default false
              */
             suggest: boolean;
+        };
+        /** AnnotatorAgreement */
+        AnnotatorAgreement: {
+            /**
+             * Judged Count
+             * @default 0
+             */
+            judged_count: number;
+            /** Name */
+            name: string;
         };
         /** AntiPattern */
         AntiPattern: {
@@ -3906,6 +4427,187 @@ export interface components {
         CallbackResponse: {
             /** Installations */
             installations: components["schemas"]["CallbackInstallation"][];
+        };
+        /**
+         * ChunkForLabeling
+         * @description A retrieved chunk presented to a human for a relevant/not judgment.
+         */
+        ChunkForLabeling: {
+            /** Ai Relevance */
+            ai_relevance?: number | null;
+            /** Chunk Id */
+            chunk_id?: string | null;
+            /** Content */
+            content?: string | null;
+            /** Content Preview */
+            content_preview?: string | null;
+            /** Heading Context */
+            heading_context?: string | null;
+            /** Labeled By */
+            labeled_by?: string | null;
+            /** Pdf Page Number */
+            pdf_page_number?: number | null;
+            /** Rank */
+            rank: number;
+            /** Relevance */
+            relevance?: number | null;
+            /** Score */
+            score?: number | null;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+        };
+        /** ChunkLabelBatch */
+        ChunkLabelBatch: {
+            /** Labels */
+            labels?: components["schemas"]["ChunkLabelUpsert"][];
+        };
+        /** ChunkLabelUpsert */
+        ChunkLabelUpsert: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Content Preview */
+            content_preview?: string | null;
+            /** Relevance */
+            relevance: number;
+            /** Test Id */
+            test_id: string;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+        };
+        /**
+         * ChunkMetadataResponse
+         * @description All index fields for a chunk, fetched live from the connected index provider.
+         */
+        ChunkMetadataResponse: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /** Fields */
+            fields?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Provider Connected
+             * @default false
+             */
+            provider_connected: boolean;
+        };
+        /** ChunkQualityRunCreateResponse */
+        ChunkQualityRunCreateResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Status */
+            status: string;
+        };
+        /** ChunkQualityRunRequest */
+        ChunkQualityRunRequest: {
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /**
+             * Sample Size
+             * @default 8000
+             */
+            sample_size: number;
+        };
+        /** ChunkQualityRunResponse */
+        ChunkQualityRunResponse: {
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Processed */
+            processed: number;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /** Results */
+            results?: {
+                [key: string]: unknown;
+            } | null;
+            /** Sample Size */
+            sample_size: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /** Total Docs */
+            total_docs: number;
+        };
+        /** ChunkQualityRunSummary */
+        ChunkQualityRunSummary: {
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Critical
+             * @default 0
+             */
+            critical: number;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Info
+             * @default 0
+             */
+            info: number;
+            /** Processed */
+            processed: number;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /** Sample Size */
+            sample_size: number;
+            /** Score */
+            score?: number | null;
+            /** Status */
+            status: string;
+            /** Total Docs */
+            total_docs: number;
+            /**
+             * Warn
+             * @default 0
+             */
+            warn: number;
+        };
+        /** ChunkQualityRunSummaryListResponse */
+        ChunkQualityRunSummaryListResponse: {
+            /** Data */
+            data: components["schemas"]["ChunkQualityRunSummary"][];
         };
         /**
          * ClassifyFailuresResponse
@@ -4363,6 +5065,35 @@ export interface components {
             /** Used Llm */
             used_llm: boolean;
         };
+        /** Disagreement */
+        Disagreement: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Gold */
+            gold?: number | null;
+            /** Test Id */
+            test_id: string;
+            /** Title */
+            title?: string | null;
+            /** Votes */
+            votes?: components["schemas"]["VoteEntry"][];
+        };
+        /**
+         * EmbeddingTestResult
+         * @description Result of a live embedding-config test (does the embedding endpoint work?).
+         */
+        EmbeddingTestResult: {
+            /** Configured */
+            configured: boolean;
+            /** Dimensions */
+            dimensions?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Ok */
+            ok: boolean;
+        };
         /** EvalJobListResponse */
         EvalJobListResponse: {
             /** Data */
@@ -4706,6 +5437,11 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * EvaluatorCategory
+         * @enum {string}
+         */
+        EvaluatorCategory: "retrieval" | "generation";
         /** EvaluatorCreate */
         EvaluatorCreate: {
             /**
@@ -4713,6 +5449,7 @@ export interface components {
              * @default false
              */
             affects_pass: boolean;
+            category?: components["schemas"]["EvaluatorCategory"] | null;
             /** Config */
             config?: {
                 [key: string]: unknown;
@@ -4760,6 +5497,11 @@ export interface components {
         EvaluatorResponse: {
             /** Affects Pass */
             affects_pass: boolean;
+            /**
+             * Category
+             * @default generation
+             */
+            category: string;
             /** Config */
             config: {
                 [key: string]: unknown;
@@ -4812,6 +5554,7 @@ export interface components {
         EvaluatorUpdate: {
             /** Affects Pass */
             affects_pass?: boolean | null;
+            category?: components["schemas"]["EvaluatorCategory"] | null;
             /** Config */
             config?: {
                 [key: string]: unknown;
@@ -5555,6 +6298,15 @@ export interface components {
             /** Data */
             data: components["schemas"]["GapRunSummary"][];
         };
+        /** GoldUpdate */
+        GoldUpdate: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Relevance */
+            relevance: number;
+            /** Test Id */
+            test_id: string;
+        };
         /**
          * GraderResultSummary
          * @description Trimmed grader result used in the list-of-results response (no `details`).
@@ -6242,6 +6994,157 @@ export interface components {
             data: components["schemas"]["JsonImportItem"][];
             pagination: components["schemas"]["app__schemas__evaluations__PaginationInfo"];
         };
+        /** LabelingCase */
+        LabelingCase: {
+            /** Chunks */
+            chunks?: components["schemas"]["ChunkForLabeling"][];
+            /**
+             * Complete
+             * @default false
+             */
+            complete: boolean;
+            /** Input */
+            input?: string | null;
+            /**
+             * Labeled Count
+             * @default 0
+             */
+            labeled_count: number;
+            /** Labelers */
+            labelers?: string[];
+            /**
+             * Relevant Count
+             * @default 0
+             */
+            relevant_count: number;
+            /** Slice */
+            slice?: string | null;
+            /** Test Id */
+            test_id: string;
+        };
+        /**
+         * LabelingDatasetOption
+         * @description A dataset the labeling page can switch to (for the picker).
+         */
+        LabelingDatasetOption: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Test Count
+             * @default 0
+             */
+            test_count: number;
+        };
+        /**
+         * LabelingPoolResponse
+         * @description The deduped candidate pool for one test case, built from the index + trace captures.
+         *
+         *     ``heads_ran`` lists the retrieval heads that contributed (``trace`` plus whichever index
+         *     modes ran); ``heads_failed`` maps a head to why it produced nothing (e.g. the index has no
+         *     vector field), so the UI can be honest about partial pools. ``provider_connected`` is False
+         *     when the project has no index provider — then the pool is just the trace chunks.
+         */
+        LabelingPoolResponse: {
+            /** Chunks */
+            chunks?: components["schemas"]["PooledChunkForLabeling"][];
+            /** Computed At */
+            computed_at?: string | null;
+            /** Heads Failed */
+            heads_failed?: {
+                [key: string]: string;
+            };
+            /** Heads Ran */
+            heads_ran?: string[];
+            /** Input */
+            input?: string | null;
+            /**
+             * Pool Size
+             * @default 0
+             */
+            pool_size: number;
+            /**
+             * Provider Connected
+             * @default false
+             */
+            provider_connected: boolean;
+            queries?: components["schemas"]["LabelingQueries"] | null;
+            /** Test Id */
+            test_id: string;
+        };
+        /**
+         * LabelingPromptDefaults
+         * @description Default rubrics the UI shows (and lets a reviewer edit before running).
+         */
+        LabelingPromptDefaults: {
+            /** Ai Judge */
+            ai_judge: string;
+            /** Query Planner */
+            query_planner: string;
+        };
+        /**
+         * LabelingQueries
+         * @description The queries run to build a case's pool: the base question + any agentic sub-queries.
+         *
+         *     ``base`` is the case's own question (what the keyword/vector/hybrid heads ran on); ``agentic``
+         *     is the LLM planner's decomposition (empty until the planner has been run for the case). Shown
+         *     in the labeling UI so a reviewer sees exactly what was sent to the index.
+         */
+        LabelingQueries: {
+            /** Agentic */
+            agentic?: string[];
+            /** Base */
+            base?: string[];
+        };
+        /**
+         * LabelingRunResponse
+         * @description A dataset's test cases, grouped per case, ready for labeling.
+         *
+         *     Cases come from the selected dataset's test cases (not eval runs); the chunks to judge
+         *     are pooled live from the connected index per case. ``available`` is False when the
+         *     project has no dataset with test cases. ``datasets`` lists every dataset for the picker;
+         *     ``dataset_id`` / ``dataset_name`` identify the one these cases belong to.
+         */
+        LabelingRunResponse: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /** Cases */
+            cases?: components["schemas"]["LabelingCase"][];
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Dataset Name */
+            dataset_name?: string | null;
+            /** Datasets */
+            datasets?: components["schemas"]["LabelingDatasetOption"][];
+            /**
+             * Labelable Cases
+             * @default 0
+             */
+            labelable_cases: number;
+            /**
+             * Total Cases
+             * @default 0
+             */
+            total_cases: number;
+        };
+        /** LabelingSliceUpdate */
+        LabelingSliceUpdate: {
+            /** Slice */
+            slice?: string | null;
+            /** Test Id */
+            test_id: string;
+        };
+        /** LabelingStatusUpdate */
+        LabelingStatusUpdate: {
+            /** Complete */
+            complete: boolean;
+            /** Test Id */
+            test_id: string;
+        };
         /**
          * LatencyPercentiles
          * @description Trace duration distribution — tails matter more than the average.
@@ -6449,6 +7352,17 @@ export interface components {
             /** Total Cost Usd */
             total_cost_usd?: number | null;
         };
+        /** PairwiseKappa */
+        PairwiseKappa: {
+            /** A */
+            a: string;
+            /** B */
+            b: string;
+            /** Kappa */
+            kappa: number;
+            /** N */
+            n: number;
+        };
         /** PartitionKeyListResponse */
         PartitionKeyListResponse: {
             /** Data */
@@ -6486,6 +7400,29 @@ export interface components {
             /** Write Pages */
             write_pages?: string[] | null;
         };
+        /** PlanQueriesRequest */
+        PlanQueriesRequest: {
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Instructions */
+            instructions?: string | null;
+            /** Max Queries */
+            max_queries?: number | null;
+            /** Test Id */
+            test_id: string;
+        };
+        /**
+         * PlanQueriesResponse
+         * @description The planned agentic queries for a case, persisted so later pools fold them in.
+         */
+        PlanQueriesResponse: {
+            /** Agentic */
+            agentic?: string[];
+            /** Base */
+            base?: string[];
+            /** Test Id */
+            test_id: string;
+        };
         /**
          * PlannedLocation
          * @description A discovered prompt location shown in the pre-import selection step.
@@ -6508,6 +7445,42 @@ export interface components {
             note?: string | null;
             /** Role */
             role?: string | null;
+        };
+        /**
+         * PooledChunkForLabeling
+         * @description A pooled candidate chunk — surfaced by one or more retrieval heads, ready to judge.
+         *
+         *     Unlike :class:`ChunkForLabeling` (which mirrors a single ranked retrieval) this carries
+         *     ``provenance`` — the heads that found it (``trace``, ``keyword``, ``vector``, ``hybrid``) —
+         *     so the labeler sees *why* a chunk is in the pool, and ``ranks`` — the 1-indexed rank the
+         *     chunk held in each of those heads — so they see *where* each method ranked it. ``score`` is
+         *     a best-effort backend score and is not comparable across heads.
+         */
+        PooledChunkForLabeling: {
+            /** Agentic Queries */
+            agentic_queries?: string[];
+            /** Ai Relevance */
+            ai_relevance?: number | null;
+            /** Chunk Id */
+            chunk_id: string;
+            /** Content Preview */
+            content_preview?: string | null;
+            /** Labeled By */
+            labeled_by?: string | null;
+            /** Provenance */
+            provenance?: string[];
+            /** Ranks */
+            ranks?: {
+                [key: string]: number;
+            };
+            /** Relevance */
+            relevance?: number | null;
+            /** Score */
+            score?: number | null;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
         };
         /** PrecisionSummary */
         PrecisionSummary: {
@@ -6911,7 +7884,7 @@ export interface components {
         /** RegenerateExpectedAnswerResponse */
         RegenerateExpectedAnswerResponse: {
             /** Expected Answer */
-            expected_answer: string | null;
+            expected_answer?: string | null;
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -7247,6 +8220,197 @@ export interface components {
             /** Requests With Retrieval */
             requests_with_retrieval: number;
         };
+        /**
+         * RetrievalCaseMetrics
+         * @description Per-test-case retrieval quality, for the drill-down table.
+         */
+        RetrievalCaseMetrics: {
+            /** Bpref */
+            bpref?: number | null;
+            /** Condensed Ndcg At K */
+            condensed_ndcg_at_k?: {
+                [key: string]: number;
+            };
+            /**
+             * Expected Count
+             * @default 0
+             */
+            expected_count: number;
+            /** First Relevant Rank */
+            first_relevant_rank?: number | null;
+            /**
+             * Hit
+             * @default false
+             */
+            hit: boolean;
+            /** Input */
+            input?: string | null;
+            /** Missing Urls */
+            missing_urls?: string[];
+            /** Mrr */
+            mrr?: number | null;
+            /** Ndcg At K */
+            ndcg_at_k?: {
+                [key: string]: number;
+            };
+            /** Recall At K */
+            recall_at_k?: {
+                [key: string]: number;
+            };
+            /**
+             * Retrieved Count
+             * @default 0
+             */
+            retrieved_count: number;
+            /** Slice */
+            slice?: string | null;
+            /** Test Id */
+            test_id: string;
+        };
+        /**
+         * RetrievalMetric
+         * @description A single preformatted stat shown on a pipeline node.
+         *
+         *     Formatting is done server-side so the chart component stays a thin renderer; ``tone``
+         *     drives the colour accent (``good``/``warn``/``bad``/``muted``).
+         */
+        RetrievalMetric: {
+            /** Hint */
+            hint?: string | null;
+            /** Label */
+            label: string;
+            /** Tone */
+            tone?: string | null;
+            /** Value */
+            value: string;
+        };
+        /** RetrievalPipelineEdge */
+        RetrievalPipelineEdge: {
+            /**
+             * Kind
+             * @default main
+             */
+            kind: string;
+            /** Label */
+            label?: string | null;
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+        };
+        /** RetrievalPipelineNode */
+        RetrievalPipelineNode: {
+            /** Description */
+            description?: string | null;
+            /** Group */
+            group?: string | null;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Metrics */
+            metrics?: components["schemas"]["RetrievalMetric"][];
+            /** Provider */
+            provider?: string | null;
+            /**
+             * Status
+             * @default active
+             */
+            status: string;
+            /** Sublabel */
+            sublabel?: string | null;
+        };
+        /**
+         * RetrievalPipelineResponse
+         * @description Aggregate retrieval pipeline derived from a window of traces.
+         *
+         *     ``available`` is False when no RAG traces were found in the window, so the page can
+         *     show an empty state instead of a chart of zeros.
+         */
+        RetrievalPipelineResponse: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /** Edges */
+            edges?: components["schemas"]["RetrievalPipelineEdge"][];
+            /** Nodes */
+            nodes?: components["schemas"]["RetrievalPipelineNode"][];
+            /**
+             * Rag Traces
+             * @default 0
+             */
+            rag_traces: number;
+            /** Span Names */
+            span_names?: {
+                [key: string]: string;
+            };
+            /**
+             * Traces Analyzed
+             * @default 0
+             */
+            traces_analyzed: number;
+        };
+        /**
+         * RetrievalRunMetrics
+         * @description Retrieval-quality metrics for an eval run, macro-averaged across cases.
+         *
+         *     ``available`` is False when the run has no cases carrying both ground-truth URLs
+         *     and captured retrieval — measuring recall needs labeled relevance. Macro (not micro)
+         *     averaging so every query counts equally regardless of how many docs it expects.
+         */
+        RetrievalRunMetrics: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /** Bpref */
+            bpref?: number | null;
+            /** Cases */
+            cases?: components["schemas"]["RetrievalCaseMetrics"][];
+            /** Condensed Ndcg At K */
+            condensed_ndcg_at_k?: {
+                [key: string]: number;
+            };
+            /**
+             * Evaluated Cases
+             * @default 0
+             */
+            evaluated_cases: number;
+            /** Hit Rate At K */
+            hit_rate_at_k?: {
+                [key: string]: number;
+            };
+            /** Ks */
+            ks?: number[];
+            /** Mrr */
+            mrr?: number | null;
+            /** Ndcg At K */
+            ndcg_at_k?: {
+                [key: string]: number;
+            };
+            /** Precision At K */
+            precision_at_k?: {
+                [key: string]: number;
+            };
+            /** Recall At K */
+            recall_at_k?: {
+                [key: string]: number;
+            };
+            /** Run Id */
+            run_id?: string | null;
+            /** Run Name */
+            run_name?: string | null;
+            /** Slices */
+            slices?: components["schemas"]["SliceMetrics"][];
+            /**
+             * Total Cases
+             * @default 0
+             */
+            total_cases: number;
+        };
         /** RetrievalSource */
         RetrievalSource: {
             /** Count */
@@ -7284,6 +8448,37 @@ export interface components {
             reasoning?: string | null;
             /** Value */
             value: string;
+        };
+        /**
+         * RetrievalTargets
+         * @description Per-project pass/fail bars for the retrieval-quality metrics (fractions 0-1).
+         */
+        RetrievalTargets: {
+            /**
+             * Hit Rate
+             * @default 0.95
+             */
+            hit_rate: number;
+            /**
+             * Mrr
+             * @default 0.7
+             */
+            mrr: number;
+            /**
+             * Ndcg
+             * @default 0.7
+             */
+            ndcg: number;
+            /**
+             * Precision
+             * @default 0.5
+             */
+            precision: number;
+            /**
+             * Recall
+             * @default 0.8
+             */
+            recall: number;
         };
         /** RouteAnalysisResponse */
         RouteAnalysisResponse: {
@@ -7416,6 +8611,32 @@ export interface components {
             provider: string;
             /** Request Count */
             request_count: number;
+        };
+        /**
+         * SliceMetrics
+         * @description Macro-averaged metrics for one risk slice within a run.
+         *
+         *     A relevant chunk missed at deep rank only matters on the safety/adversarial slices, so
+         *     aggregate scores are reported per slice rather than blended into one number.
+         */
+        SliceMetrics: {
+            /** Bpref */
+            bpref?: number | null;
+            /**
+             * Case Count
+             * @default 0
+             */
+            case_count: number;
+            /** Ndcg At K */
+            ndcg_at_k?: {
+                [key: string]: number;
+            };
+            /** Recall At K */
+            recall_at_k?: {
+                [key: string]: number;
+            };
+            /** Slice */
+            slice: string;
         };
         /** SourceExpectationCreate */
         SourceExpectationCreate: {
@@ -8593,6 +9814,13 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** VoteEntry */
+        VoteEntry: {
+            /** Labeler */
+            labeler: string;
+            /** Relevance */
+            relevance: number;
+        };
         /** PaginationInfo */
         app__schemas__evaluations__PaginationInfo: {
             /** Page */
@@ -9231,6 +10459,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_api_chunk_quality_runs_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkQualityRunSummaryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_run_api_chunk_quality_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChunkQualityRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkQualityRunCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_api_chunk_quality_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkQualityRunResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13394,6 +14723,590 @@ export interface operations {
             };
         };
     };
+    get_chunk_metadata_api_pipeline_chunk_metadata_get: {
+        parameters: {
+            query: {
+                chunk_id: string;
+                provider_id?: string | null;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkMetadataResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_retrieval_pipeline_api_pipeline_graph_get: {
+        parameters: {
+            query?: {
+                from_date?: string | null;
+                to_date?: string | null;
+                environment?: string | null;
+                include_user_ids?: string[];
+                exclude_user_ids?: string[];
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalPipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_labeling_view_api_pipeline_labeling_get: {
+        parameters: {
+            query?: {
+                dataset_id?: string | null;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelingRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agreement_api_pipeline_labeling_agreement_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_judge_case_api_pipeline_labeling_ai_judge_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiJudgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiJudgeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_judge_preview_api_pipeline_labeling_ai_judge_preview_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiJudgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiJudgePreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_gold_api_pipeline_labeling_gold_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoldUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_case_queries_api_pipeline_labeling_plan_queries_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanQueriesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanQueriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_labeling_pool_api_pipeline_labeling_pool_get: {
+        parameters: {
+            query: {
+                test_id: string;
+                dataset_id?: string | null;
+                q?: string | null;
+                depth?: number | null;
+                refresh?: boolean;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelingPoolResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_labeling_prompts_api_pipeline_labeling_prompts_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelingPromptDefaults"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_labeling_slice_api_pipeline_labeling_slice_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabelingSliceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_labeling_status_api_pipeline_labeling_status_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabelingStatusUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_labels_api_pipeline_labels_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChunkLabelBatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_label_api_pipeline_labels_delete: {
+        parameters: {
+            query: {
+                test_id: string;
+                chunk_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_retrieval_metrics_api_pipeline_retrieval_metrics_get: {
+        parameters: {
+            query?: {
+                run_id?: string | null;
+                dataset_id?: string | null;
+                source?: string;
+                refresh?: boolean;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalRunMetrics"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_targets_api_pipeline_targets_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalTargets"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_targets_api_pipeline_targets_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrievalTargets"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalTargets"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_projects_api_projects_get: {
         parameters: {
             query?: never;
@@ -13700,6 +15613,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_embedding_api_projects__project_id__test_embedding_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingTestResult"];
                 };
             };
             /** @description Validation Error */

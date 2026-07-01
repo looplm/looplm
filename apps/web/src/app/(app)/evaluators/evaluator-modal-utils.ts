@@ -3,6 +3,8 @@ export interface EvaluatorFormData {
   display_name: string;
   type: string;
   source: string;
+  // Which side of the pipeline this assesses: "retrieval" or "generation".
+  category: string;
   description: string;
   relevance: string;
   affects_pass: boolean;
@@ -14,6 +16,7 @@ export const EMPTY_FORM: EvaluatorFormData = {
   display_name: "",
   type: "llm_judge",
   source: "custom",
+  category: "generation",
   description: "",
   relevance: "important",
   affects_pass: false,

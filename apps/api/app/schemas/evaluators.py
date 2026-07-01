@@ -17,6 +17,11 @@ class EvaluatorSource(str, Enum):
     discovered = "discovered"
 
 
+class EvaluatorCategory(str, Enum):
+    retrieval = "retrieval"
+    generation = "generation"
+
+
 class EvaluatorCreate(BaseModel):
     name: str
     display_name: Optional[str] = None
@@ -26,6 +31,8 @@ class EvaluatorCreate(BaseModel):
     affects_pass: bool = False
     config: dict[str, Any] = Field(default_factory=dict)
     source: EvaluatorSource = EvaluatorSource.custom
+    # None → derive from the evaluator's name / check_type (see default_evaluator_category).
+    category: Optional[EvaluatorCategory] = None
 
 
 class EvaluatorImport(BaseModel):
@@ -47,6 +54,7 @@ class EvaluatorUpdate(BaseModel):
     config: Optional[dict[str, Any]] = None
     enabled: Optional[bool] = None
     source: Optional[EvaluatorSource] = None
+    category: Optional[EvaluatorCategory] = None
 
 
 class EvaluatorResponse(BaseModel):
@@ -59,6 +67,7 @@ class EvaluatorResponse(BaseModel):
     affects_pass: bool
     config: dict[str, Any]
     source: Optional[str] = None
+    category: str = "generation"
     enabled: bool
     total_evaluations: int = 0
     pass_rate: Optional[float] = None

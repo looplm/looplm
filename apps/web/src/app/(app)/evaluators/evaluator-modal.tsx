@@ -9,6 +9,7 @@ import {
   SOURCE_PILL_STYLES,
   RELEVANCE_PILL_STYLES,
   CHECK_TYPE_PILL_STYLES,
+  CATEGORY_PILL_STYLES,
 } from "./evaluator-badges";
 import {
   type EvaluatorFormData,
@@ -27,10 +28,13 @@ const inputClass =
 
 export function EvaluatorModal({
   editingEvaluator,
+  defaultCategory = "generation",
   onClose,
   onSave,
 }: {
   editingEvaluator: EvaluatorItem | null;
+  // Category a newly-created evaluator starts in (the tab the user opened the modal from).
+  defaultCategory?: string;
   onClose: () => void;
   onSave: (data: EvaluatorFormData) => void;
 }) {
@@ -46,6 +50,7 @@ export function EvaluatorModal({
         display_name: editingEvaluator.display_name || "",
         type: editingEvaluator.type,
         source: editingEvaluator.source || "custom",
+        category: editingEvaluator.category || "generation",
         description: editingEvaluator.description || "",
         relevance: editingEvaluator.relevance,
         affects_pass: editingEvaluator.affects_pass,
@@ -56,11 +61,11 @@ export function EvaluatorModal({
       const cfg = JSON.stringify(editingEvaluator.config);
       setShowConfig(cfg !== "{}" && cfg !== "null");
     } else {
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, category: defaultCategory });
       setStructured(EMPTY_STRUCTURED);
       setShowConfig(false);
     }
-  }, [editingEvaluator]);
+  }, [editingEvaluator, defaultCategory]);
 
   const handleTypeChange = (newType: string) => {
     setForm({ ...form, type: newType });
@@ -132,6 +137,22 @@ export function EvaluatorModal({
             {/* Classification Section */}
             <div className="space-y-3">
               <SectionHeader icon="&#9783;" label="Classification" />
+              <div>
+                <label className="block text-sm font-medium mb-2">Category</label>
+                <PillGroup
+                  options={[
+                    { value: "retrieval", label: "Retrieval" },
+                    { value: "generation", label: "Generation" },
+                  ]}
+                  value={form.category}
+                  onChange={(v) => setForm({ ...form, category: v })}
+                  styles={CATEGORY_PILL_STYLES}
+                />
+                <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                  Retrieval evaluators assess whether the right context was fetched; generation
+                  evaluators assess how the model used it.
+                </p>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">Type</label>
