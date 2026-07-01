@@ -81,3 +81,14 @@ class EvaluatorResponse(BaseModel):
 class EvaluatorListResponse(BaseModel):
     data: list[EvaluatorResponse]
     total: int
+
+
+class GenerateExpressionRequest(BaseModel):
+    description: str
+
+
+class GenerateExpressionResponse(BaseModel):
+    expression: str
+    # Whether the generated expression parses and uses only allowed constructs/variables.
+    valid: bool
+    error: Optional[str] = None

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { EvaluatorItem } from "@/lib/api";
+import { toast } from "sonner";
+import { generateEvaluatorExpression, type EvaluatorItem } from "@/lib/api";
 import {
   PillGroup,
   SectionHeader,
@@ -42,6 +43,28 @@ export function EvaluatorModal({
   const [form, setForm] = useState<EvaluatorFormData>(EMPTY_FORM);
   const [structured, setStructured] = useState<StructuredConfig>(EMPTY_STRUCTURED);
   const [showConfig, setShowConfig] = useState(false);
+  // Natural-language → expression helper (for the "expression" check type).
+  const [nlDescription, setNlDescription] = useState("");
+  const [generating, setGenerating] = useState(false);
+
+  const handleGenerateExpression = async () => {
+    const description = nlDescription.trim();
+    if (!description) return;
+    setGenerating(true);
+    try {
+      const res = await generateEvaluatorExpression(description);
+      setStructured((s) => ({ ...s, expression: res.expression }));
+      if (!res.valid) {
+        toast.warning(`Generated, but it may not be valid: ${res.error ?? "review it"}`);
+      } else {
+        toast.success("Expression generated");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to generate expression");
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   useEffect(() => {
     if (editingEvaluator) {
@@ -284,6 +307,33 @@ export function EvaluatorModal({
                       </div>
                       {structured.check_type === "expression" && (
                         <div>
+                          <label className="block text-sm font-medium mb-1">
+                            Generate from a description <span className="font-normal text-gray-400 dark:text-slate-500">(optional)</span>
+                          </label>
+                          <div className="flex items-center gap-2 mb-2">
+                            <input
+                              type="text"
+                              value={nlDescription}
+                              onChange={(e) => setNlDescription(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  void handleGenerateExpression();
+                                }
+                              }}
+                              className={inputClass}
+                              placeholder="e.g. the answer cites all expected sources"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleGenerateExpression}
+                              disabled={generating || !nlDescription.trim()}
+                              className="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50"
+                            >
+                              <span aria-hidden className={generating ? "animate-pulse" : ""}>✦</span>
+                              {generating ? "Generating…" : "Generate"}
+                            </button>
+                          </div>
                           <label className="block text-sm font-medium mb-1">Expression</label>
                           <textarea
                             value={structured.expression}

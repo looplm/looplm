@@ -7,6 +7,7 @@ import type {
   EvaluatorListResponse,
   EvaluatorCreateBody,
   EvaluatorUpdateBody,
+  GenerateExpressionResponse,
 } from "../api-types";
 import { request } from "./client";
 
@@ -41,3 +42,10 @@ export const importEvaluators = (evaluators: EvaluatorCreateBody[]) =>
 
 export const bulkDeleteEvaluators = (ids: string[]) =>
   Promise.all(ids.map((id) => deleteEvaluator(id)));
+
+// Generate a Code-evaluator DSL expression from a plain-language description via the LLM.
+export const generateEvaluatorExpression = (description: string) =>
+  request<GenerateExpressionResponse>("/api/evaluators/generate-expression", {
+    method: "POST",
+    body: JSON.stringify({ description }),
+  });

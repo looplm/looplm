@@ -40,6 +40,7 @@ export type EvaluatorItem = S["EvaluatorResponse"];
 export type EvaluatorListResponse = S["EvaluatorListResponse"];
 export type EvaluatorCreateBody = S["EvaluatorCreate"];
 export type EvaluatorUpdateBody = S["EvaluatorUpdate"];
+export type GenerateExpressionResponse = S["GenerateExpressionResponse"];
 
 // --- Eval Report ---
 export type ReportTraceInfo = S["ReportTraceInfo"];

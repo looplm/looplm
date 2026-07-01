@@ -78,3 +78,57 @@ def evaluate_bool_expression(expression: str, names: dict[str, Any]) -> bool:
         raise ExpressionError(str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - report any eval failure as a controlled error
         raise ExpressionError(f"{type(exc).__name__}: {exc}") from exc
+
+
+# Representative values (right types) used to validate a generated expression parses and only
+# uses allowed constructs/variables — a NameError here means a hallucinated variable.
+_SAMPLE_NAMESPACE: dict[str, Any] = {
+    "input": "What is the capital of France?",
+    "output": "The capital of France is Paris.",
+    "expected_output": "Paris",
+    "context": "France ... capital ... Paris ...",
+    "retrieved_urls": ["https://example.com/a", "https://example.com/b"],
+    "expected_urls": ["https://example.com/a"],
+    "expected_sources": ["Paris"],
+}
+
+
+def validate_expression(expression: str) -> str | None:
+    """Return an error string if the expression is empty/malformed/disallowed, else None."""
+    try:
+        evaluate_bool_expression(expression, dict(_SAMPLE_NAMESPACE))
+    except ExpressionError as exc:
+        return str(exc)
+    return None
+
+
+def strip_expression(text: str) -> str:
+    """Clean an LLM reply down to a bare expression (drop code fences and surrounding quotes)."""
+    s = (text or "").strip()
+    if s.startswith("```"):
+        s = s.strip("`").strip()
+        s = re.sub(r"^[A-Za-z]+\n", "", s).strip()  # drop an optional ```python language tag
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
+        s = s[1:-1].strip()
+    return s
+
+
+def build_generation_system_prompt() -> str:
+    """System prompt that constrains an LLM to emit a single DSL boolean expression."""
+    vars_doc = "\n".join(f"- {name}: {desc}" for name, desc in EXPRESSION_VARIABLES)
+    funcs = ", ".join(sorted(SAFE_FUNCTIONS))
+    return (
+        "You translate a plain-language description of a retrieval/LLM evaluation check into a "
+        "single Python boolean expression for a restricted DSL.\n\n"
+        "Available variables:\n"
+        f"{vars_doc}\n\n"
+        f"Only these helper functions may be called: {funcs}.\n"
+        "Rules:\n"
+        "- Return ONE boolean expression and nothing else: no assignments, imports, attribute or "
+        "method access (no dot access), function definitions, code fences, or explanation.\n"
+        "- The expression must evaluate truthy when the check passes.\n"
+        "- Prefer the helpers (e.g. contains(output, x), matches(pattern, output)) over method "
+        "calls, since attribute access is not allowed. Use only the variables listed above.\n"
+        'Example — "the answer mentions all expected sources": '
+        "all(contains(output, s) for s in expected_sources)"
+    )

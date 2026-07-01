@@ -1216,6 +1216,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/evaluators/generate-expression": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Expression
+         * @description Turn a plain-language check into a Code-evaluator DSL expression via the LLM.
+         *
+         *     Returns the generated boolean expression plus whether it parses and uses only allowed
+         *     constructs/variables (validated against the safe evaluator). The caller can edit it before
+         *     saving; invalid output is still returned so the reviewer sees what the model proposed.
+         */
+        post: operations["generate_expression_api_evaluators_generate_expression_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/evaluators/import": {
         parameters: {
             query?: never;
@@ -6294,6 +6318,20 @@ export interface components {
         GapRunSummaryListResponse: {
             /** Data */
             data: components["schemas"]["GapRunSummary"][];
+        };
+        /** GenerateExpressionRequest */
+        GenerateExpressionRequest: {
+            /** Description */
+            description: string;
+        };
+        /** GenerateExpressionResponse */
+        GenerateExpressionResponse: {
+            /** Error */
+            error?: string | null;
+            /** Expression */
+            expression: string;
+            /** Valid */
+            valid: boolean;
         };
         /** GoldUpdate */
         GoldUpdate: {
@@ -12269,6 +12307,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvaluatorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_expression_api_evaluators_generate_expression_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenerateExpressionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateExpressionResponse"];
                 };
             };
             /** @description Validation Error */
