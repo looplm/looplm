@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -18,7 +19,11 @@ from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import LabelingDatasetOption
-from app.services.analysis_llm import AnalysisLlmService, merge_llm_settings
+from app.services.analysis_llm import (
+    AnalysisLlmConfigError,
+    AnalysisLlmService,
+    merge_llm_settings,
+)
 from app.services.chunk_pool import (
     DEFAULT_POOL_DEPTH,
     SLICE_POOL_DEPTH,
@@ -31,10 +36,16 @@ from app.services.llm_usage_tracker import record_llm_usage
 from app.services.query_embedding import embed_query
 from app.services.query_planner import DEFAULT_PLANNER_MAX_QUERIES, plan_queries
 
+logger = logging.getLogger(__name__)
+
 # Key on the test case's metadata under which the planner's agentic queries are persisted, so the
 # pool folds them in on every later visit (and the multi-mode eval can reuse them) without
 # re-spending an LLM call.
 LABELING_QUERIES_META_KEY = "labeling_queries"
+
+# Index fields that hold a chunk's full body, in priority order. Mirrors the web client's
+# INDEX_TEXT_FIELDS (chunk-row.tsx) so the judge reads the same text "Show full chunk" renders.
+INDEX_TEXT_FIELDS = ("chunk_text", "content", "text", "chunkText")
 
 
 def _display_name(email: str | None) -> str | None:
@@ -197,6 +208,80 @@ async def plan_and_persist_case_queries(
     )
     await _persist_case_agentic_queries(db, dataset_id, test_id, base=query, agentic=queries)
     return queries
+
+
+async def ensure_case_agentic_queries(
+    db: AsyncSession,
+    project: Project,
+    user: User,
+    *,
+    dataset_id: UUID,
+    test_id: str,
+    query: str,
+) -> list[str]:
+    """The case's agentic sub-queries, auto-planning them once if they were never planned.
+
+    Mirrors the labeling-pool view's auto-plan-on-first-pool (runs once, persisted even when it
+    plans nothing). Sharing it with the AI judge guarantees the judge grades the *same* agentic
+    candidates the labeler later sees, not a base-only pool when a case is judged in batch before
+    it's ever opened. Falls back to base-only (``[]``) when no LLM is configured or planning fails.
+    """
+    agentic = await _dataset_case_agentic_queries(db, dataset_id, test_id)
+    if not agentic and not await _case_planned(db, dataset_id, test_id):
+        try:
+            agentic = await plan_and_persist_case_queries(
+                db, project, user, dataset_id=dataset_id, test_id=test_id, query=query
+            )
+        except AnalysisLlmConfigError:
+            agentic = []  # no LLM yet — pool base-only, auto-plan once one is configured
+        except Exception:  # noqa: BLE001
+            logger.exception("Auto query-planning failed for test_id=%s", test_id)
+            agentic = []
+    return agentic
+
+
+async def fetch_full_chunk_texts(
+    db: AsyncSession, project: Project, chunk_ids: list[str]
+) -> dict[str, str]:
+    """Full index body text for each chunk id, fetched live from the project's index provider.
+
+    The pool's ``content_preview`` is a display snippet the provider caps (e.g. 600 chars); the AI
+    judge must grade the whole chunk, so it resolves the complete text from the index. Ids the index
+    can't resolve (chunk gone, no index, no text field) are omitted, so the caller falls back to the
+    preview.
+    """
+    ids = [c for c in dict.fromkeys(chunk_ids) if c]
+    if not ids:
+        return {}
+    provider_row = (
+        await db.execute(
+            select(IndexProvider)
+            .where(IndexProvider.project_id == project.id)
+            .order_by(IndexProvider.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if provider_row is None:
+        return {}
+    provider = build_index_provider(provider_row)
+    try:
+        docs = await provider.fetch_documents_by_key(ids)
+    except Exception:  # noqa: BLE001 — capability gap / transient error → fall back to previews
+        logger.exception("Fetching full chunk text failed for %d ids", len(ids))
+        return {}
+    finally:
+        await provider.aclose()
+
+    out: dict[str, str] = {}
+    for cid, fields in docs.items():
+        if not isinstance(fields, dict):
+            continue
+        for f in INDEX_TEXT_FIELDS:
+            v = fields.get(f)
+            if isinstance(v, str) and v.strip():
+                out[cid] = v
+                break
+    return out
 
 
 async def _project_labels(

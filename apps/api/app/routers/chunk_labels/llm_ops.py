@@ -41,6 +41,8 @@ from ._helpers import (
     _dataset_case_query,
     _resolve_dataset,
     assemble_case_pool,
+    ensure_case_agentic_queries,
+    fetch_full_chunk_texts,
     plan_and_persist_case_queries,
 )
 
@@ -90,8 +92,12 @@ async def ai_judge_case(
             detail={"error": {"code": "NOT_FOUND", "message": "Test case not found in dataset"}},
         )
 
-    # Judge the *same* chunks the labeler sees, including any agentic-pooled candidates.
-    agentic = await _dataset_case_agentic_queries(db, dataset.id, body.test_id)
+    # Judge the *same* chunks the labeler sees, including any agentic-pooled candidates. Plan the
+    # agentic queries here if they were never planned (e.g. a batch judge over cases never opened in
+    # the UI) so the judge never grades a base-only pool the labeler will later see augmented.
+    agentic = await ensure_case_agentic_queries(
+        db, project, user, dataset_id=dataset.id, test_id=body.test_id, query=query
+    )
     pool, _computed_at, _connected = await assemble_case_pool(
         db, project, body.test_id, query, agentic_queries=agentic
     )
@@ -111,8 +117,14 @@ async def ai_judge_case(
         pc.chunk_id: {"content_preview": pc.content_preview, "url": pc.url, "title": pc.title}
         for pc in pool.chunks
     }
+    # Grade the FULL chunk text, not the pool's truncated display preview — fall back to the preview
+    # only for chunks the index can't resolve.
+    full_texts = await fetch_full_chunk_texts(db, project, [pc.chunk_id for pc in pool.chunks])
     chunks = [
-        AiJudgeChunk(chunk_id=pc.chunk_id, text=str(pc.content_preview or ""))
+        AiJudgeChunk(
+            chunk_id=pc.chunk_id,
+            text=full_texts.get(pc.chunk_id) or str(pc.content_preview or ""),
+        )
         for pc in pool.chunks
     ]
     try:
@@ -211,13 +223,19 @@ async def ai_judge_preview(
             detail={"error": {"code": "NOT_FOUND", "message": "Test case not found in dataset"}},
         )
 
-    # Same pool the judge grades, including any agentic-pooled candidates.
+    # Same pool the judge grades, including any agentic-pooled candidates. Preview reads the
+    # already-planned queries (no user context here to plan); the judge itself plans if missing.
     agentic = await _dataset_case_agentic_queries(db, dataset.id, body.test_id)
     pool, _computed_at, _connected = await assemble_case_pool(
         db, project, body.test_id, query, agentic_queries=agentic
     )
+    # Preview the FULL chunk text the judge grades, not the truncated display preview.
+    full_texts = await fetch_full_chunk_texts(db, project, [pc.chunk_id for pc in pool.chunks])
     chunks = [
-        AiJudgeChunk(chunk_id=pc.chunk_id, text=str(pc.content_preview or ""))
+        AiJudgeChunk(
+            chunk_id=pc.chunk_id,
+            text=full_texts.get(pc.chunk_id) or str(pc.content_preview or ""),
+        )
         for pc in pool.chunks
     ]
     system_prompt, planned = plan_ai_judge_prompts(
