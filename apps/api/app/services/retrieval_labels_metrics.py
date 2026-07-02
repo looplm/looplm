@@ -39,6 +39,7 @@ from app.services.retrieval_metrics_aggregate import (
     STAGE_LABELS,
     aggregate_retrieval_metrics_from_labels,
     build_by_stage_metrics,
+    compute_rerank_threshold_sweep,
 )
 from app.services.retrieval_metrics_cache import get_cached, result_cache_key, store
 from app.services.retrieval_probe import cached_probe_chunk_ids
@@ -305,6 +306,8 @@ async def compute_by_stage_metrics(
     todo = [(tid, q) for tid, q in cases if relevant_by_test.get(tid)]
     heads = [head for head, _ in STAGE_LABELS]
     retrieved_by_stage: dict[str, dict[str, list[str]]] = {h: {} for h in heads}
+    # test_id -> [(chunk_id, rerankerScore)] for the agentic-rerank stage, feeding the threshold sweep.
+    rerank_scores_by_test: dict[str, list[tuple[str, float]]] = {}
     sem = asyncio.Semaphore(PROBE_CONCURRENCY)
 
     async def _pool_case(test_id: str, query: str) -> None:
@@ -340,6 +343,10 @@ async def compute_by_stage_metrics(
                     )
                 if ranked:
                     retrieved_by_stage[head][test_id] = [c.chunk_id for c in ranked]
+                    if head == "agentic_rerank":
+                        rerank_scores_by_test[test_id] = [
+                            (c.chunk_id, c.agentic_rerank_score) for c in ranked
+                        ]
 
     await asyncio.gather(*(_pool_case(tid, q) for tid, q in todo))
 
@@ -352,6 +359,13 @@ async def compute_by_stage_metrics(
         slice_by_test,
         dataset_by_test=await resolve_case_datasets(db, dataset_uuids),
     )
+    # Attach the score-threshold sweep to the agentic-rerank stage so the UI can offer a variable-k
+    # (rerankerScore) cutoff without another compute.
+    sweep = compute_rerank_threshold_sweep(rerank_scores_by_test, relevant_by_test)
+    for stage in stages:
+        if stage.stage == "agentic_rerank":
+            stage.threshold_sweep = sweep
+            break
     result = ByStageMetricsResponse(
         available=evaluated > 0,
         dataset_id=ds_id,

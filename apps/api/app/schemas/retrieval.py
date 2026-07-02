@@ -426,11 +426,27 @@ class RetrievalRunMetrics(BaseModel):
     computed_at: str | None = None
 
 
+class RerankThresholdPoint(BaseModel):
+    """One point on the agentic-rerank score sweep: keep chunks with rerankerScore >= threshold.
+
+    Lets a variable-k (score) cutoff be chosen from the data instead of a fixed top-k. ``precision``
+    is averaged only over cases that kept at least one chunk (an empty keep is precision-undefined);
+    ``recall`` and ``avg_retrieved`` average over every case with gold.
+    """
+
+    threshold: float
+    precision: float | None = None
+    recall: float = 0.0
+    hit_rate: float = 0.0
+    avg_retrieved: float = 0.0  # mean chunks/query kept — how many you'd feed the LLM at this cut
+    evaluated_cases: int = 0
+
+
 class StageMetrics(BaseModel):
     """Deterministic retrieval metrics for one pipeline stage, macro-averaged across cases."""
 
-    stage: str  # keyword | vector | hybrid | semantic | agentic
-    label: str  # display label (Sparse / Dense / RRF / Reranked / Agentic)
+    stage: str  # keyword | vector | hybrid | semantic | agentic | agentic_rerank
+    label: str  # display label (Sparse / Dense / RRF / Reranked / Agentic / Agentic + rerank)
     evaluated_cases: int = 0
     recall_at_k: dict[str, float] = Field(default_factory=dict)
     precision_at_k: dict[str, float] = Field(default_factory=dict)
@@ -440,6 +456,9 @@ class StageMetrics(BaseModel):
     # Full per-stage metrics (per-case rows, bpref, condensed nDCG, slices, recall curve) so the
     # Overall block can render any one retriever in detail, not just the summary row above.
     metrics: RetrievalRunMetrics | None = None
+    # Only populated for the agentic_rerank stage: precision/recall/kept-count as the rerankerScore
+    # cutoff sweeps the 0-4 scale, so a score-threshold cutoff can be picked from the data.
+    threshold_sweep: list[RerankThresholdPoint] = Field(default_factory=list)
 
 
 class ByStageCaseMetrics(BaseModel):

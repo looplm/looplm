@@ -9,6 +9,7 @@ from app.models.evaluations import EvalResult, EvalRun
 from app.services.retrieval_metrics_aggregate import (
     aggregate_retrieval_metrics_from_labels,
     aggregate_run_retrieval_metrics,
+    compute_rerank_threshold_sweep,
 )
 
 
@@ -159,3 +160,31 @@ def test_labels_path_without_nonrelevant_still_works():
     )
     assert out.bpref == 0.5  # only 1 of 2 relevant retrieved
     assert out.recall_at_k["10"] == 0.5
+
+
+def test_rerank_threshold_sweep_precision_recall_and_count():
+    # t1 keeps rel r1 (3.0) + noise n1 (1.0); t2 keeps rel r2 (2.0). Gold: t1={r1,r2}, t2={r2}.
+    scores = {
+        "t1": [("r1", 3.0), ("n1", 1.0)],
+        "t2": [("r2", 2.0)],
+    }
+    relevant = {"t1": {"r1", "r2"}, "t2": {"r2"}}
+    sweep = compute_rerank_threshold_sweep(scores, relevant, thresholds=(0.0, 1.5, 2.5))
+
+    by_t = {round(p.threshold, 1): p for p in sweep}
+    # At 0.0 everything is kept: t1 keeps {r1,n1} (1/2 relevant, precision 1/2), t2 keeps {r2} (1/1).
+    assert by_t[0.0].recall == 0.75  # (0.5 + 1.0) / 2
+    assert by_t[0.0].precision == 0.75  # (0.5 + 1.0) / 2
+    assert by_t[0.0].avg_retrieved == 1.5  # (2 + 1) / 2
+    assert by_t[0.0].hit_rate == 1.0
+    # At 1.5 the noise n1 (1.0) drops: t1 keeps {r1} (0.5 recall, precision 1.0), t2 keeps {r2}.
+    assert by_t[1.5].recall == 0.75
+    assert by_t[1.5].precision == 1.0  # both kept sets are pure now
+    # At 2.5 only r1 (3.0) survives: t1 recall 0.5, t2 keeps nothing (recall 0, precision undefined).
+    assert by_t[2.5].recall == 0.25  # (0.5 + 0.0) / 2
+    assert by_t[2.5].precision == 1.0  # averaged only over t1, the one case that kept a chunk
+    assert by_t[2.5].avg_retrieved == 0.5
+
+
+def test_rerank_threshold_sweep_empty_without_gold():
+    assert compute_rerank_threshold_sweep({}, {}) == []

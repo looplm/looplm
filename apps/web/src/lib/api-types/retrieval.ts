@@ -232,6 +232,15 @@ export interface LabelingPromptDefaults {
 
 // --- Per-stage deterministic retrieval metrics comparison ---
 
+export interface RerankThresholdPoint {
+  threshold: number;
+  precision?: number | null;
+  recall: number;
+  hit_rate: number;
+  avg_retrieved: number;
+  evaluated_cases: number;
+}
+
 export interface StageMetrics {
   stage: string;
   label: string;
@@ -243,6 +252,8 @@ export interface StageMetrics {
   mrr?: number | null;
   // Full per-stage metrics so the Overall block can render one retriever in detail.
   metrics?: RetrievalRunMetrics | null;
+  // Only set on the agentic_rerank stage: the rerankerScore-cutoff sweep for the threshold slider.
+  threshold_sweep?: RerankThresholdPoint[];
 }
 
 export interface ByStageCaseMetrics {

@@ -32,6 +32,8 @@ import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
 import { KSelector } from "@/components/retrieval/k-selector";
 import { RetrieverSelector } from "@/components/retrieval/retriever-selector";
+import { RerankThreshold } from "@/components/retrieval/rerank-threshold";
+import { SourceDescription } from "@/components/retrieval/source-description";
 import { ErrorNotice } from "@/components/error-notice";
 import { ComputedAt } from "@/components/retrieval/computed-at";
 
@@ -309,6 +311,11 @@ export default function RetrievalMetricsPanel({
     : byStage?.stages.find((s) => s.stage === selectedRetriever)?.metrics ?? null;
   const displayLoading = useBest ? loading : byStageLoading;
   const retrieverLabel = RETRIEVERS.find((r) => r.value === selectedRetriever)?.label;
+  // The rerankerScore threshold sweep, present only when the Agentic + rerank stage is selected.
+  const rerankSweep =
+    selectedRetriever === "agentic_rerank"
+      ? byStage?.stages.find((s) => s.stage === "agentic_rerank")?.threshold_sweep
+      : undefined;
 
   // Cutoffs available for the displayed retriever; the selected k falls back to the deepest when
   // unset or not present in this data. Drives the Overall cards/curve/per-case and the by-stage table.
@@ -415,22 +422,7 @@ export default function RetrievalMetricsPanel({
         </div>
       </div>
 
-      <p className="text-sm text-gray-500 dark:text-slate-400 mb-5 max-w-3xl">
-        {draft.source === "labels" ? (
-          <>
-            Measured against human chunk relevance labels vs. a live retrieval probe of the
-            connected index, per dataset. Recall@k = share of judged-relevant chunks the index
-            returns in the top-k; bpref and condensed nDCG stay fair while judging is still
-            incomplete.
-          </>
-        ) : (
-          <>
-            Measured against your test cases&apos; ground-truth source URLs, per eval run.
-            Recall@k = share of expected docs found in the top-k retrieved; nDCG rewards ranking
-            them high; MRR = how early the first relevant doc shows up.
-          </>
-        )}
-      </p>
+      <SourceDescription source={draft.source} />
 
       {error ? <ErrorNotice error={error} className="mb-4" /> : null}
 
@@ -465,6 +457,11 @@ export default function RetrievalMetricsPanel({
         </div>
       ) : (
         <>
+          {/* Score-threshold cutoff explorer — Agentic + rerank only. */}
+          {showByStage && rerankSweep && rerankSweep.length > 0 && (
+            <RerankThreshold sweep={rerankSweep} precisionTarget={targets?.precision ?? null} />
+          )}
+
           {/* Overall — the selected retriever, in detail. */}
           <OverallSection
             metrics={displayMetrics}

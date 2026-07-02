@@ -23,6 +23,7 @@ from app.models.chunk_labels import DEFAULT_SLICE, TestCaseLabelingStatus
 from app.models.evaluations import EvalResult, EvalRun
 from app.schemas.retrieval import (
     ByStageCaseMetrics,
+    RerankThresholdPoint,
     RetrievalCaseMetrics,
     RetrievalRunMetrics,
     SliceMetrics,
@@ -52,6 +53,55 @@ STAGE_LABELS: tuple[tuple[str, str], ...] = (
     ("agentic", "Agentic"),
     ("agentic_rerank", "Agentic + rerank"),
 )
+
+
+# Azure's semantic rerankerScore is a 0-4 scale; sweep it in 0.1 steps so the UI slider can pick a
+# score-threshold cutoff from the data. Cheap (set ops over the cases) so a fine grid is fine.
+RERANK_THRESHOLDS: tuple[float, ...] = tuple(round(i * 0.1, 1) for i in range(0, 41))
+
+
+def compute_rerank_threshold_sweep(
+    scores_by_test: dict[str, list[tuple[str, float]]],
+    relevant_by_test: dict[str, set[str]],
+    thresholds: tuple[float, ...] = RERANK_THRESHOLDS,
+) -> list[RerankThresholdPoint]:
+    """Macro precision/recall/kept-count as the rerankerScore cutoff sweeps the 0-4 scale.
+
+    For each threshold a case keeps the chunks scoring >= it. Recall and kept-count average over
+    every case with gold (an empty keep contributes recall 0); precision averages only over cases
+    that kept >= 1 chunk (precision is undefined on an empty keep). Denominator matches the stage's
+    macro-average, so the sweep and the @k cards agree on which cases count.
+    """
+    cases = [(tid, rel) for tid, rel in relevant_by_test.items() if rel]
+    n = len(cases)
+    if n == 0:
+        return []
+    points: list[RerankThresholdPoint] = []
+    for t in thresholds:
+        recalls: list[float] = []
+        precisions: list[float] = []
+        counts: list[int] = []
+        hits = 0
+        for tid, rel in cases:
+            kept = [cid for cid, sc in scores_by_test.get(tid, []) if sc >= t]
+            inter = len(set(kept) & rel)
+            recalls.append(inter / len(rel))
+            counts.append(len(kept))
+            if kept:
+                precisions.append(inter / len(kept))
+            if inter > 0:
+                hits += 1
+        points.append(
+            RerankThresholdPoint(
+                threshold=t,
+                precision=round(sum(precisions) / len(precisions), 4) if precisions else None,
+                recall=round(sum(recalls) / n, 4),
+                hit_rate=round(hits / n, 4),
+                avg_retrieved=round(sum(counts) / n, 4),
+                evaluated_cases=n,
+            )
+        )
+    return points
 
 
 def build_by_stage_metrics(

@@ -57,6 +57,7 @@ export type {
   AiJudgePreviewResponse,
   LabelingPromptDefaults,
   StageMetrics,
+  RerankThresholdPoint,
   ByStageCaseMetrics,
   ByStageMetricsResponse,
   RetrievalRunSummary,
