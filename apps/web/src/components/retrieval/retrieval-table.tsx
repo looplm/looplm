@@ -154,8 +154,10 @@ export function PerCaseResults({
                     {c.dataset_id ? (
                       <Link
                         href={`/datasets/${c.dataset_id}?highlight=${encodeURIComponent(c.test_id)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="truncate text-indigo-600 dark:text-indigo-400 hover:underline"
-                        title={`Open test case: ${c.input ?? c.test_id}`}
+                        title={`Open test case in a new tab: ${c.input ?? c.test_id}`}
                       >
                         {c.input || c.test_id}
                       </Link>
