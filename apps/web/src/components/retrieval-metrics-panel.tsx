@@ -17,7 +17,6 @@ import {
   type RetrievalRunRecord,
   type RetrievalTargets,
 } from "@/lib/api";
-import { usePermissions } from "@/components/permissions-context";
 import { EXPLAIN, METRICS, statusOf, type MetricDef } from "@/components/retrieval/constants";
 import { Info } from "@/components/retrieval/metric-card";
 import { OverallResults } from "@/components/retrieval/overall-results";
@@ -26,7 +25,6 @@ import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
 import { KSelector } from "@/components/retrieval/k-selector";
 import { ErrorNotice } from "@/components/error-notice";
 import { ComputedAt } from "@/components/retrieval/computed-at";
-import { RunMetadataEditor } from "@/components/retrieval/run-metadata-editor";
 
 type Source = "urls" | "labels";
 type GoldSource = "human" | "ai" | "both";
@@ -54,15 +52,17 @@ export default function RetrievalMetricsPanel({
   onRunSaved,
   viewRunId,
   onViewRunChange,
+  onDisplayedRunChange,
 }: {
   onRunSaved?: () => void;
   // The saved run to display (from the history list); null shows a fresh/empty panel.
   viewRunId?: string | null;
   // Asked to change which run is displayed (e.g. after a fresh compute snapshots a new run).
   onViewRunChange?: (id: string | null) => void;
+  // The run record currently displayed (labels path), so the page can render its annotate editor
+  // below the panel; null when nothing labels-based is shown.
+  onDisplayedRunChange?: (run: RetrievalRunRecord | null) => void;
 } = {}) {
-  const { canWrite } = usePermissions();
-  const canEdit = canWrite("pipeline");
 
   const [runs, setRuns] = useState<EvalRunListItem[]>([]);
   const [datasets, setDatasets] = useState<{ id: string; name: string }[]>([]);
@@ -97,6 +97,8 @@ export default function RetrievalMetricsPanel({
   onRunSavedRef.current = onRunSaved;
   const onViewRunChangeRef = useRef(onViewRunChange);
   onViewRunChangeRef.current = onViewRunChange;
+  const onDisplayedRunChangeRef = useRef(onDisplayedRunChange);
+  onDisplayedRunChangeRef.current = onDisplayedRunChange;
   // The run id whose stored data is currently displayed, so we don't refetch a run we just showed
   // (including the one a fresh compute just snapshotted).
   const loadedRunIdRef = useRef<string | null>(null);
@@ -257,6 +259,11 @@ export default function RetrievalMetricsPanel({
       });
     return () => controller.abort();
   }, [viewRunId]);
+
+  // Surface the displayed run to the page, which renders its annotate editor below the panel.
+  useEffect(() => {
+    onDisplayedRunChangeRef.current?.(savedRun);
+  }, [savedRun]);
 
   const canCompute = draft.source === "labels" ? draft.datasetIds.length > 0 : runs.length > 0;
   const dirty = !applied || !sameSettings(draft, applied) || applied.refresh;
@@ -431,16 +438,6 @@ export default function RetrievalMetricsPanel({
       ) : (
         <>
           {/* Overall — the single best-available ranking. */}
-          {savedRun && displaySource === "labels" && (
-            <RunMetadataEditor
-              run={savedRun}
-              canEdit={canEdit}
-              onSaved={(u) => {
-                setSavedRun(u);
-                onRunSaved?.();
-              }}
-            />
-          )}
           {loading && !overall ? (
             <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
               Computing retrieval metrics...

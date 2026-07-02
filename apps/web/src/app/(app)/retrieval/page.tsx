@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { usePermissions } from "@/components/permissions-context";
 import { RetrievalTargetsConfig } from "@/components/retrieval/targets-config";
+import { RunMetadataEditor } from "@/components/retrieval/run-metadata-editor";
 import RetrievalMetricsPanel from "@/components/retrieval-metrics-panel";
 import { RunHistory } from "@/components/retrieval/run-history";
+import type { RetrievalRunRecord } from "@/lib/api";
 
 export default function RetrievalPage() {
   const { canWrite } = usePermissions();
@@ -14,6 +16,8 @@ export default function RetrievalPage() {
   // The saved run shown in the metrics panel. Defaults to the latest (set by RunHistory once loaded)
   // and follows clicks in the history list.
   const [viewRunId, setViewRunId] = useState<string | null>(null);
+  // The run currently displayed in the panel — annotated in the editor below the panel.
+  const [displayedRun, setDisplayedRun] = useState<RetrievalRunRecord | null>(null);
 
   return (
     <div>
@@ -25,7 +29,14 @@ export default function RetrievalPage() {
         agentic path.
       </p>
 
-      <details className="mb-10 group">
+      <RetrievalMetricsPanel
+        onRunSaved={() => setRunsRefresh((n) => n + 1)}
+        viewRunId={viewRunId}
+        onViewRunChange={setViewRunId}
+        onDisplayedRunChange={setDisplayedRun}
+      />
+
+      <details className="mt-10 group">
         <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
           <span className="text-gray-400 transition-transform group-open:rotate-90">▸</span>
           <h2 className="text-xl font-bold">Targets</h2>
@@ -38,13 +49,20 @@ export default function RetrievalPage() {
         <RetrievalTargetsConfig canEdit={canEdit} />
       </details>
 
-      <RetrievalMetricsPanel
-        onRunSaved={() => setRunsRefresh((n) => n + 1)}
-        viewRunId={viewRunId}
-        onViewRunChange={setViewRunId}
-      />
+      {displayedRun && (
+        <div className="mt-10">
+          <RunMetadataEditor
+            run={displayedRun}
+            canEdit={canEdit}
+            onSaved={(u) => {
+              setDisplayedRun(u);
+              setRunsRefresh((n) => n + 1);
+            }}
+          />
+        </div>
+      )}
 
-      <details className="mt-12 group">
+      <details className="mt-10 group">
         <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
           <span className="text-gray-400 transition-transform group-open:rotate-90">▸</span>
           <h2 className="text-xl font-bold">Saved runs</h2>
