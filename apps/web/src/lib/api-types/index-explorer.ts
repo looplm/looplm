@@ -49,6 +49,46 @@ export interface IndexTreeResponse {
   documents: IndexTreeDocument[];
 }
 
+// --- Files tab: file-type overview + filename search → chunks-of-a-file ---
+
+export interface IndexFileTypeValue {
+  value: string;
+  count: number;
+}
+
+export interface IndexFileTypesResponse {
+  field: string | null;
+  values: IndexFileTypeValue[];
+}
+
+export interface IndexFileMatch {
+  key: string;
+  value: string;
+  label: string;
+  kind: "attachment" | "page";
+  chunk_count: number;
+  url: string | null;
+}
+
+export interface IndexFileListResponse {
+  data: IndexFileMatch[];
+}
+
+export interface IndexFileChunk {
+  id: string;
+  index: number;
+  ordinal: string | null;
+  title: string | null;
+  url: string | null;
+  snippet: string | null;
+}
+
+export interface IndexFileChunksResponse {
+  label: string;
+  ordinal_available: boolean;
+  documents: IndexFileChunk[];
+}
+
 // --- Grouping advisor: LLM-suggested hierarchy + metadata-quality hints ---
 
 export interface GroupingLevel {

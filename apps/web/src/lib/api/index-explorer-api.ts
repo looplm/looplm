@@ -3,6 +3,9 @@
  */
 
 import type {
+  IndexFileChunksResponse,
+  IndexFileListResponse,
+  IndexFileTypesResponse,
   IndexGroupingSuggestionResponse,
   IndexProviderOption,
   IndexSummary,
@@ -35,6 +38,47 @@ export const getIndexTree = (params: {
   }
   if (params.limit != null) q.set("limit", String(params.limit));
   return request<IndexTreeResponse>(`/api/index-explorer/tree?${q.toString()}`);
+};
+
+// --- Files tab: file-type overview + filename search → chunks-of-a-file ---
+
+// The file/content types present in the index, with counts (field=null if none).
+export const getIndexFileTypes = (providerId: string) =>
+  request<IndexFileTypesResponse>(
+    `/api/index-explorer/file-types?provider_id=${encodeURIComponent(providerId)}`,
+  );
+
+// Distinct files (attachments + pages) whose filename/title matches the query.
+export const searchIndexFiles = (params: {
+  providerId: string;
+  q: string;
+  limit?: number;
+}) => {
+  const qs = new URLSearchParams({ provider_id: params.providerId, q: params.q });
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  return request<IndexFileListResponse>(`/api/index-explorer/files?${qs.toString()}`);
+};
+
+// Every chunk of one file, in reading order.
+export const getIndexFileChunks = (params: {
+  providerId: string;
+  fileKey: string;
+  fileValue: string;
+  kind: string;
+  label?: string;
+  limit?: number;
+}) => {
+  const qs = new URLSearchParams({
+    provider_id: params.providerId,
+    file_key: params.fileKey,
+    file_value: params.fileValue,
+    kind: params.kind,
+  });
+  if (params.label != null) qs.set("label", params.label);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  return request<IndexFileChunksResponse>(
+    `/api/index-explorer/file-chunks?${qs.toString()}`,
+  );
 };
 
 // Read the cached LLM grouping suggestion (no LLM call; suggestion may be null).

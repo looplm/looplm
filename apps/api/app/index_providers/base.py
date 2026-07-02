@@ -61,6 +61,28 @@ class CorpusDoc:
     # (``@search.score`` for Azure — the RRF fusion score in hybrid mode). ``None`` for
     # facet/sample paths, which don't rank.
     score: float | None = None
+    # Raw value of the chunk's ordinal/sequence field (``chunk_index``, ``page_number``…),
+    # when the doc came from the file-chunk listing path. Used to render/verify reading
+    # order. ``None`` on every other path (the field may not exist in the index).
+    ordinal: str | int | float | None = None
+
+
+@dataclass
+class FileMatch:
+    """A distinct file surfaced by a filename/title search.
+
+    ``key`` is the backend field the file is identified by and ``value`` the value
+    to filter chunks on (an ``attachment_filename`` for attachments, a parent id
+    such as ``page_id`` for pages). ``label`` is what to show the user, ``kind``
+    distinguishes the two, and ``chunk_count`` is how many chunks the file has.
+    """
+
+    key: str
+    value: str
+    label: str
+    kind: str  # "attachment" | "page"
+    chunk_count: int
+    url: str | None = None
 
 
 # Retrieval strategies a provider can pool candidates from. ``keyword`` is BM25/full-text,
@@ -151,6 +173,26 @@ class BaseIndexProvider(ABC):
         Optional capability — backends without it keep the empty default.
         """
         return {}
+
+    async def search_files(self, query: str, limit: int) -> list["FileMatch"]:
+        """Distinct files whose filename/title matches ``query``, with chunk counts.
+
+        A "file" is an attachment (grouped by its filename) or a page (grouped by
+        its parent id, labelled by title). Powers the Data Sources filename search.
+        Optional capability — backends without it keep the empty default.
+        """
+        return []
+
+    async def list_file_chunks(
+        self, key: str, value: str, kind: str, limit: int
+    ) -> list[CorpusDoc]:
+        """Every chunk of one file (``key == value``), in reading order.
+
+        Ordered by the chunk's ordinal/sequence field when the index has one, else
+        left in index order. ``kind`` is the :class:`FileMatch` kind the value came
+        from. Optional capability — backends without it keep the empty default.
+        """
+        return []
 
     async def sample_corpus(self, n: int, *, stratify_by: str | None = None) -> list[dict]:
         """Up to ``n`` full-field chunk documents, sampled across the whole corpus.

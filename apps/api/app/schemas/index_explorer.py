@@ -87,6 +87,67 @@ class IndexTreeResponse(BaseModel):
     documents: list[IndexTreeDocument] = Field(default_factory=list)
 
 
+# --- Files tab: file-type overview + filename search → chunks-of-a-file ---
+
+
+class IndexFileTypeValue(BaseModel):
+    """One file/content type present in the index, with its chunk count."""
+
+    value: str
+    count: int
+
+
+class IndexFileTypesResponse(BaseModel):
+    """The detected file-type dimension and its value distribution.
+
+    ``field`` is ``None`` when the index exposes no suitable facetable type field —
+    the UI then hides the section.
+    """
+
+    field: Optional[str] = None
+    values: list[IndexFileTypeValue] = Field(default_factory=list)
+
+
+class IndexFileMatch(BaseModel):
+    """A distinct file surfaced by a filename/title search.
+
+    ``key``/``value`` are the backend field and value to filter its chunks on;
+    ``kind`` is ``attachment`` or ``page``.
+    """
+
+    key: str
+    value: str
+    label: str
+    kind: Literal["attachment", "page"]
+    chunk_count: int
+    url: Optional[str] = None
+
+
+class IndexFileListResponse(BaseModel):
+    data: list[IndexFileMatch] = Field(default_factory=list)
+
+
+class IndexFileChunk(BaseModel):
+    """One chunk of a file, in reading order."""
+
+    id: str
+    index: int  # 0-based position in the returned (ordered) list
+    ordinal: Optional[str] = None  # raw value of the index's ordinal field, if any
+    title: Optional[str] = None
+    url: Optional[str] = None
+    snippet: Optional[str] = None
+
+
+class IndexFileChunksResponse(BaseModel):
+    """Every chunk of one file, ordered. ``ordinal_available`` is False when the
+    index has no ordinal field, so chunks are in index order rather than reading
+    order."""
+
+    label: str
+    ordinal_available: bool
+    documents: list[IndexFileChunk] = Field(default_factory=list)
+
+
 # --- Grouping advisor: LLM-suggested hierarchy + metadata-quality hints ---
 
 

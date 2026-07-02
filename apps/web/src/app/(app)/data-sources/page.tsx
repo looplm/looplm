@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { getIndexExplorerProviders } from "@/lib/api";
 import type { IndexProviderOption } from "@/lib/api-types/index-explorer";
 import { ChunkQualityTab } from "@/components/data-sources/chunk-quality-tab";
+import { FileSearchTab } from "@/components/data-sources/file-search-tab";
 import { IndexBreakdownTab } from "@/components/data-sources/index-breakdown-tab";
 import { WantedSourcesPanel } from "@/components/data-sources/wanted-sources-panel";
 import { ProviderManager } from "@/components/coverage/provider-manager";
@@ -13,10 +14,11 @@ import { usePermissions } from "@/components/permissions-context";
 const inputCls =
   "px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm";
 
-type Tab = "breakdown" | "wanted" | "quality";
+type Tab = "breakdown" | "files" | "wanted" | "quality";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "breakdown", label: "Index breakdown" },
+  { id: "files", label: "Files" },
   { id: "wanted", label: "Wanted sources" },
   { id: "quality", label: "Chunk quality" },
 ];
@@ -118,6 +120,7 @@ export default function DataSourcesPage() {
           {tab === "breakdown" && providerId && (
             <IndexBreakdownTab providerId={providerId} canEdit={canEdit} />
           )}
+          {tab === "files" && providerId && <FileSearchTab providerId={providerId} />}
           {tab === "wanted" && providerId && (
             <WantedSourcesPanel providerId={providerId} canEdit={canEdit} />
           )}

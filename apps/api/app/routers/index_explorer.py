@@ -21,7 +21,14 @@ from app.index_providers.registry import build_index_provider
 from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.models.user import User
+from app.index_providers.chunk_quality_common import pick_field
 from app.schemas.index_explorer import (
+    IndexFileChunk,
+    IndexFileChunksResponse,
+    IndexFileListResponse,
+    IndexFileMatch,
+    IndexFileTypeValue,
+    IndexFileTypesResponse,
     IndexGroupingSuggestion,
     IndexGroupingSuggestionRequest,
     IndexGroupingSuggestionResponse,
@@ -45,6 +52,13 @@ router = APIRouter(
 )
 
 _MAX_SAMPLE = 200
+
+# File-type dimension candidates for the "Files" tab overview, in priority order.
+# Detected among the index's *facetable* fields so the distribution can be faceted.
+_FILETYPE_FIELDS = [
+    "content_type", "doc_type", "file_type", "mimetype", "mime_type",
+    "format", "source_type", "type",
+]
 
 
 def _provider_error(e: Exception) -> HTTPException:
@@ -198,6 +212,108 @@ async def tree(
         raise _provider_error(e)
     finally:
         await client.aclose()
+
+
+@router.get("/file-types", response_model=IndexFileTypesResponse)
+async def file_types(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """The file/content-type dimension of the index and its chunk-count distribution.
+
+    Detects a facetable type field by name; returns ``field=null`` when the index
+    exposes none. Example chunks per type reuse the ``/tree`` endpoint.
+    """
+    provider = await _get_provider_or_404(db, provider_id, project)
+    client = build_index_provider(provider)
+    try:
+        keys = await client.list_partition_keys()
+        field = pick_field({k.key for k in keys}, _FILETYPE_FIELDS)
+        if field is None:
+            return IndexFileTypesResponse(field=None, values=[])
+        values = await client.get_partition_distribution(field)
+    except Exception as e:
+        raise _provider_error(e)
+    finally:
+        await client.aclose()
+    return IndexFileTypesResponse(
+        field=field,
+        values=[IndexFileTypeValue(value=v.value, count=v.doc_count) for v in values],
+    )
+
+
+@router.get("/files", response_model=IndexFileListResponse)
+async def files(
+    provider_id: UUID,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Distinct files (attachments + pages) whose filename/title matches ``q``."""
+    provider = await _get_provider_or_404(db, provider_id, project)
+    client = build_index_provider(provider)
+    try:
+        matches = await client.search_files(q, limit)
+    except Exception as e:
+        raise _provider_error(e)
+    finally:
+        await client.aclose()
+    return IndexFileListResponse(
+        data=[
+            IndexFileMatch(
+                key=m.key,
+                value=m.value,
+                label=m.label,
+                kind=m.kind,  # type: ignore[arg-type]
+                chunk_count=m.chunk_count,
+                url=m.url,
+            )
+            for m in matches
+        ]
+    )
+
+
+@router.get("/file-chunks", response_model=IndexFileChunksResponse)
+async def file_chunks(
+    provider_id: UUID,
+    file_key: str = Query(..., min_length=1),
+    file_value: str = Query(..., min_length=1),
+    kind: str = Query("attachment"),
+    label: str | None = Query(None),
+    limit: int = Query(500, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Every chunk of one file, in reading order (by the index's ordinal field)."""
+    provider = await _get_provider_or_404(db, provider_id, project)
+    client = build_index_provider(provider)
+    try:
+        docs = await client.list_file_chunks(file_key, file_value, kind, limit)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400, detail={"error": {"code": "BAD_REQUEST", "message": str(e)}}
+        )
+    except Exception as e:
+        raise _provider_error(e)
+    finally:
+        await client.aclose()
+    return IndexFileChunksResponse(
+        label=label or file_value,
+        ordinal_available=any(d.ordinal is not None for d in docs),
+        documents=[
+            IndexFileChunk(
+                id=d.id,
+                index=i,
+                ordinal=None if d.ordinal is None else str(d.ordinal),
+                title=d.title,
+                url=d.url,
+                snippet=d.snippet,
+            )
+            for i, d in enumerate(docs)
+        ],
+    )
 
 
 @router.get("/grouping-suggestion", response_model=IndexGroupingSuggestionResponse)

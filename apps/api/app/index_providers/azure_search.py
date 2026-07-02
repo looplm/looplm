@@ -19,6 +19,7 @@ from azure.search.documents.indexes.aio import SearchIndexClient
 from app.index_providers.base import (
     BaseIndexProvider,
     CorpusDoc,
+    FileMatch,
     PartitionKey,
     PartitionValue,
 )
@@ -468,6 +469,27 @@ class AzureSearchIndexProvider(BaseIndexProvider):
             out.extend(page)
             skip += self._SCAN_PAGE
         return out[:n]
+
+    # ── Filename search → chunks-of-a-file (Data Sources "Files" tab) ────────────
+    # The implementation lives in ``azure_search_files`` to keep this file focused;
+    # these thin methods delegate, passing the client and field metadata it needs.
+
+    async def _file_field_map(self) -> dict[str, str | None]:
+        from app.index_providers.azure_search_files import build_file_field_map
+
+        return build_file_field_map(await self._get_fields())
+
+    async def search_files(self, query: str, limit: int) -> list[FileMatch]:
+        from app.index_providers.azure_search_files import search_files
+
+        return await search_files(self, query, limit)
+
+    async def list_file_chunks(
+        self, key: str, value: str, kind: str, limit: int
+    ) -> list[CorpusDoc]:
+        from app.index_providers.azure_search_files import list_file_chunks
+
+        return await list_file_chunks(self, key, value, kind, limit)
 
     async def aclose(self) -> None:
         await self._search_client.close()
