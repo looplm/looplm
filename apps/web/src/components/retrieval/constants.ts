@@ -31,6 +31,8 @@ export const EXPLAIN = {
     "A recall-style score that ignores chunks nobody has judged yet, so it stays fair when only part of the pool is labeled. Best used while judging is still incomplete.",
   cndcg:
     "Like nDCG, but it only counts chunks that have actually been judged — so unlabeled chunks don't distort the ranking score during incomplete judging.",
+  method:
+    "Which retrieval method produced these numbers. The Overall view scores a single ranking; use By stage to compare each retrieval method (sparse, dense, RRF, reranked) side by side.",
 };
 
 export type Accent = "indigo" | "violet" | "sky" | "emerald" | "amber";
