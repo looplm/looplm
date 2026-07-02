@@ -103,13 +103,15 @@ export interface PerKMetric {
   agg: (m: RetrievalRunMetrics) => Record<string, number>;
   perCase: (c: RetrievalCaseMetrics) => Record<string, number>;
   target: (t: RetrievalTargets) => number | null | undefined;
+  // The metric's own explanation, shown on the chart + per-case info icons for that metric.
+  info: string;
 }
 
 export const PERK_METRICS: PerKMetric[] = [
-  { key: "recall", label: "Recall", agg: (m) => m.recall_at_k, perCase: (c) => c.recall_at_k, target: (t) => t.recall },
-  { key: "precision", label: "Precision", agg: (m) => m.precision_at_k, perCase: (c) => c.precision_at_k ?? {}, target: (t) => t.precision },
-  { key: "ndcg", label: "nDCG", agg: (m) => m.ndcg_at_k, perCase: (c) => c.ndcg_at_k, target: (t) => t.ndcg },
-  { key: "hit_rate", label: "Hit-rate", agg: (m) => m.hit_rate_at_k, perCase: (c) => c.hit_rate_at_k ?? {}, target: (t) => t.hit_rate },
+  { key: "recall", label: "Recall", agg: (m) => m.recall_at_k, perCase: (c) => c.recall_at_k, target: (t) => t.recall, info: EXPLAIN.recall },
+  { key: "precision", label: "Precision", agg: (m) => m.precision_at_k, perCase: (c) => c.precision_at_k ?? {}, target: (t) => t.precision, info: EXPLAIN.precision },
+  { key: "ndcg", label: "nDCG", agg: (m) => m.ndcg_at_k, perCase: (c) => c.ndcg_at_k, target: (t) => t.ndcg, info: EXPLAIN.ndcg },
+  { key: "hit_rate", label: "Hit-rate", agg: (m) => m.hit_rate_at_k, perCase: (c) => c.hit_rate_at_k ?? {}, target: (t) => t.hit_rate, info: EXPLAIN.hit },
 ];
 
 export const RETRIEVER_NOTES: Record<string, string> = {

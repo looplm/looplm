@@ -101,6 +101,7 @@ export function PerCaseResults({
   metricLabel = "Recall",
   perCase = (c) => c.recall_at_k,
   metricTarget,
+  metricInfo = EXPLAIN.caseRecall,
 }: {
   cases: RetrievalCaseMetrics[];
   largestK: number;
@@ -109,6 +110,8 @@ export function PerCaseResults({
   metricLabel?: string;
   perCase?: (c: RetrievalCaseMetrics) => Record<string, number>;
   metricTarget: number | null;
+  // Tooltip for the metric column header.
+  metricInfo?: string;
 }) {
   return (
     <div className="lg:col-span-2 flex flex-col rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
@@ -116,7 +119,7 @@ export function PerCaseResults({
         <span className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-slate-500">
           Per-case results
         </span>
-        <span className="text-[11px] text-gray-400 dark:text-slate-500">worst recall first</span>
+        <span className="text-[11px] text-gray-400 dark:text-slate-500">sorted by worst recall</span>
       </div>
       <div className="overflow-y-auto flex-1 max-h-[360px]">
         <table className="w-full text-xs">
@@ -130,7 +133,7 @@ export function PerCaseResults({
                 <span className="inline-flex items-center">Retr<Info text={EXPLAIN.retrieved} /></span>
               </th>
               <th className="text-right font-medium px-3 py-2">
-                <span className="inline-flex items-center">{metricLabel}@{largestK}<Info text={EXPLAIN.caseRecall} /></span>
+                <span className="inline-flex items-center">{metricLabel}@{largestK}<Info text={metricInfo} /></span>
               </th>
               <th className="text-right font-medium px-2 py-2">
                 <span className="inline-flex items-center">1st hit<Info text={EXPLAIN.firstHit} /></span>

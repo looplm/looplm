@@ -129,6 +129,7 @@ export function OverallResults({
           ks={overall.ks}
           target={metricTarget}
           label={metric.label}
+          info={metric.info}
         />
         <PerCaseResults
           cases={overall.cases}
@@ -137,6 +138,7 @@ export function OverallResults({
           metricLabel={metric.label}
           perCase={metric.perCase}
           metricTarget={metricTarget}
+          metricInfo={metric.info}
         />
       </div>
     </>
