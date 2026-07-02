@@ -22,14 +22,18 @@ export default function RetrievalPage() {
         agentic path.
       </p>
 
-      <section className="mb-10">
-        <h2 className="text-xl font-bold mb-1">Targets</h2>
-        <p className="text-sm text-gray-500 dark:text-slate-400 mb-4 max-w-3xl">
+      <details className="mb-10 group">
+        <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+          <span className="text-gray-400 transition-transform group-open:rotate-90">▸</span>
+          <h2 className="text-xl font-bold">Targets</h2>
+          <span className="text-sm text-gray-400 dark:text-slate-500">(pass thresholds)</span>
+        </summary>
+        <p className="text-sm text-gray-500 dark:text-slate-400 mt-2 mb-4 max-w-3xl">
           Set the pass threshold for each metric (recall@k, nDCG@k, MRR, hit-rate@k, precision@k).
           Cards turn green when a measured value meets its target.
         </p>
         <RetrievalTargetsConfig canEdit={canEdit} />
-      </section>
+      </details>
 
       <RetrievalMetricsPanel onRunSaved={() => setRunsRefresh((n) => n + 1)} />
 

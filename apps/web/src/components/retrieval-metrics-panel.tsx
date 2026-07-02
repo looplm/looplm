@@ -18,13 +18,8 @@ import {
 } from "@/lib/api";
 import { usePermissions } from "@/components/permissions-context";
 import { EXPLAIN, METRICS, statusOf, type MetricDef } from "@/components/retrieval/constants";
-import { Info, MetricCard } from "@/components/retrieval/metric-card";
-import { RecallCurve } from "@/components/retrieval/recall-curve";
-import {
-  PerCaseResults,
-  ReliabilityBanner,
-  SliceBreakdown,
-} from "@/components/retrieval/retrieval-table";
+import { Info } from "@/components/retrieval/metric-card";
+import { OverallResults } from "@/components/retrieval/overall-results";
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
 import { KSelector } from "@/components/retrieval/k-selector";
@@ -34,13 +29,12 @@ import { RunMetadataEditor } from "@/components/retrieval/run-metadata-editor";
 
 type Source = "urls" | "labels";
 type GoldSource = "human" | "ai" | "both";
-type LabelsView = "overall" | "byStage";
 
 // The settings the user is editing. Computation only runs against the *applied* copy (below).
+// The labels path always computes and shows both the Overall and By-stage views together.
 type Draft = {
   source: Source;
   goldSource: GoldSource;
-  labelsView: LabelsView;
   datasetIds: string[];
   runId: string | null;
 };
@@ -51,7 +45,6 @@ type Applied = Draft & { refresh: boolean; nonce: number };
 const sameSettings = (a: Draft, b: Draft): boolean =>
   a.source === b.source &&
   a.goldSource === b.goldSource &&
-  a.labelsView === b.labelsView &&
   a.runId === b.runId &&
   a.datasetIds.length === b.datasetIds.length &&
   a.datasetIds.every((id) => b.datasetIds.includes(id));
@@ -67,7 +60,6 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
   const [draft, setDraft] = useState<Draft>({
     source: "labels",
     goldSource: "human",
-    labelsView: "overall",
     datasetIds: [],
     runId: null,
   });
@@ -81,6 +73,9 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
   const [byStage, setByStage] = useState<ByStageMetricsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // By-stage runs as its own (slower) job so the Overall numbers render as soon as they're ready.
+  const [byStageLoading, setByStageLoading] = useState(false);
+  const [byStageError, setByStageError] = useState<unknown>(null);
   // Display-only cutoff selection — never part of Draft/Applied, so changing it doesn't recompute.
   const [selectedK, setSelectedK] = useState<number | null>(null);
   // The run auto-snapshotted from the current Overall compute, for inline metadata annotation.
@@ -112,81 +107,102 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
   }, []);
 
   // Fetch only when the applied snapshot changes (Compute / Recompute) — never on draft edits.
+  // Labels path computes BOTH views as two independent detached jobs, so the fast Overall numbers
+  // render without waiting on the slower by-stage pool. Each compute runs server-side and is polled
+  // (short HTTP calls), so a reload/proxy timeout can't reset the socket mid-flight; a failed job
+  // carries the server error + traceback (debug), surfaced via ErrorNotice.
   useEffect(() => {
     if (!applied) return;
-    const isByStage = applied.source === "labels" && applied.labelsView === "byStage";
     const controller = new AbortController();
-    setLoading(true);
+    const signal = controller.signal;
     setError(null);
     setSavedRun(null);
 
-    // The labels-path compute (live index probe + embeddings) runs detached on the server so a
-    // reload / proxy timeout can't reset the socket mid-flight. Poll the job until it settles;
-    // a failed job carries the server error + traceback (debug), surfaced via ErrorNotice.
-    const runLabels = async () => {
-      const job = await startRetrievalCompute(
-        {
-          dataset_ids: applied.datasetIds,
-          gold_source: applied.goldSource,
-          view: isByStage ? "byStage" : "overall",
-          refresh: applied.refresh,
-        },
-        controller.signal,
-      );
-      await pollRetrievalCompute(job.id, controller.signal);
-      if (controller.signal.aborted) return;
-      // The job wrote the result into the server cache; read it back without recomputing.
-      if (isByStage) {
-        const d = await getRetrievalByStageMetrics(
-          { datasetIds: applied.datasetIds, goldSource: applied.goldSource, refresh: false },
-          controller.signal,
+    // Overall (labels: detached job → warm-cache read; urls: direct stored-aggregate read).
+    const runOverall = async (): Promise<RetrievalRunMetrics | null> => {
+      if (applied.source !== "labels") {
+        const m = await getRetrievalMetrics(
+          { runId: applied.runId ?? undefined, source: "urls", refresh: applied.refresh },
+          signal,
         );
-        if (!controller.signal.aborted) setByStage(d);
-        return;
+        if (signal.aborted) return null;
+        setOverall(m);
+        if (!applied.runId && m.run_id) setDraftField("runId", m.run_id);
+        return m;
       }
+      const job = await startRetrievalCompute(
+        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, view: "overall", refresh: applied.refresh },
+        signal,
+      );
+      await pollRetrievalCompute(job.id, signal);
+      if (signal.aborted) return null;
       const m = await getRetrievalMetrics(
         { datasetIds: applied.datasetIds, source: "labels", goldSource: applied.goldSource, refresh: false },
-        controller.signal,
+        signal,
       );
-      if (controller.signal.aborted) return;
-      setOverall(m);
-      // Auto-snapshot the result into durable history (once per Compute/Recompute).
-      if (m.available && savedNonceRef.current !== applied.nonce) {
-        savedNonceRef.current = applied.nonce;
-        try {
-          const rec = await createRetrievalRun(
-            { dataset_ids: applied.datasetIds, gold_source: applied.goldSource },
-            controller.signal,
-          );
-          if (!controller.signal.aborted) {
-            setSavedRun(rec);
-            onRunSavedRef.current?.();
-          }
-        } catch {
-          /* history snapshot is best-effort; the metrics still render */
+      if (!signal.aborted) setOverall(m);
+      return m;
+    };
+
+    const runByStage = async () => {
+      const job = await startRetrievalCompute(
+        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, view: "byStage", refresh: applied.refresh },
+        signal,
+      );
+      await pollRetrievalCompute(job.id, signal);
+      if (signal.aborted) return;
+      const d = await getRetrievalByStageMetrics(
+        { datasetIds: applied.datasetIds, goldSource: applied.goldSource, refresh: false },
+        signal,
+      );
+      if (!signal.aborted) setByStage(d);
+    };
+
+    // Snapshot into durable history once both views are computed, so the saved run captures the
+    // by-stage breakdown too (server reads it from the warm cache). Best-effort.
+    const snapshot = async (m: RetrievalRunMetrics | null) => {
+      if (!m?.available || savedNonceRef.current === applied.nonce) return;
+      savedNonceRef.current = applied.nonce;
+      try {
+        const rec = await createRetrievalRun(
+          { dataset_ids: applied.datasetIds, gold_source: applied.goldSource },
+          signal,
+        );
+        if (!signal.aborted) {
+          setSavedRun(rec);
+          onRunSavedRef.current?.();
         }
+      } catch {
+        /* history snapshot is best-effort; the metrics still render */
       }
     };
 
-    const runUrls = async () => {
-      // URLs path reads a stored eval-run aggregate (no live probe) — fast enough to stay inline.
-      const m = await getRetrievalMetrics(
-        { runId: applied.runId ?? undefined, source: "urls", refresh: applied.refresh },
-        controller.signal,
-      );
-      if (controller.signal.aborted) return;
-      setOverall(m);
-      if (!applied.runId && m.run_id) setDraftField("runId", m.run_id);
-    };
-
-    (applied.source === "labels" ? runLabels() : runUrls())
+    setLoading(true);
+    const overallP = runOverall()
       .catch((e) => {
-        if (controller.signal.aborted || e?.name === "AbortError") return;
-        setError(e);
+        if (!signal.aborted && e?.name !== "AbortError") setError(e);
+        return null;
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!signal.aborted) setLoading(false);
       });
+
+    if (applied.source === "labels") {
+      setByStageError(null);
+      setByStageLoading(true);
+      const byStageP = runByStage()
+        .catch((e) => {
+          if (!signal.aborted && e?.name !== "AbortError") setByStageError(e);
+        })
+        .finally(() => {
+          if (!signal.aborted) setByStageLoading(false);
+        });
+      Promise.all([overallP, byStageP]).then(([m]) => {
+        if (!signal.aborted) void snapshot(m);
+      });
+    } else {
+      setByStage(null);
+    }
     return () => controller.abort();
   }, [applied]);
 
@@ -202,12 +218,12 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
     setApplied((prev) => (prev ? { ...prev, refresh: true, nonce: prev.nonce + 1 } : prev));
   };
 
-  const showingByStage = applied?.source === "labels" && applied.labelsView === "byStage";
-  const computedAt = showingByStage ? byStage?.computed_at : overall?.computed_at;
+  const showByStage = applied?.source === "labels";
+  const computedAt = overall?.computed_at ?? byStage?.computed_at;
 
   // Cutoffs available for the current view; the selected k falls back to the deepest when unset or
   // not present in this data. Drives the Overall cards/slices/per-case and the by-stage table.
-  const availableKs = (showingByStage ? byStage?.ks : overall?.ks) ?? [];
+  const availableKs = overall?.ks ?? byStage?.ks ?? [];
   const maxK = availableKs.length ? Math.max(...availableKs) : 10;
   const activeK = selectedK != null && availableKs.includes(selectedK) ? selectedK : maxK;
   const lk = String(activeK);
@@ -219,7 +235,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
         ? METRICS.filter((m) => statusOf(cardValue(m), targets[m.key]) === "good").length
         : 0,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overall, targets],
+    [overall, targets, lk],
   );
 
   const toggleClass = (active: boolean) =>
@@ -245,15 +261,6 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
             ))}
           </div>
           {draft.source === "labels" && (
-            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700 text-xs">
-              {(["overall", "byStage"] as const).map((v) => (
-                <button key={v} onClick={() => setDraftField("labelsView", v)} className={toggleClass(draft.labelsView === v)}>
-                  {v === "overall" ? "Overall" : "By stage"}
-                </button>
-              ))}
-            </div>
-          )}
-          {draft.source === "labels" && (
             <div
               className="flex items-center gap-1.5 text-xs"
               title="Which chunk labels resolve the gold: human only, the AI judge only, or both"
@@ -268,7 +275,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
               </div>
             </div>
           )}
-          {overall?.available && targets && !showingByStage && (
+          {overall?.available && targets && (
             <span
               className={`text-xs font-medium px-2 py-1 rounded-full ${
                 metCount === METRICS.length
@@ -342,7 +349,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
       {applied && (computedAt || loading) && (
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-3 flex-wrap">
-            {(showingByStage ? byStage?.available : overall?.available) && (
+            {(overall?.available || byStage?.available) && (
               <KSelector ks={availableKs} value={activeK} onChange={setSelectedK} />
             )}
             {dirty && applied && !loading && (
@@ -360,30 +367,9 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
           Choose your source, datasets and gold above, then press{" "}
           <span className="font-medium text-gray-700 dark:text-slate-200">Compute metrics</span>.
         </div>
-      ) : showingByStage ? (
-        <ByStageComparison data={byStage} loading={loading} goldSource={applied.goldSource} selectedK={activeK} />
-      ) : loading && !overall ? (
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
-          Computing retrieval metrics...
-        </div>
-      ) : !overall || !overall.available ? (
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
-          {applied.source === "labels" ? (
-            <>
-              No chunk relevance labels for these datasets yet, or no index is connected to probe.
-              Judge candidates on the Labeling page (and connect an index provider), then this
-              measures the index&apos;s recall against those human labels.
-            </>
-          ) : (
-            <>
-              No labeled retrieval data for this run. Add expected source URLs to test cases
-              and run an evaluation with a <span className="font-mono">contains_urls</span>{" "}
-              check to measure recall.
-            </>
-          )}
-        </div>
       ) : (
         <>
+          {/* Overall — the single best-available ranking. */}
           {savedRun && applied.source === "labels" && (
             <RunMetadataEditor
               run={savedRun}
@@ -394,99 +380,48 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
               }}
             />
           )}
+          {loading && !overall ? (
+            <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
+              Computing retrieval metrics...
+            </div>
+          ) : !overall || !overall.available ? (
+            <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
+              {applied.source === "labels" ? (
+                <>
+                  No chunk relevance labels for these datasets yet, or no index is connected to
+                  probe. Judge candidates on the Labeling page (and connect an index provider), then
+                  this measures the index&apos;s recall against those human labels.
+                </>
+              ) : (
+                <>
+                  No labeled retrieval data for this run. Add expected source URLs to test cases and
+                  run an evaluation with a <span className="font-mono">contains_urls</span> check to
+                  measure recall.
+                </>
+              )}
+            </div>
+          ) : (
+            <OverallResults
+              overall={overall}
+              targets={targets}
+              activeK={activeK}
+              source={applied.source}
+            />
+          )}
 
-          <div className="text-xs text-gray-400 dark:text-slate-500 mb-3">
-            {overall.evaluated_cases} of {overall.total_cases} cases have{" "}
-            {applied.source === "labels" ? "relevance labels" : "ground-truth URLs"}
-          </div>
-
-          {/* Which retrieval method these numbers reflect. The Overall view collapses to a single
-              ranking, so name it explicitly and point to the by-stage comparison. */}
-          <div className="flex items-start gap-2 rounded-lg bg-gray-50 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800 px-3 py-2 mb-3 text-xs text-gray-500 dark:text-slate-400">
-            <Info text={EXPLAIN.method} />
-            {applied.source === "labels" ? (
-              <span>
-                <span className="font-medium text-gray-600 dark:text-slate-300">Method:</span>{" "}
-                your live index&apos;s best-available ranking. It prefers the semantic reranker,
-                falling back to hybrid (RRF), vector, then keyword.{" "}
-                <button
-                  onClick={() => setDraftField("labelsView", "byStage")}
-                  className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                  Switch to By stage
-                </button>{" "}
-                to score each method (Sparse, Dense, RRF, Reranked) separately.
-              </span>
-            ) : (
-              <span>
-                <span className="font-medium text-gray-600 dark:text-slate-300">Method:</span>{" "}
-                your app&apos;s final logged retrieval order, which is post-rerank. A
-                before-vs-after-rerank split is not available on this path.
-              </span>
-            )}
-          </div>
-
-          <ReliabilityBanner count={overall.evaluated_cases} source={applied.source} />
-
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-            {METRICS.map((m) => (
-              <MetricCard
-                key={m.key}
-                label={m.label(activeK)}
-                value={cardValue(m)}
-                target={targets ? targets[m.key] : null}
-                kind={m.kind}
-                hint={m.hint}
-                accent={m.accent}
-                info={m.info}
+          {/* By stage — each retrieval method scored separately (labels path only). */}
+          {showByStage && (
+            <div className="mt-10">
+              <h3 className="text-base font-semibold mb-3">By stage</h3>
+              {byStageError ? <ErrorNotice error={byStageError} className="mb-3" /> : null}
+              <ByStageComparison
+                data={byStage}
+                loading={byStageLoading}
+                goldSource={applied.goldSource}
+                selectedK={activeK}
               />
-            ))}
-          </div>
-
-          {/* Incomplete-judgment-safe metrics: only on the human-label path, where the pool
-              is partly judged. Shown without targets — they're a robustness cross-check. */}
-          {applied.source === "labels" && overall.bpref != null && (
-            <div className="mb-4">
-              <div className="flex items-center text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-slate-500 mb-2">
-                Robust to incomplete judging
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <MetricCard
-                  label="bpref"
-                  value={overall.bpref}
-                  target={null}
-                  kind="pct"
-                  hint="ignores unjudged"
-                  accent="violet"
-                  info={EXPLAIN.bpref}
-                />
-                <MetricCard
-                  label={`cNDCG@${activeK}`}
-                  value={overall.condensed_ndcg_at_k?.[lk]}
-                  target={null}
-                  kind="pct"
-                  hint="judged-only ranking"
-                  accent="violet"
-                  info={EXPLAIN.cndcg}
-                />
-              </div>
             </div>
           )}
-
-          {overall.slices && overall.slices.length > 0 && (
-            <SliceBreakdown slices={overall.slices} largestK={activeK} />
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
-            <RecallCurve recall={overall.recall_at_k} ks={overall.ks} target={targets ? targets.recall : null} />
-
-            <PerCaseResults
-              cases={overall.cases}
-              largestK={activeK}
-              lk={lk}
-              recallTarget={targets ? targets.recall : null}
-            />
-          </div>
         </>
       )}
     </div>
