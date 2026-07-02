@@ -2,6 +2,7 @@
 
 import logging
 import time
+import traceback
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -48,6 +49,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     from app.models.chunk_quality import ChunkQualityRun  # noqa: F401 — ensure table is created
     from app.models.retrieval_runs import RetrievalRun  # noqa: F401 — ensure table is created
+    from app.models.retrieval_metrics_jobs import (  # noqa: F401 — ensure table is created
+        RetrievalMetricsJob,
+    )
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -105,6 +109,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     _label,
                 )
         await session.commit()
+
+    # Reconcile retrieval-metrics compute jobs orphaned by a restart/crash: their in-process
+    # asyncio task is gone, so a still-'running'/'pending' row would spin the panel forever.
+    from app.models.retrieval_metrics_jobs import RetrievalMetricsJob as _RMJob
+    async with async_session() as session:
+        result = await session.execute(
+            _sa_update(_RMJob)
+            .where(_RMJob.status.in_(("pending", "running")))
+            .values(
+                status="failed",
+                error="Compute interrupted by server restart",
+                completed_at=_dt.now(_tz.utc),
+            )
+        )
+        await session.commit()
+        if result.rowcount:
+            logger.warning("Reconciled %d retrieval compute job(s) orphaned by restart", result.rowcount)
 
     # Start batch eval poller
     from app.services.batch_poller import start_batch_poller, stop_batch_poller
@@ -185,10 +206,16 @@ async def not_found_handler(request: Request, exc):
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=500,
-        content={"error": {"code": "INTERNAL_ERROR", "message": "An internal error occurred"}},
-    )
+    error: dict = {"code": "INTERNAL_ERROR", "message": "An internal error occurred"}
+    # In debug only, surface the real exception and traceback so the frontend can offer a
+    # "copy error details" affordance. Never leak this in production (the message is sanitized).
+    if settings.debug:
+        error["message"] = str(exc) or error["message"]
+        error["type"] = type(exc).__name__
+        error["trace"] = "".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)
+        )
+    return JSONResponse(status_code=500, content={"error": error})
 
 
 # --- Routers ---

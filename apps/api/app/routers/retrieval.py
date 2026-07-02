@@ -8,6 +8,7 @@ read from already-synced span input/output — no re-sync required.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from uuid import UUID
 
@@ -16,13 +17,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_project, require_section, require_write
+from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
 from app.models.evaluations import EvalResult, EvalRun
 from app.models.models import Integration, Trace
 from app.models.project import Project
+from app.models.retrieval_metrics_jobs import RetrievalMetricsJob
+from app.models.user import User
 from app.schemas.retrieval import (
     ByStageMetricsResponse,
+    RetrievalComputeJob,
+    RetrievalComputeStart,
     RetrievalPipelineResponse,
     RetrievalRunMetrics,
     RetrievalTargets,
@@ -35,6 +40,7 @@ from app.services.retrieval_labels_metrics import (
     resolve_slices,
 )
 from app.services.retrieval_metrics_aggregate import aggregate_run_retrieval_metrics
+from app.services.retrieval_metrics_job import run_metrics_job
 from app.services.retrieval_pipeline_aggregate import build_retrieval_pipeline_aggregate
 from app.services.retrieval_targets import (
     SETTINGS_KEY as TARGETS_SETTINGS_KEY,
@@ -51,6 +57,24 @@ router = APIRouter(
 # Cap the window so the per-trace pipeline reconstruction stays bounded. The most recent
 # traces are the relevant ones for "what does the pipeline look like now".
 _MAX_TRACES = 500
+
+# In-process handles to running compute tasks (mirrors eval_jobs._eval_tasks). Best-effort: a
+# restart drops them and the lifespan reconcile marks orphaned rows failed.
+_metrics_jobs: dict[UUID, asyncio.Task] = {}
+
+
+def _job_view(job: RetrievalMetricsJob) -> RetrievalComputeJob:
+    return RetrievalComputeJob(
+        id=str(job.id),
+        status=job.status,
+        view=job.view,
+        gold_source=job.gold_source,
+        dataset_ids=list(job.dataset_ids or []),
+        progress_current=job.progress_current,
+        progress_total=job.progress_total,
+        error=job.error,
+        trace=job.trace,
+    )
 
 
 @router.get("/graph", response_model=RetrievalPipelineResponse)
@@ -158,6 +182,55 @@ async def get_retrieval_metrics_by_stage(
     ids = dataset_ids or ([dataset_id] if dataset_id else None)
     datasets = await resolve_datasets(db, project, ids)
     return await compute_by_stage_metrics(db, project, datasets, gold_source, refresh)
+
+
+@router.post("/retrieval-metrics/compute", response_model=RetrievalComputeJob)
+async def start_retrieval_metrics_compute(
+    body: RetrievalComputeStart,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """Start a detached labels-path metrics compute and return the job to poll.
+
+    The live probe + embedding work runs in a background task that writes its result into the Redis
+    metrics cache; the panel then reads it via the plain ``retrieval-metrics`` endpoint. Keeping the
+    compute off the request means a reload / proxy timeout can't reset the socket mid-flight (which
+    surfaced as a phantom 500). ``view`` is ``overall`` (default) or ``byStage``.
+    """
+    view = "byStage" if body.view == "byStage" else "overall"
+    job = RetrievalMetricsJob(
+        project_id=project.id,
+        created_by=user.id,
+        view=view,
+        gold_source=body.gold_source,
+        dataset_ids=list(body.dataset_ids or []),
+        status="pending",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    task = asyncio.create_task(run_metrics_job(job.id, refresh=body.refresh))
+    _metrics_jobs[job.id] = task
+    task.add_done_callback(lambda _t, jid=job.id: _metrics_jobs.pop(jid, None))
+    return _job_view(job)
+
+
+@router.get("/retrieval-metrics/compute/{job_id}", response_model=RetrievalComputeJob)
+async def get_retrieval_metrics_compute(
+    job_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Poll a compute job's status; carries the error + traceback (debug) when it failed."""
+    job = await db.get(RetrievalMetricsJob, job_id)
+    if job is None or job.project_id != project.id:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Compute job not found"}},
+        )
+    return _job_view(job)
 
 
 @router.get("/targets", response_model=RetrievalTargets)

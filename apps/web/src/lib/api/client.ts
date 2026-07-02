@@ -8,6 +8,49 @@ import type { Project } from "../api-types";
 // to the API. Absolute overrides still work if NEXT_PUBLIC_API_URL is explicitly set.
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+/**
+ * Error thrown by {@link request} for any non-OK response. Carries the structured error the API
+ * returned so the UI can show the message and — in debug builds, where the API includes it — the
+ * full server-side traceback (via {@link ApiError.details}).
+ */
+export class ApiError extends Error {
+  code: string | number;
+  status: number;
+  method: string;
+  path: string;
+  errorType?: string;
+  trace?: string;
+
+  constructor(init: {
+    code: string | number;
+    message: string;
+    status: number;
+    method: string;
+    path: string;
+    errorType?: string;
+    trace?: string;
+  }) {
+    super(`[${init.code}] ${init.message}`);
+    this.name = "ApiError";
+    this.code = init.code;
+    this.status = init.status;
+    this.method = init.method;
+    this.path = init.path;
+    this.errorType = init.errorType;
+    this.trace = init.trace;
+  }
+
+  /** A copy-pasteable block: request line, error, and the server traceback when present. */
+  get details(): string {
+    const lines = [
+      `${this.method} ${this.path}`,
+      `${this.message}${this.errorType ? ` (${this.errorType})` : ""}`,
+    ];
+    if (this.trace) lines.push("", this.trace.trimEnd());
+    return lines.join("\n");
+  }
+}
+
 // --- Auth token management ---
 
 const TOKEN_KEY = "looplm_token";
@@ -157,7 +200,15 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     const errorObj = body?.error || (typeof detail === "object" && detail !== null ? detail.error : null);
     const code = errorObj?.code || res.status;
     const message = errorObj?.message || (typeof detail === "string" ? detail : null) || res.statusText || "Unknown error";
-    throw new Error(`[${code}] ${message}`);
+    throw new ApiError({
+      code,
+      message,
+      status: res.status,
+      method: (options?.method ?? "GET").toUpperCase(),
+      path,
+      errorType: errorObj?.type,
+      trace: errorObj?.trace,
+    });
   }
   if (res.status === 204) return undefined as T;
   return res.json();

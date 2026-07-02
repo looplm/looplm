@@ -356,3 +356,24 @@ export interface RetrievalRunMetadataUpdate {
   index_version?: string | null;
   notes?: string | null;
 }
+
+export interface RetrievalComputeStartBody {
+  dataset_ids: string[];
+  gold_source: "human" | "ai" | "both";
+  view: "overall" | "byStage";
+  refresh?: boolean;
+}
+
+export type RetrievalComputeStatus = "pending" | "running" | "completed" | "failed";
+
+export interface RetrievalComputeJob {
+  id: string;
+  status: RetrievalComputeStatus;
+  view: "overall" | "byStage";
+  gold_source: "human" | "ai" | "both";
+  dataset_ids: string[];
+  progress_current?: number | null;
+  progress_total?: number | null;
+  error?: string | null;
+  trace?: string | null;
+}

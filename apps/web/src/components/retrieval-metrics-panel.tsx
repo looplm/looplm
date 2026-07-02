@@ -8,6 +8,8 @@ import {
   getRetrievalByStageMetrics,
   getRetrievalMetrics,
   getRetrievalTargets,
+  pollRetrievalCompute,
+  startRetrievalCompute,
   type ByStageMetricsResponse,
   type EvalRunListItem,
   type RetrievalRunMetrics,
@@ -25,6 +27,7 @@ import {
 } from "@/components/retrieval/retrieval-table";
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
+import { ErrorNotice } from "@/components/error-notice";
 import { ComputedAt } from "@/components/retrieval/computed-at";
 import { RunMetadataEditor } from "@/components/retrieval/run-metadata-editor";
 
@@ -76,7 +79,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
   const [overall, setOverall] = useState<RetrievalRunMetrics | null>(null);
   const [byStage, setByStage] = useState<ByStageMetricsResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   // The run auto-snapshotted from the current Overall compute, for inline metadata annotation.
   const [savedRun, setSavedRun] = useState<RetrievalRunRecord | null>(null);
   const savedNonceRef = useRef<number | null>(null);
@@ -113,52 +116,70 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
     setLoading(true);
     setError(null);
     setSavedRun(null);
-    const run = async () => {
+
+    // The labels-path compute (live index probe + embeddings) runs detached on the server so a
+    // reload / proxy timeout can't reset the socket mid-flight. Poll the job until it settles;
+    // a failed job carries the server error + traceback (debug), surfaced via ErrorNotice.
+    const runLabels = async () => {
+      const job = await startRetrievalCompute(
+        {
+          dataset_ids: applied.datasetIds,
+          gold_source: applied.goldSource,
+          view: isByStage ? "byStage" : "overall",
+          refresh: applied.refresh,
+        },
+        controller.signal,
+      );
+      await pollRetrievalCompute(job.id, controller.signal);
+      if (controller.signal.aborted) return;
+      // The job wrote the result into the server cache; read it back without recomputing.
       if (isByStage) {
         const d = await getRetrievalByStageMetrics(
-          { datasetIds: applied.datasetIds, goldSource: applied.goldSource, refresh: applied.refresh },
+          { datasetIds: applied.datasetIds, goldSource: applied.goldSource, refresh: false },
           controller.signal,
         );
         if (!controller.signal.aborted) setByStage(d);
-      } else {
-        const m = await getRetrievalMetrics(
-          applied.source === "labels"
-            ? {
-                datasetIds: applied.datasetIds,
-                source: "labels",
-                goldSource: applied.goldSource,
-                refresh: applied.refresh,
-              }
-            : { runId: applied.runId ?? undefined, source: "urls", refresh: applied.refresh },
-          controller.signal,
-        );
-        if (controller.signal.aborted) return;
-        setOverall(m);
-        if (applied.source !== "labels" && !applied.runId && m.run_id) {
-          setDraftField("runId", m.run_id);
-        }
-        // Auto-snapshot the labels-path result into durable history (once per Compute/Recompute).
-        if (applied.source === "labels" && m.available && savedNonceRef.current !== applied.nonce) {
-          savedNonceRef.current = applied.nonce;
-          try {
-            const rec = await createRetrievalRun(
-              { dataset_ids: applied.datasetIds, gold_source: applied.goldSource },
-              controller.signal,
-            );
-            if (!controller.signal.aborted) {
-              setSavedRun(rec);
-              onRunSavedRef.current?.();
-            }
-          } catch {
-            /* history snapshot is best-effort; the metrics still render */
+        return;
+      }
+      const m = await getRetrievalMetrics(
+        { datasetIds: applied.datasetIds, source: "labels", goldSource: applied.goldSource, refresh: false },
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      setOverall(m);
+      // Auto-snapshot the result into durable history (once per Compute/Recompute).
+      if (m.available && savedNonceRef.current !== applied.nonce) {
+        savedNonceRef.current = applied.nonce;
+        try {
+          const rec = await createRetrievalRun(
+            { dataset_ids: applied.datasetIds, gold_source: applied.goldSource },
+            controller.signal,
+          );
+          if (!controller.signal.aborted) {
+            setSavedRun(rec);
+            onRunSavedRef.current?.();
           }
+        } catch {
+          /* history snapshot is best-effort; the metrics still render */
         }
       }
     };
-    run()
+
+    const runUrls = async () => {
+      // URLs path reads a stored eval-run aggregate (no live probe) — fast enough to stay inline.
+      const m = await getRetrievalMetrics(
+        { runId: applied.runId ?? undefined, source: "urls", refresh: applied.refresh },
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      setOverall(m);
+      if (!applied.runId && m.run_id) setDraftField("runId", m.run_id);
+    };
+
+    (applied.source === "labels" ? runLabels() : runUrls())
       .catch((e) => {
         if (controller.signal.aborted || e?.name === "AbortError") return;
-        setError(e.message);
+        setError(e);
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -308,11 +329,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
         )}
       </p>
 
-      {error && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
-          {error}
-        </div>
-      )}
+      {error ? <ErrorNotice error={error} className="mb-4" /> : null}
 
       {/* Results header: when the numbers were computed + a Recompute action. */}
       {applied && (computedAt || loading) && (
@@ -371,6 +388,32 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
           <div className="text-xs text-gray-400 dark:text-slate-500 mb-3">
             {overall.evaluated_cases} of {overall.total_cases} cases have{" "}
             {applied.source === "labels" ? "relevance labels" : "ground-truth URLs"}
+          </div>
+
+          {/* Which retrieval method these numbers reflect. The Overall view collapses to a single
+              ranking, so name it explicitly and point to the by-stage comparison. */}
+          <div className="flex items-start gap-2 rounded-lg bg-gray-50 dark:bg-slate-800/40 border border-gray-100 dark:border-slate-800 px-3 py-2 mb-3 text-xs text-gray-500 dark:text-slate-400">
+            <Info text={EXPLAIN.method} />
+            {applied.source === "labels" ? (
+              <span>
+                <span className="font-medium text-gray-600 dark:text-slate-300">Method:</span>{" "}
+                your live index&apos;s best-available ranking. It prefers the semantic reranker,
+                falling back to hybrid (RRF), vector, then keyword.{" "}
+                <button
+                  onClick={() => setDraftField("labelsView", "byStage")}
+                  className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                  Switch to By stage
+                </button>{" "}
+                to score each method (Sparse, Dense, RRF, Reranked) separately.
+              </span>
+            ) : (
+              <span>
+                <span className="font-medium text-gray-600 dark:text-slate-300">Method:</span>{" "}
+                your app&apos;s final logged retrieval order, which is post-rerank. A
+                before-vs-after-rerank split is not available on this path.
+              </span>
+            )}
           </div>
 
           <ReliabilityBanner count={overall.evaluated_cases} source={applied.source} />

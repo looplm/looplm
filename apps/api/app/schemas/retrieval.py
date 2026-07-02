@@ -519,3 +519,31 @@ class RetrievalRunRecord(RetrievalRunSummary):
 
 class RetrievalRunListResponse(BaseModel):
     data: list[RetrievalRunSummary] = Field(default_factory=list)
+
+
+class RetrievalComputeStart(BaseModel):
+    """Request to start a detached labels-path metrics compute."""
+
+    dataset_ids: list[str] = Field(default_factory=list)
+    gold_source: str = "human"
+    view: str = "overall"  # overall | byStage
+    # Recompute forces a fresh live probe + embed; a plain Compute may reuse a warm cache.
+    refresh: bool = False
+
+
+class RetrievalComputeJob(BaseModel):
+    """Status of a detached metrics compute; the panel polls this until it settles.
+
+    ``trace`` is only populated on failure in debug builds (mirrors the sanitized 500 handler), so
+    the panel can offer a copy-the-stack affordance.
+    """
+
+    id: str
+    status: str  # pending | running | completed | failed
+    view: str = "overall"
+    gold_source: str = "human"
+    dataset_ids: list[str] = Field(default_factory=list)
+    progress_current: int | None = None
+    progress_total: int | None = None
+    error: str | None = None
+    trace: str | None = None

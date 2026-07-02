@@ -2,7 +2,7 @@
  * Retrieval API — the aggregate retrieval pipeline flow chart.
  */
 
-import { request } from "./client";
+import { ApiError, request } from "./client";
 import type { AnalyticsFilters } from "./analytics-api";
 import type {
   RetrievalPipelineResponse,
@@ -22,6 +22,8 @@ import type {
   RetrievalRunRecord,
   RetrievalRunCreateBody,
   RetrievalRunMetadataUpdate,
+  RetrievalComputeStartBody,
+  RetrievalComputeJob,
 } from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
@@ -74,6 +76,46 @@ export const getRetrievalByStageMetrics = (
     `/api/pipeline/retrieval-metrics/by-stage${qs ? `?${qs}` : ""}`,
     { signal },
   );
+};
+
+// --- Detached metrics compute (fire-and-poll) ---
+
+// Start a labels-path metrics compute as a background job. Returns the job to poll; the result
+// lands in the server cache, read back via getRetrievalMetrics / getRetrievalByStageMetrics.
+export const startRetrievalCompute = (body: RetrievalComputeStartBody, signal?: AbortSignal) =>
+  request<RetrievalComputeJob>(`/api/pipeline/retrieval-metrics/compute`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    signal,
+  });
+
+export const getRetrievalComputeJob = (jobId: string, signal?: AbortSignal) =>
+  request<RetrievalComputeJob>(`/api/pipeline/retrieval-metrics/compute/${jobId}`, { signal });
+
+// Poll a compute job until it settles. Resolves on completion; on failure throws an ApiError
+// carrying the server error + traceback (debug) so the caller can render + copy it. Aborting the
+// signal rejects with an AbortError. Short HTTP calls only — a reload/timeout can't wedge this.
+export const pollRetrievalCompute = async (
+  jobId: string,
+  signal: AbortSignal,
+  intervalMs = 1500,
+): Promise<void> => {
+  for (;;) {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const job = await getRetrievalComputeJob(jobId, signal);
+    if (job.status === "completed") return;
+    if (job.status === "failed") {
+      throw new ApiError({
+        code: "COMPUTE_FAILED",
+        message: job.error || "Compute failed",
+        status: 500,
+        method: "POST",
+        path: "/api/pipeline/retrieval-metrics/compute",
+        trace: job.trace ?? undefined,
+      });
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
 };
 
 // --- Saved retrieval runs (durable history) ---
