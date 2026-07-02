@@ -7,15 +7,21 @@ type ConditionData = Pick<
   "team_filter" | "tag_filter" | "context_filters" | "message_count" | "has_summary" | "metadata"
 >;
 
+// Metadata keys used for internal bookkeeping (not user-facing conditions).
+const INTERNAL_META_KEYS = new Set(["labeling_queries"]);
+
 export function TestCaseConditions({ data }: { data: ConditionData }) {
   const { team_filter, tag_filter, context_filters, message_count, has_summary, metadata } = data;
+  const visibleMetadata = Object.entries(metadata || {}).filter(
+    ([k]) => !INTERNAL_META_KEYS.has(k)
+  );
   const hasAnything =
     team_filter.length > 0 ||
     tag_filter.length > 0 ||
     Object.keys(context_filters).length > 0 ||
     message_count != null ||
     has_summary ||
-    Object.keys(metadata || {}).length > 0;
+    visibleMetadata.length > 0;
 
   if (!hasAnything) {
     return <span className="text-xs text-gray-400 dark:text-slate-500">No conditions</span>;
@@ -59,12 +65,19 @@ export function TestCaseConditions({ data }: { data: ConditionData }) {
           {t}
         </span>
       ))}
-      {Object.entries(metadata || {}).map(([k, v]) => (
+      {visibleMetadata.map(([k, v]) => (
         <span
           key={k}
           className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
         >
-          {k}: {typeof v === "boolean" ? (v ? "yes" : "no") : String(v)}
+          {k}:{" "}
+          {typeof v === "boolean"
+            ? v
+              ? "yes"
+              : "no"
+            : typeof v === "object" && v !== null
+              ? JSON.stringify(v)
+              : String(v)}
         </span>
       ))}
     </div>
