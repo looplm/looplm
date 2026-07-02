@@ -50,6 +50,7 @@ STAGE_LABELS: tuple[tuple[str, str], ...] = (
     ("hybrid", "RRF"),
     ("semantic", "Reranked"),
     ("agentic", "Agentic"),
+    ("agentic_rerank", "Agentic + rerank"),
 )
 
 

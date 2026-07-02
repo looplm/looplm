@@ -31,6 +31,7 @@ from app.routers.chunk_labels._helpers import (
 )
 from app.schemas.retrieval import ByStageMetricsResponse, RetrievalRunMetrics
 from app.services.analysis_llm import merge_llm_settings
+from app.services.chunk_pool import AGENTIC_RERANK_DEPTH
 from app.services.chunk_agreement import resolve_gold
 from app.services.query_embedding import build_query_embedder
 from app.services.retrieval_metrics_aggregate import (
@@ -315,14 +316,28 @@ async def compute_by_stage_metrics(
                 if agentic:
                     break
             pool, _computed, connected = await assemble_case_pool(
-                db, project, test_id, str(query or ""), agentic_queries=agentic, refresh=refresh
+                db,
+                project,
+                test_id,
+                str(query or ""),
+                agentic_queries=agentic,
+                rerank_depth=AGENTIC_RERANK_DEPTH,
+                refresh=refresh,
             )
             if not connected:
                 return
             for head in heads:
-                ranked = sorted(
-                    (c for c in pool.chunks if head in c.ranks), key=lambda c: c.ranks[head]
-                )
+                if head == "agentic_rerank":
+                    # Ordered by semantic-reranker score (desc), not by a positional rank.
+                    ranked = sorted(
+                        (c for c in pool.chunks if c.agentic_rerank_score is not None),
+                        key=lambda c: c.agentic_rerank_score,
+                        reverse=True,
+                    )
+                else:
+                    ranked = sorted(
+                        (c for c in pool.chunks if head in c.ranks), key=lambda c: c.ranks[head]
+                    )
                 if ranked:
                     retrieved_by_stage[head][test_id] = [c.chunk_id for c in ranked]
 

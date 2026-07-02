@@ -89,6 +89,7 @@ export const RETRIEVERS: { value: string; label: string }[] = [
   { value: "hybrid", label: "RRF" },
   { value: "semantic", label: "Reranked" },
   { value: "agentic", label: "Agentic" },
+  { value: "agentic_rerank", label: "Agentic + rerank" },
   { value: "best", label: "Best available" },
 ];
 
@@ -119,6 +120,7 @@ export const RETRIEVER_NOTES: Record<string, string> = {
   vector: "dense vector (embedding) similarity only.",
   hybrid: "reciprocal-rank fusion (RRF) of sparse + dense.",
   semantic: "the semantic reranker's final ranking.",
-  agentic: "the agentic retrieval path (multi-query planning).",
+  agentic: "the agentic retrieval path (multi-query planning), ordered by best retrieval position.",
+  agentic_rerank: "the agentic pool reordered by the semantic (L2) reranker score, top 50 per sub-query.",
   best: "your live index's best-available ranking. It prefers the semantic reranker, falling back to hybrid (RRF), vector, then keyword.",
 };

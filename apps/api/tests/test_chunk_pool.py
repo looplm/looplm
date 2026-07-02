@@ -144,6 +144,54 @@ async def test_agentic_queries_fold_new_chunks_with_provenance():
 
 
 @pytest.mark.asyncio
+async def test_agentic_rerank_scores_by_semantic_and_keeps_best_across_subqueries():
+    # The semantic head returns reranker scores per sub-query; the pool keeps the best per chunk
+    # and never gives reranked hits a positional "agentic" rank.
+    provider = QueryAwareProvider(
+        {
+            ("base", "keyword"): [_doc("b1")],
+            ("sub-a", "keyword"): [_doc("b1"), _doc("a1")],
+            ("sub-a", "semantic"): [_doc("a1", score=3.5), _doc("b1", score=1.0)],
+            ("sub-b", "semantic"): [_doc("b1", score=2.5), _doc("z1", score=0.4)],
+        }
+    )
+    res = await assemble_pool(
+        provider,
+        "base",
+        modes=["keyword"],
+        agentic_queries=[AgenticQuery("sub-a"), AgenticQuery("sub-b")],
+        agentic_rerank_depth=50,
+    )
+    by_id = {c.chunk_id: c for c in res.chunks}
+    # b1 scored 1.0 (sub-a) and 2.5 (sub-b) → best kept.
+    assert by_id["b1"].agentic_rerank_score == 2.5
+    assert by_id["a1"].agentic_rerank_score == 3.5
+    # A chunk only the rerank pass surfaced enters the pool with a score but no positional rank,
+    # so it can't inflate the positional-union "agentic" stage.
+    assert by_id["z1"].agentic_rerank_score == 0.4
+    assert "agentic" not in by_id["z1"].ranks
+    assert "agentic_rerank" in by_id["z1"].provenance
+    assert "agentic_rerank" in res.heads_ran
+
+
+@pytest.mark.asyncio
+async def test_agentic_rerank_skipped_without_depth():
+    # Without agentic_rerank_depth the semantic-scoring pass never runs, even if agentic queries do.
+    provider = QueryAwareProvider(
+        {
+            ("base", "keyword"): [_doc("b1")],
+            ("sub", "keyword"): [_doc("a1")],
+            ("sub", "semantic"): [_doc("a1", score=3.0)],
+        }
+    )
+    res = await assemble_pool(
+        provider, "base", modes=["keyword"], agentic_queries=[AgenticQuery("sub")]
+    )
+    assert all(c.agentic_rerank_score is None for c in res.chunks)
+    assert "agentic_rerank" not in res.heads_ran
+
+
+@pytest.mark.asyncio
 async def test_agentic_does_not_overwrite_base_head_ranks():
     # The base query ranks "shared" at keyword #2; an agentic query ranks it #1. The base
     # per-head rank must stay #2 (authoritative for the badge); agentic rank is tracked apart.

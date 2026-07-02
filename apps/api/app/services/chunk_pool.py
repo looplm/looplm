@@ -33,6 +33,11 @@ DEFAULT_POOL_DEPTH = 10
 # (safety/adversarial). Pools these to ~30-40 unique chunks. Slices not listed use the default.
 SLICE_POOL_DEPTH = {"safety": 35, "adversarial": 35}
 
+# Candidate depth for the agentic-rerank pass: each planned sub-query is re-run with the semantic
+# (L2) reranker and the top results are scored. 50 matches Azure AI Search's semantic-ranker
+# window (it reranks at most the top 50 L1 candidates of a query), so we ask for exactly that.
+AGENTIC_RERANK_DEPTH = 50
+
 
 @dataclass
 class AgenticQuery:
@@ -69,6 +74,10 @@ class PooledChunk:
     # The agentic sub-queries that surfaced this chunk, in the order they first did. Empty unless
     # agentic pooling ran. Drives the per-chunk "found by query X" display.
     agentic_queries: list[str] = field(default_factory=list)
+    # Best Azure semantic-reranker score (0-4) this chunk earned across the agentic sub-queries,
+    # or None if the agentic-rerank pass didn't score it. Orders the "agentic_rerank" stage — a
+    # relevance reordering of the agentic candidates, as opposed to the positional-rank union.
+    agentic_rerank_score: float | None = None
 
     def _seen(self, head: str, rank: int) -> None:
         """Record that ``head`` surfaced this chunk at ``rank`` (keeping the best/first)."""
@@ -92,6 +101,17 @@ class PooledChunk:
             self.ranks["agentic"] = rank
         if query and query not in self.agentic_queries:
             self.agentic_queries.append(query)
+
+    def _seen_agentic_rerank(self, score: float) -> None:
+        """Record a semantic-reranker score from the agentic-rerank pass (keeping the best).
+
+        This is a relevance score, not a rank position, so it doesn't touch ``ranks``; it lands in
+        ``agentic_rerank_score`` and orders the ``agentic_rerank`` stage on its own.
+        """
+        if "agentic_rerank" not in self.provenance:
+            self.provenance.append("agentic_rerank")
+        if self.agentic_rerank_score is None or score > self.agentic_rerank_score:
+            self.agentic_rerank_score = score
 
 
 @dataclass
@@ -181,6 +201,33 @@ def _merge_hit(
         existing.score = d.score
 
 
+def _merge_rerank_hit(pool: dict[str, PooledChunk], d: Any, *, score: float) -> None:
+    """Fold one agentic-rerank hit into the pool, recording its semantic-reranker score.
+
+    Unlike :func:`_merge_hit`, this never assigns a positional rank — the reranked list is ordered
+    by score, and it must not inflate the positional-union "agentic" stage. A chunk the rerank pass
+    surfaces that no other head found still enters the pool (a legitimate reranked candidate).
+    """
+    existing = pool.get(d.id)
+    if existing is None:
+        chunk = PooledChunk(
+            chunk_id=d.id,
+            title=_coalesce(d.title),
+            url=_coalesce(d.url),
+            content_preview=_coalesce(d.snippet),
+            score=d.score,
+        )
+        chunk._seen_agentic_rerank(score)
+        pool[d.id] = chunk
+        return
+    existing._seen_agentic_rerank(score)
+    existing.title = existing.title or _coalesce(d.title)
+    existing.url = existing.url or _coalesce(d.url)
+    existing.content_preview = existing.content_preview or _coalesce(d.snippet)
+    if existing.score is None:
+        existing.score = d.score
+
+
 async def assemble_pool(
     provider: BaseIndexProvider | None,
     query: str,
@@ -191,6 +238,7 @@ async def assemble_pool(
     filters: dict[str, str] | None = None,
     query_vector: list[float] | None = None,
     agentic_queries: Iterable[AgenticQuery] | None = None,
+    agentic_rerank_depth: int | None = None,
 ) -> PoolResult:
     """Build the deduped candidate pool for one query.
 
@@ -205,6 +253,12 @@ async def assemble_pool(
     agentic retriever would surface, not just the bare question. Their per-head failures are not
     re-reported (the base pass already did), and they never overwrite the base question's per-head
     ranks.
+
+    When ``agentic_rerank_depth`` is also set, each sub-query is additionally re-run through the
+    semantic (L2) reranker at that depth, and the best reranker score per chunk is recorded in
+    ``agentic_rerank_score`` (provenance ``agentic_rerank``). This models "agentic retrieve →
+    rerank" without disturbing the positional-union ``agentic`` stage: reranked-only chunks get a
+    score but no positional rank. Skipped silently when the index has no semantic configuration.
 
     ``provider`` may be ``None`` (no index connected), in which case the pool is just the
     trace chunks — still useful, just not augmented.
@@ -235,9 +289,10 @@ async def assemble_pool(
                 if d.id:
                     _merge_hit(pool, d, mode=mode, rank=rank, agentic_query=None)
 
+    agentic_list = list(agentic_queries) if agentic_queries else []
     agentic_ran = False
-    if provider is not None and agentic_queries:
-        for aq in agentic_queries:
+    if provider is not None and agentic_list:
+        for aq in agentic_list:
             if not aq.text.strip():
                 continue
             for mode in modes:
@@ -253,6 +308,27 @@ async def assemble_pool(
                         _merge_hit(pool, d, mode=None, rank=rank, agentic_query=aq.text)
     if agentic_ran:
         heads_ran.append("agentic")
+
+    # Agentic-rerank: re-run each sub-query through the semantic reranker at a deeper window and
+    # keep the best score per chunk. Ordered by score (not position) into the "agentic_rerank"
+    # stage. Silent when the index has no semantic config (the semantic head raises).
+    agentic_rerank_ran = False
+    if provider is not None and agentic_list and agentic_rerank_depth:
+        for aq in agentic_list:
+            if not aq.text.strip():
+                continue
+            try:
+                docs = await provider.search_documents(
+                    aq.text, agentic_rerank_depth, filters, mode="semantic", query_vector=aq.vector
+                )
+            except Exception:  # no semantic config / transient error — skip this pass quietly.
+                continue
+            for d in docs:
+                if d.id and isinstance(d.score, (int, float)):
+                    agentic_rerank_ran = True
+                    _merge_rerank_hit(pool, d, score=float(d.score))
+    if agentic_rerank_ran:
+        heads_ran.append("agentic_rerank")
 
     return PoolResult(
         chunks=list(pool.values()), heads_ran=heads_ran, heads_failed=heads_failed

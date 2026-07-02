@@ -368,8 +368,13 @@ def _agentic_signature(queries: list[str]) -> str:
     return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:12]
 
 
-def _pool_cache_key(project_id: UUID, test_id: str, per_head: int, agentic_sig: str) -> str:
-    return f"labeling:pool:{project_id}:{test_id}:{per_head}:{agentic_sig}"
+def _pool_cache_key(
+    project_id: UUID, test_id: str, per_head: int, agentic_sig: str, rerank_depth: int | None = None
+) -> str:
+    base = f"labeling:pool:{project_id}:{test_id}:{per_head}:{agentic_sig}"
+    # A rerank pool carries extra scored candidates, so it must not collide with the labeling pool
+    # (which never sets rerank_depth); only the rerank variant gets the ``:r{depth}`` suffix.
+    return f"{base}:r{rerank_depth}" if rerank_depth else base
 
 
 def _serialize_pool(pool: PoolResult, computed_at: str) -> dict:
@@ -387,6 +392,7 @@ def _serialize_pool(pool: PoolResult, computed_at: str) -> dict:
                 "provenance": c.provenance,
                 "ranks": c.ranks,
                 "agentic_queries": c.agentic_queries,
+                "agentic_rerank_score": c.agentic_rerank_score,
             }
             for c in pool.chunks
         ],
@@ -405,6 +411,7 @@ def _deserialize_pool(data: dict) -> PoolResult:
                 provenance=list(c.get("provenance") or []),
                 ranks={k: int(v) for k, v in (c.get("ranks") or {}).items()},
                 agentic_queries=list(c.get("agentic_queries") or []),
+                agentic_rerank_score=c.get("agentic_rerank_score"),
             )
             for c in data.get("chunks", [])
         ],
@@ -440,6 +447,7 @@ async def assemble_case_pool(
     manual: bool = False,
     refresh: bool = False,
     agentic_queries: list[str] | None = None,
+    rerank_depth: int | None = None,
 ) -> tuple[PoolResult, str | None, bool]:
     """Assemble (or load from cache) the candidate pool for a case's query.
 
@@ -448,7 +456,9 @@ async def assemble_case_pool(
     :func:`assemble_pool`, and caches the auto-pool in Redis (a manual ``q`` is always fresh and
     never cached; ``refresh`` bypasses the cache). When ``agentic_queries`` are given, each is
     embedded and folded into the pool, and the cache key carries their signature so a base-only
-    pool and an agentic pool never collide. Returns ``(pool, computed_at, provider_connected)``.
+    pool and an agentic pool never collide. When ``rerank_depth`` is set, the agentic sub-queries
+    are also scored through the semantic reranker at that depth (a separate cache entry, so the
+    labeling pool is untouched). Returns ``(pool, computed_at, provider_connected)``.
     """
     per_head = await _case_pool_depth(db, project, test_id, depth)
     agentic_queries = [q for q in (agentic_queries or []) if q and q.strip()]
@@ -465,7 +475,9 @@ async def assemble_case_pool(
     cache_key = (
         None
         if manual
-        else _pool_cache_key(project.id, test_id, per_head, _agentic_signature(agentic_queries))
+        else _pool_cache_key(
+            project.id, test_id, per_head, _agentic_signature(agentic_queries), rerank_depth
+        )
     )
     if cache_key and not refresh:
         cached = await cache_get_json(cache_key)
@@ -488,6 +500,7 @@ async def assemble_case_pool(
             per_head_depth=per_head,
             query_vector=query_vector,
             agentic_queries=agentic_specs or None,
+            agentic_rerank_depth=rerank_depth,
         )
     finally:
         if provider is not None:
