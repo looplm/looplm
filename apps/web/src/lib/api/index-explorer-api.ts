@@ -3,6 +3,7 @@
  */
 
 import type {
+  IndexChunkMetadataResponse,
   IndexFileChunksResponse,
   IndexFileListResponse,
   IndexFileTypesResponse,
@@ -78,6 +79,14 @@ export const getIndexFileChunks = (params: {
   if (params.limit != null) qs.set("limit", String(params.limit));
   return request<IndexFileChunksResponse>(
     `/api/index-explorer/file-chunks?${qs.toString()}`,
+  );
+};
+
+// All index fields for one chunk (embedding vectors omitted).
+export const getIndexChunkMetadata = (providerId: string, chunkId: string) => {
+  const qs = new URLSearchParams({ provider_id: providerId, chunk_id: chunkId });
+  return request<IndexChunkMetadataResponse>(
+    `/api/index-explorer/chunk-metadata?${qs.toString()}`,
   );
 };
 

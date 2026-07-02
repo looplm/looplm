@@ -182,6 +182,19 @@ class _FakeProvider(BaseIndexProvider):
             CorpusDoc(id="c1", title="r.pdf", url=None, snippet="second", ordinal=1),
         ]
 
+    async def fetch_documents_by_key(self, ids):
+        if "c0" not in ids:
+            return {}
+        return {
+            "c0": {
+                "id": "c0",
+                "chunk_text": "first",
+                "attachment_filename": "r.pdf",
+                "chunk_index": 0,
+                "embedding": [0.1] * 64,  # vector — must be stripped from metadata
+            }
+        }
+
     async def aclose(self):
         pass
 
@@ -250,3 +263,28 @@ async def test_file_chunks_route(client, auth_headers, index_provider):
     assert body["ordinal_available"] is True
     assert [c["index"] for c in body["documents"]] == [0, 1]
     assert [c["ordinal"] for c in body["documents"]] == ["0", "1"]
+
+
+@pytest.mark.asyncio
+async def test_chunk_metadata_route_strips_vectors(client, auth_headers, index_provider):
+    r = await client.get(
+        f"/api/index-explorer/chunk-metadata?provider_id={index_provider.id}&chunk_id=c0",
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["found"] is True
+    assert body["fields"]["chunk_text"] == "first"
+    assert body["fields"]["chunk_index"] == 0
+    assert "embedding" not in body["fields"]  # vector stripped
+
+
+@pytest.mark.asyncio
+async def test_chunk_metadata_route_not_found(client, auth_headers, index_provider):
+    r = await client.get(
+        f"/api/index-explorer/chunk-metadata?provider_id={index_provider.id}&chunk_id=missing",
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["found"] is False and body["fields"] == {}

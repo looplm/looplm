@@ -3,16 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  getIndexChunkMetadata,
   getIndexFileChunks,
   getIndexFileTypes,
-  getIndexTree,
   searchIndexFiles,
 } from "@/lib/api";
 import type {
   IndexFileChunk,
   IndexFileMatch,
   IndexFileTypeValue,
-  IndexTreeDocument,
 } from "@/lib/api-types/index-explorer";
 import { ErrorNotice } from "@/components/error-notice";
 
@@ -49,20 +48,74 @@ function KindBadge({ kind }: { kind: IndexFileMatch["kind"] }) {
   );
 }
 
-/** A retrieved chunk / sampled doc row: text snippet + optional external link. */
+function formatFieldValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
+/** Lazily-loaded table of every index field for one chunk. */
+function ChunkMetadata({ providerId, chunkId }: { providerId: string; chunkId: string }) {
+  const [fields, setFields] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getIndexChunkMetadata(providerId, chunkId)
+      .then((res) => !cancelled && setFields(res.found ? res.fields : {}))
+      .catch((e) => !cancelled && setError(e))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [providerId, chunkId]);
+
+  if (loading) return <p className="py-1 text-[11px] text-gray-400">Loading metadata…</p>;
+  if (error != null) return <ErrorNotice error={error} />;
+  const entries = Object.entries(fields ?? {});
+  if (entries.length === 0) {
+    return <p className="py-1 text-[11px] text-gray-400">No metadata for this chunk.</p>;
+  }
+  return (
+    <dl className="mt-1 grid grid-cols-[minmax(0,10rem)_1fr] gap-x-3 gap-y-1 rounded-md bg-gray-50 p-2 text-[11px] dark:bg-slate-800/50">
+      {entries.map(([k, v]) => (
+        <div key={k} className="contents">
+          <dt className="truncate font-mono text-gray-500 dark:text-slate-400" title={k}>
+            {k}
+          </dt>
+          <dd className="min-w-0 whitespace-pre-wrap break-words text-gray-700 dark:text-slate-200">
+            {formatFieldValue(v)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** A chunk row: full text + optional external link and a lazy metadata toggle. */
 function ChunkRow({
+  providerId,
+  chunkId,
   index,
   ordinal,
   title,
   url,
   snippet,
 }: {
+  providerId?: string;
+  chunkId?: string;
   index?: number;
   ordinal?: string | null;
   title: string | null;
   url: string | null;
   snippet: string | null;
 }) {
+  const [showMeta, setShowMeta] = useState(false);
+  const canMeta = !!providerId && !!chunkId;
+
   return (
     <div className="border-t border-gray-100 dark:border-slate-800 py-2 text-xs first:border-t-0">
       <div className="flex items-center gap-1.5">
@@ -86,12 +139,21 @@ function ChunkRow({
             ↗
           </a>
         )}
+        {canMeta && (
+          <button
+            onClick={() => setShowMeta((s) => !s)}
+            className="ml-auto flex-shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+          >
+            {showMeta ? "Hide metadata" : "Metadata"}
+          </button>
+        )}
       </div>
       {snippet && (
         <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-gray-500 dark:text-slate-400">
           {snippet}
         </p>
       )}
+      {showMeta && canMeta && <ChunkMetadata providerId={providerId!} chunkId={chunkId!} />}
     </div>
   );
 }
@@ -112,7 +174,7 @@ function FileTypeRow({
   fraction: number;
 }) {
   const [open, setOpen] = useState(false);
-  const [docs, setDocs] = useState<IndexTreeDocument[] | null>(null);
+  const [docs, setDocs] = useState<IndexFileChunk[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -123,10 +185,11 @@ function FileTypeRow({
       setLoading(true);
       setError(null);
       try {
-        const res = await getIndexTree({
+        const res = await getIndexFileChunks({
           providerId,
-          levels: [[field]],
-          path: [{ key: field, value }],
+          fileKey: field,
+          fileValue: value,
+          kind: "page",
           limit: 8,
         });
         setDocs(res.documents);
@@ -166,7 +229,15 @@ function FileTypeRow({
             <p className="py-1 text-xs text-gray-400">No example chunks.</p>
           )}
           {docs?.map((d) => (
-            <ChunkRow key={d.id} title={d.title} url={d.url} snippet={d.snippet} />
+            <ChunkRow
+              key={d.id || d.index}
+              providerId={providerId}
+              chunkId={d.id}
+              ordinal={d.ordinal}
+              title={d.title}
+              url={d.url}
+              snippet={d.snippet}
+            />
           ))}
         </div>
       )}
@@ -304,6 +375,8 @@ function FileMatchRow({
           {chunks?.map((c) => (
             <ChunkRow
               key={c.id || c.index}
+              providerId={providerId}
+              chunkId={c.id}
               index={c.index}
               ordinal={c.ordinal}
               title={c.title}

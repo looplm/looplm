@@ -89,6 +89,12 @@ export interface IndexFileChunksResponse {
   documents: IndexFileChunk[];
 }
 
+export interface IndexChunkMetadataResponse {
+  id: string;
+  found: boolean;
+  fields: Record<string, unknown>;
+}
+
 // --- Grouping advisor: LLM-suggested hierarchy + metadata-quality hints ---
 
 export interface GroupingLevel {

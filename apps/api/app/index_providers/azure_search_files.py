@@ -160,9 +160,9 @@ async def list_file_chunks(
         page = 0
         async for doc in results:
             page += 1
+            # Full chunk text (not truncated): this view is for reading a file's
+            # chunks in order, so the whole text is shown.
             snippet = doc.get(f["text"]) if f["text"] else None
-            if isinstance(snippet, str) and len(snippet) > 600:
-                snippet = snippet[:600] + "…"
             docs.append(
                 CorpusDoc(
                     id=str(

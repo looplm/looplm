@@ -23,6 +23,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.index_providers.chunk_quality_common import pick_field
 from app.schemas.index_explorer import (
+    IndexChunkMetadataResponse,
     IndexFileChunk,
     IndexFileChunksResponse,
     IndexFileListResponse,
@@ -59,6 +60,16 @@ _FILETYPE_FIELDS = [
     "content_type", "doc_type", "file_type", "mimetype", "mime_type",
     "format", "source_type", "type",
 ]
+
+
+def _visible_fields(fields: dict) -> dict:
+    """Drop embedding vectors — long numeric arrays are noise in a metadata view."""
+    out = {}
+    for k, v in fields.items():
+        if isinstance(v, list) and len(v) > 16 and all(isinstance(x, (int, float)) for x in v[:8]):
+            continue
+        out[k] = v
+    return out
 
 
 def _provider_error(e: Exception) -> HTTPException:
@@ -313,6 +324,30 @@ async def file_chunks(
             )
             for i, d in enumerate(docs)
         ],
+    )
+
+
+@router.get("/chunk-metadata", response_model=IndexChunkMetadataResponse)
+async def chunk_metadata(
+    provider_id: UUID,
+    chunk_id: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """All index fields for one chunk (embedding vectors omitted)."""
+    provider = await _get_provider_or_404(db, provider_id, project)
+    client = build_index_provider(provider)
+    try:
+        docs = await client.fetch_documents_by_key([chunk_id])
+    except Exception as e:
+        raise _provider_error(e)
+    finally:
+        await client.aclose()
+    fields = docs.get(chunk_id)
+    return IndexChunkMetadataResponse(
+        id=chunk_id,
+        found=fields is not None,
+        fields=_visible_fields(fields) if fields else {},
     )
 
 

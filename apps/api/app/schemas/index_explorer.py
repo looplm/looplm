@@ -148,6 +148,18 @@ class IndexFileChunksResponse(BaseModel):
     documents: list[IndexFileChunk] = Field(default_factory=list)
 
 
+class IndexChunkMetadataResponse(BaseModel):
+    """All index fields for one chunk (embedding vectors omitted).
+
+    ``found`` is False when the id is not in the index. Powers the per-chunk
+    "metadata" toggle on the Files tab.
+    """
+
+    id: str
+    found: bool
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
 # --- Grouping advisor: LLM-suggested hierarchy + metadata-quality hints ---
 
 

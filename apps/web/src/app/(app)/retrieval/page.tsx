@@ -37,15 +37,18 @@ export default function RetrievalPage() {
 
       <RetrievalMetricsPanel onRunSaved={() => setRunsRefresh((n) => n + 1)} />
 
-      <section className="mt-12">
-        <h2 className="text-xl font-bold mb-1">Saved runs</h2>
-        <p className="text-sm text-gray-500 dark:text-slate-400 mb-4 max-w-3xl">
+      <details className="mt-12 group">
+        <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+          <span className="text-gray-400 transition-transform group-open:rotate-90">▸</span>
+          <h2 className="text-xl font-bold">Saved runs</h2>
+        </summary>
+        <p className="text-sm text-gray-500 dark:text-slate-400 mt-2 mb-4 max-w-3xl">
           Every Human-labels computation is snapshotted here. Annotate runs with their RAG pipeline
           version and index name/version, then select two or more to compare how retrieval quality
           moved as the pipeline and index changed.
         </p>
         <RunHistory refreshKey={runsRefresh} canEdit={canEdit} />
-      </section>
+      </details>
     </div>
   );
 }
