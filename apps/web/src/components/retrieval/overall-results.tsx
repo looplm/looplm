@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { type RetrievalRunMetrics, type RetrievalTargets } from "@/lib/api";
-import { EXPLAIN, METRICS, type MetricDef } from "@/components/retrieval/constants";
+import { EXPLAIN, METRICS, PERK_METRICS, type MetricDef } from "@/components/retrieval/constants";
 import { Info, MetricCard } from "@/components/retrieval/metric-card";
 import { RecallCurve } from "@/components/retrieval/recall-curve";
+import { RetrieverSelector } from "@/components/retrieval/retriever-selector";
 import { PerCaseResults, ReliabilityBanner, SliceBreakdown } from "@/components/retrieval/retrieval-table";
 
 // The "Overall" retrieval-quality result: the single best-available ranking scored against the
@@ -14,14 +16,24 @@ export function OverallResults({
   targets,
   activeK,
   source,
+  retrieverLabel,
+  retrieverNote,
 }: {
   overall: RetrievalRunMetrics;
   targets: RetrievalTargets | null;
   activeK: number;
   source: "urls" | "labels";
+  // The selected retriever's label + one-line description (labels path), shown in the method note.
+  retrieverLabel?: string;
+  retrieverNote?: string;
 }) {
   const lk = String(activeK);
   const cardValue = (m: MetricDef): number | null | undefined => m.value(overall, lk);
+
+  // Which per-k metric the curve + per-case table show (default recall).
+  const [metricKey, setMetricKey] = useState("recall");
+  const metric = PERK_METRICS.find((m) => m.key === metricKey) ?? PERK_METRICS[0];
+  const metricTarget = targets ? metric.target(targets) ?? null : null;
 
   return (
     <>
@@ -36,10 +48,11 @@ export function OverallResults({
         <Info text={EXPLAIN.method} />
         {source === "labels" ? (
           <span>
-            <span className="font-medium text-gray-600 dark:text-slate-300">Method:</span>{" "}
-            your live index&apos;s best-available ranking. It prefers the semantic reranker, falling
-            back to hybrid (RRF), vector, then keyword. See the By stage comparison below to score
-            each method (Sparse, Dense, RRF, Reranked) separately.
+            <span className="font-medium text-gray-600 dark:text-slate-300">
+              {retrieverLabel ?? "Method"}:
+            </span>{" "}
+            {retrieverNote ?? "the live index's best-available ranking."} Pick a retriever above; see
+            the By stage comparison below to compare them side by side.
           </span>
         ) : (
           <span>
@@ -101,13 +114,29 @@ export function OverallResults({
         <SliceBreakdown slices={overall.slices} largestK={activeK} />
       )}
 
+      <div className="flex items-center justify-end mb-2">
+        <RetrieverSelector
+          label="Metric"
+          title="Which metric the chart and per-case table show"
+          options={PERK_METRICS.map((m) => ({ value: m.key, label: m.label }))}
+          value={metricKey}
+          onChange={setMetricKey}
+        />
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
-        <RecallCurve recall={overall.recall_at_k} ks={overall.ks} target={targets ? targets.recall : null} />
+        <RecallCurve
+          recall={metric.agg(overall)}
+          ks={overall.ks}
+          target={metricTarget}
+          label={metric.label}
+        />
         <PerCaseResults
           cases={overall.cases}
           largestK={activeK}
           lk={lk}
-          recallTarget={targets ? targets.recall : null}
+          metricLabel={metric.label}
+          perCase={metric.perCase}
+          metricTarget={metricTarget}
         />
       </div>
     </>

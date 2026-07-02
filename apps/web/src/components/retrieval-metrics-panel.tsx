@@ -17,12 +17,21 @@ import {
   type RetrievalRunRecord,
   type RetrievalTargets,
 } from "@/lib/api";
-import { EXPLAIN, METRICS, statusOf, type MetricDef } from "@/components/retrieval/constants";
+import {
+  DEFAULT_RETRIEVER,
+  EXPLAIN,
+  METRICS,
+  RETRIEVERS,
+  RETRIEVER_NOTES,
+  statusOf,
+  type MetricDef,
+} from "@/components/retrieval/constants";
 import { Info } from "@/components/retrieval/metric-card";
-import { OverallResults } from "@/components/retrieval/overall-results";
+import { OverallSection } from "@/components/retrieval/overall-section";
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
 import { KSelector } from "@/components/retrieval/k-selector";
+import { RetrieverSelector } from "@/components/retrieval/retriever-selector";
 import { ErrorNotice } from "@/components/error-notice";
 import { ComputedAt } from "@/components/retrieval/computed-at";
 
@@ -89,6 +98,9 @@ export default function RetrievalMetricsPanel({
   const [byStageError, setByStageError] = useState<unknown>(null);
   // Display-only cutoff selection — never part of Draft/Applied, so changing it doesn't recompute.
   const [selectedK, setSelectedK] = useState<number | null>(null);
+  // Which retriever the Overall block reflects (default Agentic). Display-only; every retriever's
+  // metrics are already in the response.
+  const [selectedRetriever, setSelectedRetriever] = useState<string>(DEFAULT_RETRIEVER);
   // The run auto-snapshotted from the current Overall compute, for inline metadata annotation.
   const [savedRun, setSavedRun] = useState<RetrievalRunRecord | null>(null);
   const savedNonceRef = useRef<number | null>(null);
@@ -289,21 +301,30 @@ export default function RetrievalMetricsPanel({
   const showByStage = displaySource === "labels";
   const computedAt = overall?.computed_at ?? byStage?.computed_at;
 
-  // Cutoffs available for the current view; the selected k falls back to the deepest when unset or
-  // not present in this data. Drives the Overall cards/slices/per-case and the by-stage table.
-  const availableKs = overall?.ks ?? byStage?.ks ?? [];
+  // The Overall block reflects the selected retriever. "best" (and the URLs path) use the live-probe
+  // overall; a pipeline stage uses that stage's full metrics from the by-stage response.
+  const useBest = displaySource !== "labels" || selectedRetriever === "best";
+  const displayMetrics: RetrievalRunMetrics | null = useBest
+    ? overall
+    : byStage?.stages.find((s) => s.stage === selectedRetriever)?.metrics ?? null;
+  const displayLoading = useBest ? loading : byStageLoading;
+  const retrieverLabel = RETRIEVERS.find((r) => r.value === selectedRetriever)?.label;
+
+  // Cutoffs available for the displayed retriever; the selected k falls back to the deepest when
+  // unset or not present in this data. Drives the Overall cards/curve/per-case and the by-stage table.
+  const availableKs = displayMetrics?.ks ?? overall?.ks ?? byStage?.ks ?? [];
   const maxK = availableKs.length ? Math.max(...availableKs) : 10;
   const activeK = selectedK != null && availableKs.includes(selectedK) ? selectedK : maxK;
   const lk = String(activeK);
   const cardValue = (m: MetricDef): number | null | undefined =>
-    overall ? m.value(overall, lk) : undefined;
+    displayMetrics ? m.value(displayMetrics, lk) : undefined;
   const metCount = useMemo(
     () =>
-      overall && targets
+      displayMetrics && targets
         ? METRICS.filter((m) => statusOf(cardValue(m), targets[m.key]) === "good").length
         : 0,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overall, targets, lk],
+    [displayMetrics, targets, lk],
   );
 
   const toggleClass = (active: boolean) =>
@@ -343,7 +364,7 @@ export default function RetrievalMetricsPanel({
               </div>
             </div>
           )}
-          {overall?.available && targets && (
+          {displayMetrics?.available && targets && (
             <span
               className={`text-xs font-medium px-2 py-1 rounded-full ${
                 metCount === METRICS.length
@@ -413,11 +434,18 @@ export default function RetrievalMetricsPanel({
 
       {error ? <ErrorNotice error={error} className="mb-4" /> : null}
 
-      {/* Results header: cutoff selector + when the numbers were computed + a Recompute action. */}
-      {displaySource && (computedAt || loading) && (
+      {/* Results header: retriever + cutoff selectors, when computed, and a Recompute action. */}
+      {displaySource && (computedAt || loading || byStageLoading) && (
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-3 flex-wrap">
-            {(overall?.available || byStage?.available) && (
+            {showByStage && (
+              <RetrieverSelector
+                options={RETRIEVERS}
+                value={selectedRetriever}
+                onChange={setSelectedRetriever}
+              />
+            )}
+            {displayMetrics?.available && (
               <KSelector ks={availableKs} value={activeK} onChange={setSelectedK} />
             )}
             {dirty && applied && !loading && (
@@ -437,35 +465,18 @@ export default function RetrievalMetricsPanel({
         </div>
       ) : (
         <>
-          {/* Overall — the single best-available ranking. */}
-          {loading && !overall ? (
-            <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
-              Computing retrieval metrics...
-            </div>
-          ) : !overall || !overall.available ? (
-            <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
-              {displaySource === "labels" ? (
-                <>
-                  No chunk relevance labels for these datasets yet, or no index is connected to
-                  probe. Judge candidates on the Labeling page (and connect an index provider), then
-                  this measures the index&apos;s recall against those human labels.
-                </>
-              ) : (
-                <>
-                  No labeled retrieval data for this run. Add expected source URLs to test cases and
-                  run an evaluation with a <span className="font-mono">contains_urls</span> check to
-                  measure recall.
-                </>
-              )}
-            </div>
-          ) : (
-            <OverallResults
-              overall={overall}
-              targets={targets}
-              activeK={activeK}
-              source={displaySource}
-            />
-          )}
+          {/* Overall — the selected retriever, in detail. */}
+          <OverallSection
+            metrics={displayMetrics}
+            loading={displayLoading}
+            source={displaySource}
+            activeK={activeK}
+            targets={targets}
+            retrieverLabel={retrieverLabel}
+            retrieverNote={RETRIEVER_NOTES[selectedRetriever]}
+            perRetriever={!useBest}
+            bestAvailable={!!overall?.available}
+          />
 
           {/* By stage — each retrieval method scored separately (labels path only). */}
           {showByStage && (

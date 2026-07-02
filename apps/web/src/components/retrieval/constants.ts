@@ -1,4 +1,4 @@
-import type { RetrievalRunMetrics, RetrievalTargets } from "@/lib/api";
+import type { RetrievalCaseMetrics, RetrievalRunMetrics, RetrievalTargets } from "@/lib/api";
 
 export function pct(x: number | null | undefined): string {
   return x == null ? "-" : `${Math.round(x * 100)}%`;
@@ -80,3 +80,43 @@ export const METRICS: MetricDef[] = [
 ];
 
 export const fmt = (kind: MetricKind, v: number | null | undefined) => (kind === "pct" ? pct(v) : dec(v));
+
+// Which retriever the Overall block reflects. Real pipeline stages (matching the By-stage table)
+// plus "best" — the live index's best-available ranking. Default selection is "agentic".
+export const RETRIEVERS: { value: string; label: string }[] = [
+  { value: "keyword", label: "Sparse" },
+  { value: "vector", label: "Dense" },
+  { value: "hybrid", label: "RRF" },
+  { value: "semantic", label: "Reranked" },
+  { value: "agentic", label: "Agentic" },
+  { value: "best", label: "Best available" },
+];
+
+export const DEFAULT_RETRIEVER = "agentic";
+
+// Per-k metrics selectable for the recall curve + per-case table. Each maps to the aggregate and
+// per-case @k dicts and its target threshold, so one selector re-points both the chart and the
+// table. (precision/hit-rate are only stored per case on runs computed after they were added.)
+export interface PerKMetric {
+  key: string;
+  label: string;
+  agg: (m: RetrievalRunMetrics) => Record<string, number>;
+  perCase: (c: RetrievalCaseMetrics) => Record<string, number>;
+  target: (t: RetrievalTargets) => number | null | undefined;
+}
+
+export const PERK_METRICS: PerKMetric[] = [
+  { key: "recall", label: "Recall", agg: (m) => m.recall_at_k, perCase: (c) => c.recall_at_k, target: (t) => t.recall },
+  { key: "precision", label: "Precision", agg: (m) => m.precision_at_k, perCase: (c) => c.precision_at_k ?? {}, target: (t) => t.precision },
+  { key: "ndcg", label: "nDCG", agg: (m) => m.ndcg_at_k, perCase: (c) => c.ndcg_at_k, target: (t) => t.ndcg },
+  { key: "hit_rate", label: "Hit-rate", agg: (m) => m.hit_rate_at_k, perCase: (c) => c.hit_rate_at_k ?? {}, target: (t) => t.hit_rate },
+];
+
+export const RETRIEVER_NOTES: Record<string, string> = {
+  keyword: "keyword / BM25 lexical search only.",
+  vector: "dense vector (embedding) similarity only.",
+  hybrid: "reciprocal-rank fusion (RRF) of sparse + dense.",
+  semantic: "the semantic reranker's final ranking.",
+  agentic: "the agentic retrieval path (multi-query planning).",
+  best: "your live index's best-available ranking. It prefers the semantic reranker, falling back to hybrid (RRF), vector, then keyword.",
+};

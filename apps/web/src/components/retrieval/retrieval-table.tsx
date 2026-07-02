@@ -97,12 +97,17 @@ export function PerCaseResults({
   cases,
   largestK,
   lk,
-  recallTarget,
+  metricLabel = "Recall",
+  perCase = (c) => c.recall_at_k,
+  metricTarget,
 }: {
   cases: RetrievalCaseMetrics[];
   largestK: number;
   lk: string;
-  recallTarget: number | null;
+  // Which per-k metric the column shows (defaults to recall).
+  metricLabel?: string;
+  perCase?: (c: RetrievalCaseMetrics) => Record<string, number>;
+  metricTarget: number | null;
 }) {
   return (
     <div className="lg:col-span-2 flex flex-col rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
@@ -124,7 +129,7 @@ export function PerCaseResults({
                 <span className="inline-flex items-center">Retr<Info text={EXPLAIN.retrieved} /></span>
               </th>
               <th className="text-right font-medium px-3 py-2">
-                <span className="inline-flex items-center">Recall@{largestK}<Info text={EXPLAIN.caseRecall} /></span>
+                <span className="inline-flex items-center">{metricLabel}@{largestK}<Info text={EXPLAIN.caseRecall} /></span>
               </th>
               <th className="text-right font-medium px-2 py-2">
                 <span className="inline-flex items-center">1st hit<Info text={EXPLAIN.firstHit} /></span>
@@ -151,8 +156,8 @@ export function PerCaseResults({
                 <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">{c.retrieved_count}</td>
                 <td className="px-3 py-2.5">
                   <MiniBar
-                    v={c.recall_at_k[lk] ?? 0}
-                    ok={recallTarget != null ? (c.recall_at_k[lk] ?? 0) >= recallTarget : c.hit}
+                    v={perCase(c)[lk] ?? 0}
+                    ok={metricTarget != null ? (perCase(c)[lk] ?? 0) >= metricTarget : c.hit}
                   />
                 </td>
                 <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">

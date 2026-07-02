@@ -7,15 +7,18 @@ export function RecallCurve({
   recall,
   ks,
   target,
+  label = "Recall",
 }: {
   recall: Record<string, number>;
   ks: number[];
   target: number | null;
+  // Metric name for the title (the values dict is passed in via `recall`).
+  label?: string;
 }) {
   return (
     <div className="flex flex-col h-full rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
       <div className="flex items-center text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-slate-500 mb-4">
-        Recall @ k
+        {label} @ k
         <Info text={EXPLAIN.recallCurve} />
       </div>
 

@@ -96,6 +96,7 @@ def build_by_stage_metrics(
                 hit_rate_at_k=m.hit_rate_at_k,
                 ndcg_at_k=m.ndcg_at_k,
                 mrr=m.mrr,
+                metrics=m,
             )
         )
         for c in m.cases:
@@ -285,6 +286,8 @@ def _aggregate_rows(
                 expected_count=len(expected),
                 retrieved_count=len(retrieved),
                 recall_at_k=recall,
+                precision_at_k=metrics["precision_at_k"] or {},
+                hit_rate_at_k=hit_rate,
                 ndcg_at_k=ndcg,
                 mrr=metrics["mrr"],
                 first_relevant_rank=metrics["first_relevant_rank"],

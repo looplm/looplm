@@ -241,6 +241,8 @@ export interface StageMetrics {
   hit_rate_at_k: Record<string, number>;
   ndcg_at_k: Record<string, number>;
   mrr?: number | null;
+  // Full per-stage metrics so the Overall block can render one retriever in detail.
+  metrics?: RetrievalRunMetrics | null;
 }
 
 export interface ByStageCaseMetrics {
@@ -272,6 +274,8 @@ export interface RetrievalCaseMetrics {
   expected_count: number;
   retrieved_count: number;
   recall_at_k: Record<string, number>;
+  precision_at_k?: Record<string, number>;
+  hit_rate_at_k?: Record<string, number>;
   ndcg_at_k: Record<string, number>;
   mrr?: number | null;
   first_relevant_rank?: number | null;

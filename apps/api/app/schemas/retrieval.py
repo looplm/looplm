@@ -86,6 +86,8 @@ class RetrievalCaseMetrics(BaseModel):
     expected_count: int = 0
     retrieved_count: int = 0
     recall_at_k: dict[str, float] = Field(default_factory=dict)
+    precision_at_k: dict[str, float] = Field(default_factory=dict)
+    hit_rate_at_k: dict[str, float] = Field(default_factory=dict)
     ndcg_at_k: dict[str, float] = Field(default_factory=dict)
     mrr: float | None = None
     # 1-indexed rank of the first relevant doc retrieved, or null if it never surfaced.
@@ -433,6 +435,9 @@ class StageMetrics(BaseModel):
     hit_rate_at_k: dict[str, float] = Field(default_factory=dict)
     ndcg_at_k: dict[str, float] = Field(default_factory=dict)
     mrr: float | None = None
+    # Full per-stage metrics (per-case rows, bpref, condensed nDCG, slices, recall curve) so the
+    # Overall block can render any one retriever in detail, not just the summary row above.
+    metrics: RetrievalRunMetrics | None = None
 
 
 class ByStageCaseMetrics(BaseModel):
