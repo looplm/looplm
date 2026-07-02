@@ -27,6 +27,7 @@ import {
 } from "@/components/retrieval/retrieval-table";
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
+import { KSelector } from "@/components/retrieval/k-selector";
 import { ErrorNotice } from "@/components/error-notice";
 import { ComputedAt } from "@/components/retrieval/computed-at";
 import { RunMetadataEditor } from "@/components/retrieval/run-metadata-editor";
@@ -80,6 +81,8 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
   const [byStage, setByStage] = useState<ByStageMetricsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // Display-only cutoff selection — never part of Draft/Applied, so changing it doesn't recompute.
+  const [selectedK, setSelectedK] = useState<number | null>(null);
   // The run auto-snapshotted from the current Overall compute, for inline metadata annotation.
   const [savedRun, setSavedRun] = useState<RetrievalRunRecord | null>(null);
   const savedNonceRef = useRef<number | null>(null);
@@ -202,8 +205,12 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
   const showingByStage = applied?.source === "labels" && applied.labelsView === "byStage";
   const computedAt = showingByStage ? byStage?.computed_at : overall?.computed_at;
 
-  const largestK = overall?.ks.length ? Math.max(...overall.ks) : 10;
-  const lk = String(largestK);
+  // Cutoffs available for the current view; the selected k falls back to the deepest when unset or
+  // not present in this data. Drives the Overall cards/slices/per-case and the by-stage table.
+  const availableKs = (showingByStage ? byStage?.ks : overall?.ks) ?? [];
+  const maxK = availableKs.length ? Math.max(...availableKs) : 10;
+  const activeK = selectedK != null && availableKs.includes(selectedK) ? selectedK : maxK;
+  const lk = String(activeK);
   const cardValue = (m: MetricDef): number | null | undefined =>
     overall ? m.value(overall, lk) : undefined;
   const metCount = useMemo(
@@ -331,16 +338,19 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
 
       {error ? <ErrorNotice error={error} className="mb-4" /> : null}
 
-      {/* Results header: when the numbers were computed + a Recompute action. */}
+      {/* Results header: cutoff selector + when the numbers were computed + a Recompute action. */}
       {applied && (computedAt || loading) && (
-        <div className="flex items-center justify-between mb-3">
-          {dirty && applied && !loading ? (
-            <span className="text-xs text-amber-600 dark:text-amber-400">
-              Settings changed — press Compute to update.
-            </span>
-          ) : (
-            <span />
-          )}
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            {(showingByStage ? byStage?.available : overall?.available) && (
+              <KSelector ks={availableKs} value={activeK} onChange={setSelectedK} />
+            )}
+            {dirty && applied && !loading && (
+              <span className="text-xs text-amber-600 dark:text-amber-400">
+                Settings changed — press Compute to update.
+              </span>
+            )}
+          </div>
           <ComputedAt at={computedAt} onRecompute={recompute} busy={loading} />
         </div>
       )}
@@ -351,7 +361,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
           <span className="font-medium text-gray-700 dark:text-slate-200">Compute metrics</span>.
         </div>
       ) : showingByStage ? (
-        <ByStageComparison data={byStage} loading={loading} goldSource={applied.goldSource} />
+        <ByStageComparison data={byStage} loading={loading} goldSource={applied.goldSource} selectedK={activeK} />
       ) : loading && !overall ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
           Computing retrieval metrics...
@@ -422,7 +432,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
             {METRICS.map((m) => (
               <MetricCard
                 key={m.key}
-                label={m.label(largestK)}
+                label={m.label(activeK)}
                 value={cardValue(m)}
                 target={targets ? targets[m.key] : null}
                 kind={m.kind}
@@ -451,7 +461,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
                   info={EXPLAIN.bpref}
                 />
                 <MetricCard
-                  label={`cNDCG@${largestK}`}
+                  label={`cNDCG@${activeK}`}
                   value={overall.condensed_ndcg_at_k?.[lk]}
                   target={null}
                   kind="pct"
@@ -464,7 +474,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
           )}
 
           {overall.slices && overall.slices.length > 0 && (
-            <SliceBreakdown slices={overall.slices} largestK={largestK} />
+            <SliceBreakdown slices={overall.slices} largestK={activeK} />
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
@@ -472,7 +482,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
 
             <PerCaseResults
               cases={overall.cases}
-              largestK={largestK}
+              largestK={activeK}
               lk={lk}
               recallTarget={targets ? targets.recall : null}
             />

@@ -11,15 +11,20 @@ export function ByStageComparison({
   data,
   loading,
   goldSource,
+  selectedK,
 }: {
   data: ByStageMetricsResponse | null;
   loading: boolean;
   goldSource: "human" | "ai" | "both";
+  selectedK?: number | null;
 }) {
   const [drillMetric, setDrillMetric] = useState<"recall" | "ndcg">("recall");
   const [showCases, setShowCases] = useState(false);
 
-  const lk = useMemo(() => (data?.ks.length ? String(Math.max(...data.ks)) : "10"), [data]);
+  // Deepest cutoff (the k the per-case drilldown is collapsed to server-side) and the selected one
+  // the comparison table shows. They differ only when the user picks a shallower cutoff.
+  const maxK = useMemo(() => (data?.ks.length ? Math.max(...data.ks) : 10), [data]);
+  const k = selectedK != null && data?.ks.includes(selectedK) ? String(selectedK) : String(maxK);
 
   if (loading) {
     return (
@@ -38,7 +43,6 @@ export function ByStageComparison({
     );
   }
 
-  const k = lk;
   const cols: { key: string; label: string; fmt: (v: number | null | undefined) => string }[] = [
     { key: "recall", label: `Recall@${k}`, fmt: pct },
     { key: "ndcg", label: `nDCG@${k}`, fmt: pct },
@@ -132,6 +136,9 @@ export function ByStageComparison({
           <span>
             <span className="mr-1.5">{showCases ? "▾" : "▸"}</span>
             Per-case breakdown ({data.cases.length})
+            {showCases && (
+              <span className="ml-1.5 text-gray-400 dark:text-slate-500 font-normal">at @{maxK}</span>
+            )}
           </span>
           {showCases && (
             <span className="flex items-center gap-1 text-xs" onClick={(e) => e.stopPropagation()}>
@@ -145,7 +152,7 @@ export function ByStageComparison({
                       : "text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
                   }`}
                 >
-                  {m === "recall" ? `Recall@${k}` : `nDCG@${k}`}
+                  {m === "recall" ? `Recall@${maxK}` : `nDCG@${maxK}`}
                 </button>
               ))}
             </span>
