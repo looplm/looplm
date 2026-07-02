@@ -82,6 +82,8 @@ class RetrievalCaseMetrics(BaseModel):
     """Per-test-case retrieval quality, for the drill-down table."""
 
     test_id: str
+    # Dataset this case belongs to, so the UI can link to it (labels path; null on the URLs path).
+    dataset_id: str | None = None
     input: str | None = None
     expected_count: int = 0
     retrieved_count: int = 0

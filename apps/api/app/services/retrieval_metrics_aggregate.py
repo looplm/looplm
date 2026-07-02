@@ -61,6 +61,7 @@ def build_by_stage_metrics(
     grade_by_test: dict[str, dict[str, int]],
     slice_by_test: dict[str, str],
     ks: tuple[int, ...] = AGG_KS,
+    dataset_by_test: dict[str, str] | None = None,
 ) -> tuple[list[StageMetrics], list[ByStageCaseMetrics], int]:
     """Per-stage metrics + a per-case grid, by scoring each stage's ranking against the gold.
 
@@ -84,6 +85,7 @@ def build_by_stage_metrics(
             slice_by_test,
             grade_by_test,
             ks=ks,
+            dataset_by_test=dataset_by_test,
         )
         evaluated = max(evaluated, m.evaluated_cases)
         stages.append(
@@ -282,6 +284,7 @@ def _aggregate_rows(
         cases.append(
             RetrievalCaseMetrics(
                 test_id=row["test_id"],
+                dataset_id=row.get("dataset_id"),
                 input=row.get("input"),
                 expected_count=len(expected),
                 retrieved_count=len(retrieved),
@@ -368,6 +371,7 @@ def aggregate_retrieval_metrics_from_labels(
     *,
     dataset_id: str | None = None,
     dataset_name: str | None = None,
+    dataset_by_test: dict[str, str] | None = None,
     ks: tuple[int, ...] = AGG_KS,
 ) -> RetrievalRunMetrics:
     """Summary from human chunk labels vs. a live retrieval probe, over a dataset's cases.
@@ -383,6 +387,7 @@ def aggregate_retrieval_metrics_from_labels(
     judged_nonrelevant_by_test = judged_nonrelevant_by_test or {}
     grade_by_test = grade_by_test or {}
     slice_by_test = slice_by_test or {}
+    dataset_by_test = dataset_by_test or {}
     case_list = list(cases)
     rows: list[dict[str, Any]] = []
     for test_id, query in case_list:
@@ -392,6 +397,7 @@ def aggregate_retrieval_metrics_from_labels(
         rows.append(
             {
                 "test_id": test_id,
+                "dataset_id": dataset_by_test.get(test_id),
                 "input": (query or None) and str(query)[:200],
                 "expected": list(relevant),
                 "retrieved": retrieved_by_test.get(test_id, []),

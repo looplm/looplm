@@ -270,6 +270,8 @@ export interface ByStageMetricsResponse {
 
 export interface RetrievalCaseMetrics {
   test_id: string;
+  // Dataset this case belongs to, for linking to it (labels path; null on the URLs path).
+  dataset_id?: string | null;
   input?: string | null;
   expected_count: number;
   retrieved_count: number;

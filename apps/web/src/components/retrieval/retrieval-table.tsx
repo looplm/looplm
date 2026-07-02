@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { RetrievalCaseMetrics, SliceMetrics } from "@/lib/api";
 import { EXPLAIN, pct } from "./constants";
 import { Info } from "./metric-card";
@@ -147,9 +148,19 @@ export function PerCaseResults({
                     <span
                       className={`shrink-0 w-1.5 h-1.5 rounded-full ${c.hit ? "bg-emerald-500" : "bg-red-500"}`}
                     />
-                    <span className="truncate text-gray-700 dark:text-slate-300" title={c.input ?? c.test_id}>
-                      {c.input || c.test_id}
-                    </span>
+                    {c.dataset_id ? (
+                      <Link
+                        href={`/datasets/${c.dataset_id}?highlight=${encodeURIComponent(c.test_id)}`}
+                        className="truncate text-indigo-600 dark:text-indigo-400 hover:underline"
+                        title={`Open test case: ${c.input ?? c.test_id}`}
+                      >
+                        {c.input || c.test_id}
+                      </Link>
+                    ) : (
+                      <span className="truncate text-gray-700 dark:text-slate-300" title={c.input ?? c.test_id}>
+                        {c.input || c.test_id}
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">{c.expected_count}</td>

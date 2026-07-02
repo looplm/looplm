@@ -158,6 +158,21 @@ async def dataset_cases(
     return cases
 
 
+async def resolve_case_datasets(db: AsyncSession, dataset_ids: list[UUID]) -> dict[str, str]:
+    """test_id → dataset id (first dataset containing it), so the UI can link each case."""
+    rows = (
+        await db.execute(
+            select(TestCase.test_id, TestCase.dataset_id).where(
+                TestCase.dataset_id.in_(dataset_ids)
+            )
+        )
+    ).all()
+    out: dict[str, str] = {}
+    for tid, dsid in rows:
+        out.setdefault(tid, str(dsid))
+    return out
+
+
 async def compute_overall_labels_metrics(
     db: AsyncSession,
     project: Project,
@@ -245,6 +260,7 @@ async def compute_overall_labels_metrics(
         grade_by_test=grade_by_test,
         dataset_id=ds_id,
         dataset_name=ds_name,
+        dataset_by_test=await resolve_case_datasets(db, dataset_uuids),
     )
     # Only cache a result that actually measured something; caching an "unavailable" (no gold / no
     # index) result would hide labeling or index-connection progress for the whole TTL.
@@ -319,6 +335,7 @@ async def compute_by_stage_metrics(
         nonrelevant_by_test,
         grade_by_test,
         slice_by_test,
+        dataset_by_test=await resolve_case_datasets(db, dataset_uuids),
     )
     result = ByStageMetricsResponse(
         available=evaluated > 0,
