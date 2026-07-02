@@ -118,7 +118,7 @@ class IndexFileMatch(BaseModel):
     key: str
     value: str
     label: str
-    kind: Literal["attachment", "page"]
+    kind: Literal["attachment", "page", "web"]
     chunk_count: int
     url: Optional[str] = None
 

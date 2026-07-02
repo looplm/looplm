@@ -57,6 +57,21 @@ def _ordinal_key(value) -> float:
         return float("inf")
 
 
+_HEX = set("0123456789abcdef")
+
+
+def _looks_like_hashed_page_id(value: str) -> bool:
+    """True for a scraped/external page id vs a Confluence one.
+
+    The rde indexer derives external page ids as ``sha1(url)[:16]`` (16 hex chars),
+    while Confluence Cloud page ids are all-numeric — the one clean signal that
+    separates the two (source_type/tags don't). Require an alpha hex digit so an
+    all-numeric Confluence id can't false-positive.
+    """
+    v = value.lower()
+    return len(v) == 16 and all(c in _HEX for c in v) and any(c in "abcdef" for c in v)
+
+
 async def _filter_for(provider: "AzureSearchIndexProvider", field_name: str, value: str) -> str:
     """Collection-aware ``field eq value`` OData clause (mirrors sample_documents)."""
     from app.index_providers.azure_search import _odata_escape
@@ -123,7 +138,10 @@ async def search_files(
                     break
             if not raw:
                 continue
-            key, value, label, kind = group_field, str(raw), str(title or raw), "page"
+            value = str(raw)
+            # A scraped/external web page (hashed page_id) vs a Confluence page.
+            kind = "web" if group_field == f["parent"] and _looks_like_hashed_page_id(value) else "page"
+            key, label = group_field, str(title or raw)
         dedupe = (kind, key, value)
         if dedupe not in seen:
             seen[dedupe] = FileMatch(

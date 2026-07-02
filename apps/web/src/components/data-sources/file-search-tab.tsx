@@ -35,12 +35,14 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
+const KIND_BADGE: Record<IndexFileMatch["kind"], { label: string; cls: string }> = {
+  attachment: { label: "Attachment", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
+  page: { label: "Page", cls: "bg-sky-500/15 text-sky-600 dark:text-sky-400" },
+  web: { label: "Web page", cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
+};
+
 function KindBadge({ kind }: { kind: IndexFileMatch["kind"] }) {
-  const label = kind === "attachment" ? "Attachment" : "Page";
-  const cls =
-    kind === "attachment"
-      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-      : "bg-sky-500/15 text-sky-600 dark:text-sky-400";
+  const { label, cls } = KIND_BADGE[kind] ?? KIND_BADGE.page;
   return (
     <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>
       {label}

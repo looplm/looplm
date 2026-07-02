@@ -65,7 +65,7 @@ export interface IndexFileMatch {
   key: string;
   value: string;
   label: string;
-  kind: "attachment" | "page";
+  kind: "attachment" | "page" | "web";
   chunk_count: number;
   url: string | null;
 }

@@ -7,6 +7,7 @@ import {
   getEvalRuns,
   getRetrievalByStageMetrics,
   getRetrievalMetrics,
+  getRetrievalRun,
   getRetrievalTargets,
   pollRetrievalCompute,
   startRetrievalCompute,
@@ -49,7 +50,17 @@ const sameSettings = (a: Draft, b: Draft): boolean =>
   a.datasetIds.length === b.datasetIds.length &&
   a.datasetIds.every((id) => b.datasetIds.includes(id));
 
-export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () => void } = {}) {
+export default function RetrievalMetricsPanel({
+  onRunSaved,
+  viewRunId,
+  onViewRunChange,
+}: {
+  onRunSaved?: () => void;
+  // The saved run to display (from the history list); null shows a fresh/empty panel.
+  viewRunId?: string | null;
+  // Asked to change which run is displayed (e.g. after a fresh compute snapshots a new run).
+  onViewRunChange?: (id: string | null) => void;
+} = {}) {
   const { canWrite } = usePermissions();
   const canEdit = canWrite("pipeline");
 
@@ -81,9 +92,14 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
   // The run auto-snapshotted from the current Overall compute, for inline metadata annotation.
   const [savedRun, setSavedRun] = useState<RetrievalRunRecord | null>(null);
   const savedNonceRef = useRef<number | null>(null);
-  // Keep the latest onRunSaved without making it an effect dependency (would re-run on each render).
+  // Keep the latest callbacks without making them effect dependencies (would re-run each render).
   const onRunSavedRef = useRef(onRunSaved);
   onRunSavedRef.current = onRunSaved;
+  const onViewRunChangeRef = useRef(onViewRunChange);
+  onViewRunChangeRef.current = onViewRunChange;
+  // The run id whose stored data is currently displayed, so we don't refetch a run we just showed
+  // (including the one a fresh compute just snapshotted).
+  const loadedRunIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     getEvalRuns({ limit: "50" })
@@ -170,6 +186,10 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
         );
         if (!signal.aborted) {
           setSavedRun(rec);
+          // The fresh result is already on screen; mark this run as displayed and select it in the
+          // history so the load-run effect skips a redundant refetch.
+          loadedRunIdRef.current = rec.id;
+          onViewRunChangeRef.current?.(rec.id);
           onRunSavedRef.current?.();
         }
       } catch {
@@ -206,6 +226,38 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
     return () => controller.abort();
   }, [applied]);
 
+  // Display a saved run's stored metrics/by-stage (from the history list, or the default latest).
+  // No recompute — the blobs are read straight off the run. Skips a run we already show (e.g. the
+  // one a fresh compute just snapshotted). Setting applied=null exits fresh-compute mode.
+  useEffect(() => {
+    if (!viewRunId || viewRunId === loadedRunIdRef.current) return;
+    const controller = new AbortController();
+    getRetrievalRun(viewRunId, controller.signal)
+      .then((rec) => {
+        if (controller.signal.aborted) return;
+        loadedRunIdRef.current = rec.id;
+        savedNonceRef.current = null;
+        setApplied(null);
+        setError(null);
+        setByStageError(null);
+        setLoading(false);
+        setByStageLoading(false);
+        setOverall(rec.metrics ?? null);
+        setByStage(rec.by_stage ?? null);
+        setSavedRun(rec);
+        setDraft((d) => ({
+          ...d,
+          source: "labels",
+          goldSource: (rec.gold_source as GoldSource) || "human",
+          datasetIds: rec.dataset_ids,
+        }));
+      })
+      .catch(() => {
+        /* a deleted/invalid run just leaves the current view in place */
+      });
+    return () => controller.abort();
+  }, [viewRunId]);
+
   const canCompute = draft.source === "labels" ? draft.datasetIds.length > 0 : runs.length > 0;
   const dirty = !applied || !sameSettings(draft, applied) || applied.refresh;
 
@@ -218,7 +270,12 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
     setApplied((prev) => (prev ? { ...prev, refresh: true, nonce: prev.nonce + 1 } : prev));
   };
 
-  const showByStage = applied?.source === "labels";
+  // What's on screen: a fresh compute (applied) or a saved run being viewed (savedRun). null → the
+  // initial empty prompt. Viewed runs are always the labels path.
+  const displaySource: Source | null = applied?.source ?? (savedRun ? "labels" : null);
+  const displayGold: GoldSource =
+    applied?.goldSource ?? (savedRun?.gold_source as GoldSource) ?? "human";
+  const showByStage = displaySource === "labels";
   const computedAt = overall?.computed_at ?? byStage?.computed_at;
 
   // Cutoffs available for the current view; the selected k falls back to the deepest when unset or
@@ -346,7 +403,7 @@ export default function RetrievalMetricsPanel({ onRunSaved }: { onRunSaved?: () 
       {error ? <ErrorNotice error={error} className="mb-4" /> : null}
 
       {/* Results header: cutoff selector + when the numbers were computed + a Recompute action. */}
-      {applied && (computedAt || loading) && (
+      {displaySource && (computedAt || loading) && (
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-3 flex-wrap">
             {(overall?.available || byStage?.available) && (

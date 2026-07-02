@@ -144,9 +144,45 @@ async def test_search_files_dedupes_and_counts():
 
 
 @pytest.mark.asyncio
+async def test_search_files_classifies_scraped_vs_confluence_page():
+    # rde indexer: scraped/external pages have a hashed 16-hex page_id ("web"),
+    # Confluence pages have all-numeric page_ids ("page"). Both group by page_id.
+    p = _azure_provider(
+        {
+            "id": ("Edm.String", True),
+            "attachment_filename": ("Edm.String", False),
+            "page_title": ("Edm.String", False),
+            "page_id": ("Edm.String", False),
+            "page_url": ("Edm.String", False),
+        }
+    )
+    hits = [
+        {"page_title": "Scraped Docs", "page_id": "a1b2c3d4e5f60718", "page_url": "https://ex.com/d"},
+        {"page_title": "Scraped Docs", "page_id": "a1b2c3d4e5f60718"},  # dup
+        {"page_title": "Confluence Home", "page_id": "123456789"},
+    ]
+
+    class _FakeClient:
+        async def search(self, **kwargs):
+            if kwargs.get("top") == 0 and kwargs.get("include_total_count"):
+                count = 9 if "a1b2c3d4e5f60718" in (kwargs.get("filter") or "") else 4
+                return _FakeResults([], count=count)
+            return _FakeResults(hits)
+
+    p._search_client = _FakeClient()
+
+    matches = await p.search_files("docs", 25)
+    by_value = {m.value: m for m in matches}
+    assert by_value["a1b2c3d4e5f60718"].kind == "web"
+    assert by_value["a1b2c3d4e5f60718"].key == "page_id"
+    assert by_value["a1b2c3d4e5f60718"].label == "Scraped Docs"
+    assert by_value["a1b2c3d4e5f60718"].chunk_count == 9
+    assert by_value["123456789"].kind == "page"  # all-numeric → Confluence
+
+
+@pytest.mark.asyncio
 async def test_search_files_groups_scraped_page_by_url_when_no_page_id():
-    # Scraped web pages have a URL and a title but no page_id value — they must
-    # group by URL, not be dropped.
+    # Fallback path: a page with a URL/title but no page_id value groups by URL.
     p = _azure_provider(
         {
             "id": ("Edm.String", True),
