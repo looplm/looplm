@@ -112,12 +112,18 @@ async def search_files(
             url = doc.get(f["attachment_url"]) if f["attachment_url"] else None
         else:
             title = (f["page_title"] and doc.get(f["page_title"])) or ""
-            group_field = f["parent"] or f["page_title"]
-            raw = doc.get(group_field) if group_field else None
+            url = doc.get(f["page_url"]) if f["page_url"] else None
+            # Group pages by the most stable identifier that has a *value* on this
+            # doc: a parent id (Confluence page_id), else the URL (scraped web
+            # pages have a URL but often no page_id), else the title.
+            group_field, raw = None, None
+            for candidate in (f["parent"], f["page_url"], f["page_title"]):
+                if candidate and doc.get(candidate):
+                    group_field, raw = candidate, doc.get(candidate)
+                    break
             if not raw:
                 continue
             key, value, label, kind = group_field, str(raw), str(title or raw), "page"
-            url = doc.get(f["page_url"]) if f["page_url"] else None
         dedupe = (kind, key, value)
         if dedupe not in seen:
             seen[dedupe] = FileMatch(

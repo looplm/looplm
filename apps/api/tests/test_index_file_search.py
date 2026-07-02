@@ -144,6 +144,39 @@ async def test_search_files_dedupes_and_counts():
 
 
 @pytest.mark.asyncio
+async def test_search_files_groups_scraped_page_by_url_when_no_page_id():
+    # Scraped web pages have a URL and a title but no page_id value — they must
+    # group by URL, not be dropped.
+    p = _azure_provider(
+        {
+            "id": ("Edm.String", True),
+            "attachment_filename": ("Edm.String", False),
+            "page_title": ("Edm.String", False),
+            "page_id": ("Edm.String", False),
+            "page_url": ("Edm.String", False),
+        }
+    )
+    hits = [
+        {"page_title": "Docs Home", "page_url": "https://ex.com/docs"},  # no page_id value
+        {"page_title": "Docs Home", "page_url": "https://ex.com/docs"},  # dup
+    ]
+
+    class _FakeClient:
+        async def search(self, **kwargs):
+            if kwargs.get("top") == 0 and kwargs.get("include_total_count"):
+                return _FakeResults([], count=7)
+            return _FakeResults(hits)
+
+    p._search_client = _FakeClient()
+
+    matches = await p.search_files("docs", 25)
+    assert len(matches) == 1
+    assert matches[0].kind == "page"
+    assert matches[0].key == "page_url" and matches[0].value == "https://ex.com/docs"
+    assert matches[0].label == "Docs Home" and matches[0].chunk_count == 7
+
+
+@pytest.mark.asyncio
 async def test_search_files_returns_empty_without_name_fields():
     # No filename/title field to search → empty, no error.
     p = _azure_provider({"id": ("Edm.String", True), "chunk_text": ("Edm.String", False)})
