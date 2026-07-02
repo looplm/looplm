@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bulkDeleteRetrievalRuns,
   deleteRetrievalRun,
@@ -16,7 +16,19 @@ import { RunCompare } from "@/components/retrieval/run-compare";
 
 // Durable history of saved retrieval runs: annotate, prune, and compare. Auto-refetches when the
 // panel snapshots a new run (via refreshKey).
-export function RunHistory({ refreshKey, canEdit }: { refreshKey: number; canEdit: boolean }) {
+export function RunHistory({
+  refreshKey,
+  canEdit,
+  selectedRunId,
+  onSelectRun,
+}: {
+  refreshKey: number;
+  canEdit: boolean;
+  // The run currently displayed in the metrics panel (highlighted here).
+  selectedRunId?: string | null;
+  // Change which run the panel displays (also used to default to the latest / recover after delete).
+  onSelectRun?: (id: string | null) => void;
+}) {
   const [runs, setRuns] = useState<RetrievalRunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -26,12 +38,24 @@ export function RunHistory({ refreshKey, canEdit }: { refreshKey: number; canEdi
   const [compareRuns, setCompareRuns] = useState<RetrievalRunRecord[] | null>(null);
   const [comparing, setComparing] = useState(false);
 
+  // Refs so load() stays stable (no refetch on every selection change).
+  const selectedRunIdRef = useRef(selectedRunId);
+  selectedRunIdRef.current = selectedRunId;
+  const onSelectRunRef = useRef(onSelectRun);
+  onSelectRunRef.current = onSelectRun;
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await listRetrievalRuns();
       setRuns(res.data);
       setSelected((prev) => new Set([...prev].filter((id) => res.data.some((r) => r.id === id))));
+      // Keep the panel's displayed run valid: default to the latest when nothing is selected, and
+      // recover to the latest if the selected run was just deleted.
+      const cur = selectedRunIdRef.current;
+      if (onSelectRunRef.current && (!cur || !res.data.some((r) => r.id === cur))) {
+        onSelectRunRef.current(res.data[0]?.id ?? null);
+      }
     } catch {
       setRuns([]);
     } finally {
@@ -156,8 +180,10 @@ export function RunHistory({ refreshKey, canEdit }: { refreshKey: number; canEdi
                 run={r}
                 checked={selected.has(r.id)}
                 editing={editingId === r.id}
+                viewing={selectedRunId === r.id}
                 canEdit={canEdit}
                 onToggle={() => toggle(r.id)}
+                onView={() => onSelectRun?.(r.id)}
                 onEdit={() => setEditingId((cur) => (cur === r.id ? null : r.id))}
                 onDelete={() => setDeleteId(r.id)}
                 onSaved={(u) => {
@@ -214,8 +240,10 @@ function RunRow({
   run,
   checked,
   editing,
+  viewing,
   canEdit,
   onToggle,
+  onView,
   onEdit,
   onDelete,
   onSaved,
@@ -223,8 +251,10 @@ function RunRow({
   run: RetrievalRunSummary;
   checked: boolean;
   editing: boolean;
+  viewing: boolean;
   canEdit: boolean;
   onToggle: () => void;
+  onView: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onSaved: (u: RetrievalRunRecord) => void;
@@ -232,8 +262,16 @@ function RunRow({
   const k = run.max_k ?? "";
   return (
     <>
-      <tr className="border-b border-gray-100/50 dark:border-slate-800/50 align-top">
-        <td className="px-3 py-2.5">
+      <tr
+        onClick={onView}
+        title="Show this run in the metrics panel above"
+        className={`border-b border-gray-100/50 dark:border-slate-800/50 align-top cursor-pointer ${
+          viewing
+            ? "bg-indigo-50/70 dark:bg-indigo-500/10"
+            : "hover:bg-gray-50/70 dark:hover:bg-slate-800/30"
+        }`}
+      >
+        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
           <input
             type="checkbox"
             checked={checked}
@@ -273,7 +311,7 @@ function RunRow({
         <td className="px-3 py-2.5 text-right tabular-nums text-gray-500 dark:text-slate-400">
           {run.evaluated_cases}/{run.total_cases}
         </td>
-        <td className="px-3 py-2.5 text-right whitespace-nowrap">
+        <td className="px-3 py-2.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
           {canEdit && (
             <>
               <button onClick={onEdit} className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">

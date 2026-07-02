@@ -266,7 +266,11 @@ export default function RetrievalMetricsPanel({
     setApplied((prev) => ({ ...draft, refresh, nonce: (prev?.nonce ?? 0) + 1 }));
   };
   const recompute = () => {
-    if (!applied) return;
+    // Viewing a saved run (no applied): run fresh with the run's settings, already synced to draft.
+    if (!applied) {
+      compute(true);
+      return;
+    }
     setApplied((prev) => (prev ? { ...prev, refresh: true, nonce: prev.nonce + 1 } : prev));
   };
 
@@ -419,7 +423,7 @@ export default function RetrievalMetricsPanel({
         </div>
       )}
 
-      {!applied ? (
+      {!displaySource ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
           Choose your source, datasets and gold above, then press{" "}
           <span className="font-medium text-gray-700 dark:text-slate-200">Compute metrics</span>.
@@ -427,7 +431,7 @@ export default function RetrievalMetricsPanel({
       ) : (
         <>
           {/* Overall — the single best-available ranking. */}
-          {savedRun && applied.source === "labels" && (
+          {savedRun && displaySource === "labels" && (
             <RunMetadataEditor
               run={savedRun}
               canEdit={canEdit}
@@ -443,7 +447,7 @@ export default function RetrievalMetricsPanel({
             </div>
           ) : !overall || !overall.available ? (
             <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">
-              {applied.source === "labels" ? (
+              {displaySource === "labels" ? (
                 <>
                   No chunk relevance labels for these datasets yet, or no index is connected to
                   probe. Judge candidates on the Labeling page (and connect an index provider), then
@@ -462,7 +466,7 @@ export default function RetrievalMetricsPanel({
               overall={overall}
               targets={targets}
               activeK={activeK}
-              source={applied.source}
+              source={displaySource}
             />
           )}
 
@@ -474,7 +478,7 @@ export default function RetrievalMetricsPanel({
               <ByStageComparison
                 data={byStage}
                 loading={byStageLoading}
-                goldSource={applied.goldSource}
+                goldSource={displayGold}
                 selectedK={activeK}
               />
             </div>

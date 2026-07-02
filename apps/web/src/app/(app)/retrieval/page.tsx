@@ -11,6 +11,9 @@ export default function RetrievalPage() {
   const canEdit = canWrite("pipeline");
   // Bumped whenever the panel auto-saves or edits a run, so the history list refetches.
   const [runsRefresh, setRunsRefresh] = useState(0);
+  // The saved run shown in the metrics panel. Defaults to the latest (set by RunHistory once loaded)
+  // and follows clicks in the history list.
+  const [viewRunId, setViewRunId] = useState<string | null>(null);
 
   return (
     <div>
@@ -35,7 +38,11 @@ export default function RetrievalPage() {
         <RetrievalTargetsConfig canEdit={canEdit} />
       </details>
 
-      <RetrievalMetricsPanel onRunSaved={() => setRunsRefresh((n) => n + 1)} />
+      <RetrievalMetricsPanel
+        onRunSaved={() => setRunsRefresh((n) => n + 1)}
+        viewRunId={viewRunId}
+        onViewRunChange={setViewRunId}
+      />
 
       <details className="mt-12 group">
         <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
@@ -47,7 +54,12 @@ export default function RetrievalPage() {
           version and index name/version, then select two or more to compare how retrieval quality
           moved as the pipeline and index changed.
         </p>
-        <RunHistory refreshKey={runsRefresh} canEdit={canEdit} />
+        <RunHistory
+          refreshKey={runsRefresh}
+          canEdit={canEdit}
+          selectedRunId={viewRunId}
+          onSelectRun={setViewRunId}
+        />
       </details>
     </div>
   );
