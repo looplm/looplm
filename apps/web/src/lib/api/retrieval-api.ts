@@ -142,6 +142,12 @@ export const updateRetrievalRunMeta = (runId: string, meta: RetrievalRunMetadata
 export const deleteRetrievalRun = (runId: string) =>
   request<{ deleted: boolean }>(`/api/pipeline/retrieval-runs/${runId}`, { method: "DELETE" });
 
+export const bulkDeleteRetrievalRuns = (runIds: string[]) =>
+  request<{ deleted: number }>(`/api/pipeline/retrieval-runs/bulk-delete`, {
+    method: "POST",
+    body: JSON.stringify({ run_ids: runIds }),
+  });
+
 export const getLabelingView = (datasetId?: string) =>
   request<LabelingRunResponse>(
     `/api/pipeline/labeling${datasetId ? `?dataset_id=${encodeURIComponent(datasetId)}` : ""}`,

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  bulkDeleteRetrievalRuns,
   deleteRetrievalRun,
   getRetrievalRun,
   listRetrievalRuns,
@@ -21,6 +22,7 @@ export function RunHistory({ refreshKey, canEdit }: { refreshKey: number; canEdi
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [compareRuns, setCompareRuns] = useState<RetrievalRunRecord[] | null>(null);
   const [comparing, setComparing] = useState(false);
 
@@ -49,6 +51,11 @@ export function RunHistory({ refreshKey, canEdit }: { refreshKey: number; canEdi
       return next;
     });
 
+  const allSelected = runs.length > 0 && selected.size === runs.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(runs.map((r) => r.id)));
+
   const compare = async () => {
     setComparing(true);
     try {
@@ -66,6 +73,17 @@ export function RunHistory({ refreshKey, canEdit }: { refreshKey: number; canEdi
     setDeleteId(null);
     await deleteRetrievalRun(id);
     setCompareRuns((prev) => prev?.filter((r) => r.id !== id) ?? null);
+    await load();
+  };
+
+  const confirmBulkDelete = async () => {
+    const ids = runs.filter((r) => selected.has(r.id)).map((r) => r.id);
+    setBulkDeleteOpen(false);
+    if (!ids.length) return;
+    await bulkDeleteRetrievalRuns(ids);
+    const removed = new Set(ids);
+    setCompareRuns((prev) => prev?.filter((r) => !removed.has(r.id)) ?? null);
+    setSelected(new Set());
     await load();
   };
 
@@ -87,20 +105,41 @@ export function RunHistory({ refreshKey, canEdit }: { refreshKey: number; canEdi
         <span className="text-xs text-gray-400 dark:text-slate-500">
           {runs.length} run{runs.length === 1 ? "" : "s"} · {selected.size} selected
         </span>
-        <button
-          onClick={compare}
-          disabled={selected.size < 2 || comparing}
-          className="text-xs font-medium rounded-lg px-3 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-        >
-          {comparing ? "Loading…" : `Compare (${selected.size})`}
-        </button>
+        <div className="flex items-center gap-2">
+          {canEdit && selected.size > 0 && (
+            <button
+              onClick={() => setBulkDeleteOpen(true)}
+              className="text-xs font-medium rounded-lg px-3 py-1.5 bg-red-600 text-white hover:bg-red-700"
+            >
+              Delete selected ({selected.size})
+            </button>
+          )}
+          <button
+            onClick={compare}
+            disabled={selected.size < 2 || comparing}
+            className="text-xs font-medium rounded-lg px-3 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {comparing ? "Loading…" : `Compare (${selected.size})`}
+          </button>
+        </div>
       </div>
 
       <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 dark:border-slate-800 text-left text-gray-500 dark:text-slate-400">
-              <th className="px-3 py-2.5 w-8" />
+              <th className="px-3 py-2.5 w-8">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someSelected;
+                  }}
+                  onChange={toggleAll}
+                  aria-label={allSelected ? "Deselect all runs" : "Select all runs"}
+                  className="rounded border-gray-300 dark:border-slate-600"
+                />
+              </th>
               <th className="px-3 py-2.5 font-medium">Run</th>
               <th className="px-3 py-2.5 font-medium">Pipeline / index</th>
               <th className="px-3 py-2.5 font-medium text-right">Recall@k</th>
@@ -154,6 +193,17 @@ export function RunHistory({ refreshKey, canEdit }: { refreshKey: number; canEdi
           confirmVariant="danger"
           onConfirm={confirmDelete}
           onCancel={() => setDeleteId(null)}
+        />
+      )}
+
+      {bulkDeleteOpen && (
+        <ConfirmModal
+          title={`Delete ${selected.size} run${selected.size === 1 ? "" : "s"}?`}
+          message="This permanently removes the selected snapshots and their metadata. This cannot be undone."
+          confirmLabel={`Delete ${selected.size}`}
+          confirmVariant="danger"
+          onConfirm={confirmBulkDelete}
+          onCancel={() => setBulkDeleteOpen(false)}
         />
       )}
     </div>

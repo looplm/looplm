@@ -8,19 +8,22 @@ how the metric blobs are produced; this router only persists, lists, annotates a
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
 from app.models.index_providers import IndexProvider
+from app.models.models import Integration, Trace
 from app.models.project import Project
 from app.models.retrieval_runs import RetrievalRun
 from app.models.user import User
 from app.schemas.retrieval import (
+    RetrievalRunBulkDelete,
     RetrievalRunCreate,
     RetrievalRunListResponse,
     RetrievalRunMetadataUpdate,
@@ -29,9 +32,39 @@ from app.schemas.retrieval import (
 )
 from app.services.retrieval_labels_metrics import (
     compute_overall_labels_metrics,
+    datasets_label,
     get_cached_by_stage,
     resolve_datasets,
 )
+
+_GOLD_LABELS = {"human": "Human labels", "ai": "AI labels", "both": "Human+AI labels"}
+
+
+def _default_run_name(gold_source: str, dataset_name: str) -> str:
+    """A readable default run name: dataset(s) · gold source · date."""
+    label = _GOLD_LABELS.get(gold_source, gold_source)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"{dataset_name} · {label} · {today}"
+
+
+async def _latest_pipeline_version(db: AsyncSession, project: Project) -> str | None:
+    """The RAG app version on the most recent trace — the pipeline version live for this run.
+
+    Reads ``metadata.appVersion`` (Langfuse's trace ``release`` is mirrored there); returns None
+    when the project has no traces or none carry a version. Only the metadata column is selected so
+    this never loads the (large) raw trace payloads.
+    """
+    project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
+    meta = (
+        await db.execute(
+            select(Trace.trace_metadata)
+            .where(Trace.integration_id.in_(project_integration_ids))
+            .order_by(Trace.start_time.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    version = (meta or {}).get("appVersion")
+    return str(version) if version else None
 
 router = APIRouter(
     prefix="/api/pipeline/retrieval-runs",
@@ -148,6 +181,12 @@ async def create_run(
     if provider is not None:
         index_name = (provider.config or {}).get("index_name") or provider.name
 
+    # Auto-fill the annotatable metadata so a fresh snapshot arrives pre-populated (all still
+    # editable): a readable default name, the RAG pipeline version from the latest trace, and the
+    # connected index name. Index version has no reliable source, so it stays blank for the user.
+    _, ds_name = datasets_label(datasets)
+    pipeline_version = await _latest_pipeline_version(db, project)
+
     run = RetrievalRun(
         project_id=project.id,
         created_by=user.id,
@@ -159,8 +198,9 @@ async def create_run(
         by_stage=by_stage.model_dump() if by_stage is not None else None,
         total_cases=metrics.total_cases,
         evaluated_cases=metrics.evaluated_cases,
-        name=body.name,
+        name=body.name or _default_run_name(body.gold_source, ds_name),
         index_name=index_name,
+        pipeline_version=pipeline_version,
     )
     db.add(run)
     await db.flush()
@@ -182,6 +222,33 @@ async def list_runs(
         )
     ).scalars().all()
     return RetrievalRunListResponse(data=[_summary(r) for r in rows])
+
+
+@router.post("/bulk-delete", dependencies=[require_write("evaluate", "pipeline")])
+async def bulk_delete_runs(
+    body: RetrievalRunBulkDelete,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Prune several saved runs at once (only those owned by the project). Returns the count.
+
+    Declared before ``/{run_id}`` so the literal path wins the route match.
+    """
+    ids: list[UUID] = []
+    for rid in body.run_ids:
+        try:
+            ids.append(UUID(rid))
+        except (ValueError, AttributeError):
+            continue
+    if not ids:
+        return {"deleted": 0}
+    result = await db.execute(
+        delete(RetrievalRun).where(
+            RetrievalRun.project_id == project.id, RetrievalRun.id.in_(ids)
+        )
+    )
+    await db.flush()
+    return {"deleted": result.rowcount or 0}
 
 
 @router.get("/{run_id}", response_model=RetrievalRunRecord)

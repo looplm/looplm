@@ -521,6 +521,12 @@ class RetrievalRunListResponse(BaseModel):
     data: list[RetrievalRunSummary] = Field(default_factory=list)
 
 
+class RetrievalRunBulkDelete(BaseModel):
+    """Request to prune several saved runs at once."""
+
+    run_ids: list[str] = Field(default_factory=list)
+
+
 class RetrievalComputeStart(BaseModel):
     """Request to start a detached labels-path metrics compute."""
 
