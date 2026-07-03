@@ -279,6 +279,41 @@ export interface ByStageMetricsResponse {
   computed_at?: string | null;
 }
 
+// --- Per-case retrieval diagnosis (why were relevant chunks missed?) ---
+
+export interface DiagnosedChunk {
+  chunk_id: string;
+  title?: string | null;
+  url?: string | null;
+  // Gold relevance grade (1..3).
+  grade?: number | null;
+  // 1-based rank in the retriever's full ranked list, or null if it never surfaced.
+  rank?: number | null;
+  // not_in_index | missing_embedding | bad_chunk | buried | unretrievable
+  verdict: string;
+  // Quality flags (tiny | giant | mojibake | table_heavy | markup_heavy | missing_embedding | empty).
+  flags: string[];
+  token_estimate?: number | null;
+  has_embedding?: boolean | null;
+  content_preview?: string | null;
+}
+
+export interface CaseDiagnosisResponse {
+  provider_connected: boolean;
+  available: boolean;
+  test_id: string;
+  query?: string | null;
+  retriever: string;
+  k: number;
+  relevant_count: number;
+  retrieved_count: number;
+  retrieved_relevant_count: number;
+  missed_count: number;
+  // verdict -> count.
+  summary: Record<string, number>;
+  missed: DiagnosedChunk[];
+}
+
 // --- Quantitative retrieval-quality metrics (eval-run based) ---
 
 export interface RetrievalCaseMetrics {

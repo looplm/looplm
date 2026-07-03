@@ -9,6 +9,7 @@ import type {
   RetrievalRunMetrics,
   RetrievalTargets,
   ByStageMetricsResponse,
+  CaseDiagnosisResponse,
   LabelingRunResponse,
   LabelingPoolResponse,
   ChunkLabelUpsert,
@@ -74,6 +75,29 @@ export const getRetrievalByStageMetrics = (
   const qs = params.toString();
   return request<ByStageMetricsResponse>(
     `/api/pipeline/retrieval-metrics/by-stage${qs ? `?${qs}` : ""}`,
+    { signal },
+  );
+};
+
+// Per-case retrieval diagnosis: which judged-relevant chunks a retriever missed, and why
+// (not_in_index / missing_embedding / bad_chunk / buried / unretrievable).
+export const getCaseDiagnosis = (
+  opts: {
+    testId: string;
+    k?: number;
+    retriever?: string;
+    goldSource?: "human" | "ai" | "both";
+    refresh?: boolean;
+  },
+  signal?: AbortSignal,
+) => {
+  const params = new URLSearchParams({ test_id: opts.testId });
+  if (opts.k) params.set("k", String(opts.k));
+  if (opts.retriever) params.set("retriever", opts.retriever);
+  if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
+  if (opts.refresh) params.set("refresh", "true");
+  return request<CaseDiagnosisResponse>(
+    `/api/pipeline/case-diagnosis?${params.toString()}`,
     { signal },
   );
 };

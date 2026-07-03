@@ -471,6 +471,8 @@ export default function RetrievalMetricsPanel({
             targets={targets}
             retrieverLabel={retrieverLabel}
             retrieverNote={RETRIEVER_NOTES[selectedRetriever]}
+            retriever={selectedRetriever}
+            goldSource={displayGold}
             perRetriever={!useBest}
             bestAvailable={!!overall?.available}
           />

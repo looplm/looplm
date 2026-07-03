@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { RetrievalCaseMetrics, SliceMetrics } from "@/lib/api";
 import { EXPLAIN, pct } from "./constants";
 import { Info } from "./metric-card";
 import { MiniBar } from "./recall-curve";
+import { CaseDiagnosisPanel } from "./case-diagnosis";
 
 // Coverage guidance: below ~25 measured queries, run-to-run metric deltas are mostly noise;
 // 50+ gives trustworthy comparisons. Silent at >=50 to avoid clutter.
@@ -161,6 +162,7 @@ export function PerCaseResults({
   },
   ratioHeader = "Found / Exp",
   ratioInfo = EXPLAIN.ratioRecall,
+  diagnose = null,
 }: {
   cases: RetrievalCaseMetrics[];
   largestK: number;
@@ -177,10 +179,18 @@ export function PerCaseResults({
   ratio?: ((c: RetrievalCaseMetrics) => { num: number; den: number } | null) | null;
   ratioHeader?: string;
   ratioInfo?: string;
+  // When set (chunk-labels path), each row gets a "Diagnose" toggle that expands the per-case
+  // chunk diagnosis for this retriever + k. Null on the URLs path (no chunk-level truth).
+  diagnose?: { retriever: string; goldSource: "human" | "ai" | "both" } | null;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "metric", dir: "asc" });
   const onSort = (k: SortKey) =>
     setSort((s) => (s.key === k ? { key: k, dir: s.dir === "asc" ? "desc" : "asc" } : { key: k, dir: INITIAL_DIR[k] }));
+  // Which case's diagnosis is expanded (one at a time keeps the table compact).
+  const [openId, setOpenId] = useState<string | null>(null);
+  // Columns the expanded diagnosis row must span: query + relevant + metric + firsthit (4 fixed),
+  // plus the optional detail (ratio) and diagnose columns.
+  const colCount = 4 + (ratio ? 1 : 0) + (diagnose ? 1 : 0);
 
   // If the detail column is hidden (nDCG/hit-rate) but it was the active sort, fall back to metric.
   const key: SortKey = sort.key === "detail" && !ratio ? "metric" : sort.key;
@@ -249,12 +259,13 @@ export function PerCaseResults({
               <SortTh sortKey="firsthit" sort={sort} onSort={onSort} info={EXPLAIN.firstHit} className="px-2 py-2 whitespace-nowrap">
                 1st hit
               </SortTh>
+              {diagnose && <th className="px-2 py-2 w-0" />}
             </tr>
           </thead>
           <tbody>
             {sorted.map((c) => (
+              <Fragment key={c.test_id}>
               <tr
-                key={c.test_id}
                 className="border-b border-gray-50 dark:border-slate-800/50 hover:bg-gray-50/60 dark:hover:bg-slate-800/30"
               >
                 <td className="px-4 py-2.5 max-w-[280px]">
@@ -299,7 +310,32 @@ export function PerCaseResults({
                 <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">
                   {c.first_relevant_rank ?? "-"}
                 </td>
+                {diagnose && (
+                  <td className="px-2 py-2.5 text-right whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => setOpenId((id) => (id === c.test_id ? null : c.test_id))}
+                      className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+                      title="Diagnose why this case's relevant chunks were missed"
+                    >
+                      {openId === c.test_id ? "Hide" : "Diagnose"}
+                    </button>
+                  </td>
+                )}
               </tr>
+              {diagnose && openId === c.test_id && (
+                <tr className="border-b border-gray-100 dark:border-slate-800">
+                  <td colSpan={colCount} className="p-0">
+                    <CaseDiagnosisPanel
+                      testId={c.test_id}
+                      k={largestK}
+                      retriever={diagnose.retriever}
+                      goldSource={diagnose.goldSource}
+                    />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>

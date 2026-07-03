@@ -63,6 +63,8 @@ export type {
   RerankThresholdPoint,
   ByStageCaseMetrics,
   ByStageMetricsResponse,
+  DiagnosedChunk,
+  CaseDiagnosisResponse,
   RetrievalRunSummary,
   RetrievalRunRecord,
   RetrievalRunCreateBody,
