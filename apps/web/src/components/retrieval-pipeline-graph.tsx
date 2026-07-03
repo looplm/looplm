@@ -22,6 +22,7 @@ import type {
   RetrievalMetric,
 } from "@/lib/api";
 import { getLayoutedElements } from "@/lib/graph-utils";
+import EditablePipelineEdge from "@/components/editable-pipeline-edge";
 
 // --- Node data ---
 
@@ -116,6 +117,7 @@ function PipelineNode({ data, selected }: NodeProps<Node<PipelineNodeData>>) {
 }
 
 const nodeTypes = { pipelineNode: PipelineNode };
+const edgeTypes = { editable: EditablePipelineEdge };
 
 // --- Detail panel ---
 
@@ -206,8 +208,9 @@ export default function RetrievalPipelineGraph({ data }: { data: RetrievalPipeli
         id: `re-${i}-${e.source}-${e.target}`,
         source: e.source,
         target: e.target,
-        type: "smoothstep",
+        type: "editable",
         animated: fallback,
+        data: { fallback },
         style: {
           stroke: fallback ? (dark ? "#b45309" : "#f59e0b") : dark ? "#475569" : "#cbd5e1",
           strokeWidth: 1.5,
@@ -221,11 +224,17 @@ export default function RetrievalPipelineGraph({ data }: { data: RetrievalPipeli
       };
     });
 
+    // Fallback edges (e.g. "broaden & retry") loop backward and close a cycle in the
+    // otherwise-linear pipeline. Feeding them to the layout engine forces it to break the
+    // cycle by reversing an arbitrary edge, which scrambles the vertical ordering. Lay out
+    // on the forward edges only, then render all edges (the fallback routes over the result).
+    const layoutEdges = rawEdges.filter((_, i) => (data.edges ?? [])[i]?.kind !== "fallback");
+
     let cancelled = false;
-    getLayoutedElements(rawNodes, rawEdges, "TB").then((layouted) => {
+    getLayoutedElements(rawNodes, layoutEdges, "TB").then((layouted) => {
       if (!cancelled) {
         setNodes(layouted.nodes);
-        setEdges(layouted.edges);
+        setEdges(rawEdges);
       }
     });
     return () => {
@@ -240,7 +249,7 @@ export default function RetrievalPipelineGraph({ data }: { data: RetrievalPipeli
   const onPaneClick = useCallback(() => setSelected(null), []);
 
   return (
-    <div className="w-full h-[640px] rounded-xl overflow-hidden border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 relative">
+    <div className="w-full h-full min-h-[480px] rounded-xl overflow-hidden border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 relative">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -249,6 +258,7 @@ export default function RetrievalPipelineGraph({ data }: { data: RetrievalPipeli
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
         proOptions={PRO_OPTIONS}

@@ -112,8 +112,11 @@ def build_retrieval_pipeline_aggregate(
         edge("score_filter", "context_assembly"),
         edge("context_assembly", "generation"),
         edge("generation", "judge"),
-        # Broadening: on a thin/empty result set the agent loosens filters and searches again.
-        edge("score_filter", "keyword", label="broaden & retry", kind="fallback"),
+        # Broadening: when the filtered pass keeps nothing, rde-gpt re-runs the SAME expanded
+        # queries with the team/tag/source filters dropped (all teams + sources) — a fresh
+        # hybrid search call, not a re-expansion. So the loop returns to the hybrid search
+        # (RRF) rather than to query expansion.
+        edge("score_filter", "rrf", label="no hits → retry without filters", kind="fallback"),
     ]
 
     return RetrievalPipelineResponse(

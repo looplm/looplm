@@ -111,8 +111,11 @@ def test_fixed_topology_and_hybrid_separation():
     assert ("keyword", "rrf") in pairs
     assert ("vector", "rrf") in pairs
     assert ("rrf", "rerank") in pairs
-    # Broadening is a fallback edge back to search.
-    assert any(e.kind == "fallback" for e in resp.edges)
+    # Broadening re-runs the hybrid search (same queries, filters dropped), so the fallback
+    # loops back to RRF — not to keyword-only or to query expansion.
+    assert ("score_filter", "rrf") in {
+        (e.source, e.target) for e in resp.edges if e.kind == "fallback"
+    }
 
 
 def test_rollup_stats():

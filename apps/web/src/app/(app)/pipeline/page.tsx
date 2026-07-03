@@ -49,43 +49,45 @@ export default function PipelinePage() {
   }, [filters]);
 
   return (
-    <div>
-      <div className="mb-6">
+    <div className="h-full flex flex-col">
+      <div className="shrink-0 mb-4">
         <h1 className="text-3xl font-bold">Pipeline</h1>
         <p className="text-sm text-gray-500 dark:text-slate-400 mt-1 max-w-3xl">
           Your RAG pipeline, painted from traces — query through retrieval to grounded
           answer. Each node is a stage; click one for its stats. Hybrid search (keyword +
           vector + RRF) and the semantic reranker run inside one Azure AI Search call but
           are shown as the distinct stages they are. Dashed nodes are part of the pipeline
-          but not yet observable in the traces.
+          but not yet observable in the traces. Drag nodes to rearrange them, and drag the
+          dot on any connection to bend it around (double-click the dot to straighten).
         </p>
+        {data && data.available && (
+          <div className="flex items-center gap-4 mt-3 text-xs text-gray-400 dark:text-slate-500">
+            <span>{data.rag_traces} RAG requests</span>
+            <span>&middot;</span>
+            <span>{data.traces_analyzed} traces analyzed</span>
+          </div>
+        )}
       </div>
 
-      {data && data.available && (
-        <div className="flex items-center gap-4 mb-4 text-xs text-gray-400 dark:text-slate-500">
-          <span>{data.rag_traces} RAG requests</span>
-          <span>&middot;</span>
-          <span>{data.traces_analyzed} traces analyzed</span>
-        </div>
-      )}
-
       {error && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+        <div className="shrink-0 mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
+        <div className="flex-1 min-h-0 flex items-center justify-center rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 text-center text-gray-500 dark:text-slate-400">
           Reconstructing retrieval pipeline...
         </div>
       ) : !data || !data.available ? (
-        <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
+        <div className="flex-1 min-h-0 flex items-center justify-center rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-12 text-center text-gray-500 dark:text-slate-400">
           No RAG traces found for the selected filters. Sync traces from a retrieval app, or
           configure the retrieval span names in settings.
         </div>
       ) : (
-        <RetrievalPipelineGraph data={data} />
+        <div className="flex-1 min-h-0">
+          <RetrievalPipelineGraph data={data} />
+        </div>
       )}
     </div>
   );
