@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -82,6 +83,37 @@ class TestCase(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     dataset = relationship("TestDataset", back_populates="test_cases")
+
+
+class DatasetDuplicateDismissal(Base):
+    """A user-confirmed 'these two cases are NOT duplicates' record.
+
+    The duplicate scanner excludes any pair present here so a dismissed pair
+    stops resurfacing on future scans. ``case_id_a``/``case_id_b`` are stored
+    sorted (a < b as strings) so the pair is order-independent. Both FK to
+    ``test_cases`` with ``ondelete=CASCADE`` — deleting either case removes the
+    stale dismissal automatically.
+    """
+
+    __tablename__ = "dataset_duplicate_dismissals"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "case_id_a", "case_id_b", name="uq_dup_dismissal_pair"
+        ),
+        Index("idx_dup_dismissal_project_id", "project_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    case_id_a = Column(
+        UUID(as_uuid=True), ForeignKey("test_cases.id", ondelete="CASCADE"), nullable=False
+    )
+    case_id_b = Column(
+        UUID(as_uuid=True), ForeignKey("test_cases.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
 
 class JsonImport(Base):

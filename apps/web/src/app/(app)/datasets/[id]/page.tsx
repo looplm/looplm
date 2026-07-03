@@ -109,6 +109,8 @@ export default function DatasetDetailPage() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const highlightTestId = searchParams.get("highlight") || undefined;
+  const editCaseId = searchParams.get("edit") || undefined;
+  const editOpenedRef = useRef(false);
   const highlightRef = useRef<HTMLTableRowElement>(null);
   const [dataset, setDataset] = useState<TestDatasetDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -140,6 +142,17 @@ export default function DatasetDetailPage() {
       highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [highlightTestId, dataset]);
+
+  // Deep-link from the duplicates view: open the edit modal for a specific case.
+  useEffect(() => {
+    if (!editCaseId || editOpenedRef.current || !dataset) return;
+    const target = dataset.test_cases.find((c) => c.id === editCaseId);
+    if (target) {
+      editOpenedRef.current = true;
+      setEditingCase(target);
+      setShowModal(true);
+    }
+  }, [editCaseId, dataset]);
 
   async function handleSave(form: TestCaseFormData) {
     setSaving(true);

@@ -535,6 +535,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/datasets/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Duplicates
+         * @description Return duplicate / near-duplicate groups across all datasets in the project.
+         */
+        get: operations["list_duplicates_api_datasets_duplicates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasets/duplicates/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Duplicates
+         * @description Record every pair among ``case_ids`` as a confirmed non-duplicate.
+         */
+        post: operations["dismiss_duplicates_api_datasets_duplicates_dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/datasets/duplicates/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge Duplicates
+         * @description Merge ``merge_case_ids`` into ``keep_case_id`` and delete the merged ones.
+         *
+         *     List fields are unioned and empty scalars on the kept case are backfilled;
+         *     the kept case wins on conflicting context-filter / metadata keys.
+         */
+        post: operations["merge_duplicates_api_datasets_duplicates_merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/datasets/import": {
         parameters: {
             query?: never;
@@ -2048,6 +2111,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/index-explorer/chunk-metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Chunk Metadata
+         * @description All index fields for one chunk (embedding vectors omitted).
+         */
+        get: operations["chunk_metadata_api_index_explorer_chunk_metadata_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/index-explorer/file-chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * File Chunks
+         * @description Every chunk of one file, in reading order (by the index's ordinal field).
+         */
+        get: operations["file_chunks_api_index_explorer_file_chunks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/index-explorer/file-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * File Types
+         * @description The file/content-type dimension of the index and its chunk-count distribution.
+         *
+         *     Detects a facetable type field by name; returns ``field=null`` when the index
+         *     exposes none. Example chunks per type reuse the ``/tree`` endpoint.
+         */
+        get: operations["file_types_api_index_explorer_file_types_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/index-explorer/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Files
+         * @description Distinct files (attachments + pages) whose filename/title matches ``q``.
+         */
+        get: operations["files_api_index_explorer_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/index-explorer/grouping-suggestion": {
         parameters: {
             query?: never;
@@ -2788,6 +2934,130 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/retrieval-metrics/compute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Retrieval Metrics Compute
+         * @description Start a detached labels-path metrics compute and return the job to poll.
+         *
+         *     The live probe + embedding work runs in a background task that writes its result into the Redis
+         *     metrics cache; the panel then reads it via the plain ``retrieval-metrics`` endpoint. Keeping the
+         *     compute off the request means a reload / proxy timeout can't reset the socket mid-flight (which
+         *     surfaced as a phantom 500). ``view`` is ``overall`` (default) or ``byStage``.
+         */
+        post: operations["start_retrieval_metrics_compute_api_pipeline_retrieval_metrics_compute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/retrieval-metrics/compute/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Retrieval Metrics Compute
+         * @description Poll a compute job's status; carries the error + traceback (debug) when it failed.
+         */
+        get: operations["get_retrieval_metrics_compute_api_pipeline_retrieval_metrics_compute__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/retrieval-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description All saved retrieval runs for the project, newest first.
+         */
+        get: operations["list_runs_api_pipeline_retrieval_runs_get"];
+        put?: never;
+        /**
+         * Create Run
+         * @description Snapshot the current labels-path metrics as a durable run.
+         *
+         *     Computes the overall metrics (served from the warm result cache the panel just populated),
+         *     attaches the by-stage breakdown when one is already cached for the same settings, auto-captures
+         *     the connected index name, and snapshots the dataset names. Rejects when there is nothing to
+         *     measure (no gold / no index connected).
+         */
+        post: operations["create_run_api_pipeline_retrieval_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/retrieval-runs/bulk-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Delete Runs
+         * @description Prune several saved runs at once (only those owned by the project). Returns the count.
+         *
+         *     Declared before ``/{run_id}`` so the literal path wins the route match.
+         */
+        post: operations["bulk_delete_runs_api_pipeline_retrieval_runs_bulk_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/retrieval-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run
+         * @description Full detail of one saved run (metric blobs included).
+         */
+        get: operations["get_run_api_pipeline_retrieval_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Run
+         * @description Prune a saved run.
+         */
+        delete: operations["delete_run_api_pipeline_retrieval_runs__run_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Run Metadata
+         * @description Edit a run's metadata (name, pipeline version, index name/version, notes).
+         */
+        patch: operations["update_run_metadata_api_pipeline_retrieval_runs__run_id__patch"];
         trace?: never;
     };
     "/api/pipeline/targets": {
@@ -5240,6 +5510,74 @@ export interface components {
             votes?: components["schemas"]["VoteEntry"][];
         };
         /**
+         * DuplicateDismissRequest
+         * @description Mark a set of cases as mutually non-duplicate (all pairs dismissed).
+         */
+        DuplicateDismissRequest: {
+            /** Case Ids */
+            case_ids: string[];
+        };
+        /** DuplicateGroup */
+        DuplicateGroup: {
+            /** Match Type */
+            match_type: string;
+            /** Members */
+            members: components["schemas"]["DuplicateMember"][];
+            /** Score */
+            score: number;
+        };
+        /** DuplicateMember */
+        DuplicateMember: {
+            /**
+             * Case Id
+             * Format: uuid
+             */
+            case_id: string;
+            /**
+             * Dataset Id
+             * Format: uuid
+             */
+            dataset_id: string;
+            /** Dataset Name */
+            dataset_name: string;
+            /** Expected Answer */
+            expected_answer?: string | null;
+            /** Prompt */
+            prompt: string;
+            /** Score */
+            score: number;
+            /**
+             * Status
+             * @default active
+             */
+            status: string;
+            /** Test Id */
+            test_id: string;
+        };
+        /** DuplicateMergeRequest */
+        DuplicateMergeRequest: {
+            /**
+             * Keep Case Id
+             * Format: uuid
+             */
+            keep_case_id: string;
+            /** Merge Case Ids */
+            merge_case_ids: string[];
+        };
+        /** DuplicatesResponse */
+        DuplicatesResponse: {
+            /** Duplicate Cases */
+            duplicate_cases: number;
+            /** Groups */
+            groups: components["schemas"]["DuplicateGroup"][];
+            /** Scope */
+            scope: string;
+            /** Threshold */
+            threshold: number;
+            /** Total Cases */
+            total_cases: number;
+        };
+        /**
          * EmbeddingTestResult
          * @description Result of a live embedding-config test (does the embedding endpoint work?).
          */
@@ -6597,6 +6935,107 @@ export interface components {
             }[];
         };
         /**
+         * IndexChunkMetadataResponse
+         * @description All index fields for one chunk (embedding vectors omitted).
+         *
+         *     ``found`` is False when the id is not in the index. Powers the per-chunk
+         *     "metadata" toggle on the Files tab.
+         */
+        IndexChunkMetadataResponse: {
+            /** Fields */
+            fields?: {
+                [key: string]: unknown;
+            };
+            /** Found */
+            found: boolean;
+            /** Id */
+            id: string;
+        };
+        /**
+         * IndexFileChunk
+         * @description One chunk of a file, in reading order.
+         */
+        IndexFileChunk: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Ordinal */
+            ordinal?: string | null;
+            /** Snippet */
+            snippet?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+        };
+        /**
+         * IndexFileChunksResponse
+         * @description Every chunk of one file, ordered. ``ordinal_available`` is False when the
+         *     index has no ordinal field, so chunks are in index order rather than reading
+         *     order.
+         */
+        IndexFileChunksResponse: {
+            /** Documents */
+            documents?: components["schemas"]["IndexFileChunk"][];
+            /** Label */
+            label: string;
+            /** Ordinal Available */
+            ordinal_available: boolean;
+        };
+        /** IndexFileListResponse */
+        IndexFileListResponse: {
+            /** Data */
+            data?: components["schemas"]["IndexFileMatch"][];
+        };
+        /**
+         * IndexFileMatch
+         * @description A distinct file surfaced by a filename/title search.
+         *
+         *     ``key``/``value`` are the backend field and value to filter its chunks on;
+         *     ``kind`` is ``attachment`` or ``page``.
+         */
+        IndexFileMatch: {
+            /** Chunk Count */
+            chunk_count: number;
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "attachment" | "page" | "web";
+            /** Label */
+            label: string;
+            /** Url */
+            url?: string | null;
+            /** Value */
+            value: string;
+        };
+        /**
+         * IndexFileTypeValue
+         * @description One file/content type present in the index, with its chunk count.
+         */
+        IndexFileTypeValue: {
+            /** Count */
+            count: number;
+            /** Value */
+            value: string;
+        };
+        /**
+         * IndexFileTypesResponse
+         * @description The detected file-type dimension and its value distribution.
+         *
+         *     ``field`` is ``None`` when the index exposes no suitable facetable type field —
+         *     the UI then hides the section.
+         */
+        IndexFileTypesResponse: {
+            /** Field */
+            field?: string | null;
+            /** Values */
+            values?: components["schemas"]["IndexFileTypeValue"][];
+        };
+        /**
          * IndexGroupingSuggestion
          * @description The advisor's recommended grouping for an index.
          *
@@ -7188,6 +7627,8 @@ export interface components {
              * @default false
              */
             complete: boolean;
+            /** Expected Answer */
+            expected_answer?: string | null;
             /** Input */
             input?: string | null;
             /**
@@ -8390,6 +8831,40 @@ export interface components {
              */
             success: number;
         };
+        /**
+         * RerankThresholdPoint
+         * @description One point on the agentic-rerank score sweep: keep chunks with rerankerScore >= threshold.
+         *
+         *     Lets a variable-k (score) cutoff be chosen from the data instead of a fixed top-k. ``precision``
+         *     is averaged only over cases that kept at least one chunk (an empty keep is precision-undefined);
+         *     ``recall`` and ``avg_retrieved`` average over every case with gold.
+         */
+        RerankThresholdPoint: {
+            /**
+             * Avg Retrieved
+             * @default 0
+             */
+            avg_retrieved: number;
+            /**
+             * Evaluated Cases
+             * @default 0
+             */
+            evaluated_cases: number;
+            /**
+             * Hit Rate
+             * @default 0
+             */
+            hit_rate: number;
+            /** Precision */
+            precision?: number | null;
+            /**
+             * Recall
+             * @default 0
+             */
+            recall: number;
+            /** Threshold */
+            threshold: number;
+        };
         /** RerunEvalRequest */
         RerunEvalRequest: {
             /**
@@ -8465,6 +8940,8 @@ export interface components {
             condensed_ndcg_at_k?: {
                 [key: string]: number;
             };
+            /** Dataset Id */
+            dataset_id?: string | null;
             /**
              * Expected Count
              * @default 0
@@ -8477,6 +8954,10 @@ export interface components {
              * @default false
              */
             hit: boolean;
+            /** Hit Rate At K */
+            hit_rate_at_k?: {
+                [key: string]: number;
+            };
             /** Input */
             input?: string | null;
             /** Missing Urls */
@@ -8487,10 +8968,28 @@ export interface components {
             ndcg_at_k?: {
                 [key: string]: number;
             };
+            /** Precision At K */
+            precision_at_k?: {
+                [key: string]: number;
+            };
             /** Recall At K */
             recall_at_k?: {
                 [key: string]: number;
             };
+            /**
+             * Relevant Count
+             * @default 0
+             */
+            relevant_count: number;
+            /** Relevant Retrieved At K */
+            relevant_retrieved_at_k?: {
+                [key: string]: number;
+            };
+            /**
+             * Relevant Retrieved Total
+             * @default 0
+             */
+            relevant_retrieved_total: number;
             /**
              * Retrieved Count
              * @default 0
@@ -8500,6 +8999,62 @@ export interface components {
             slice?: string | null;
             /** Test Id */
             test_id: string;
+        };
+        /**
+         * RetrievalComputeJob
+         * @description Status of a detached metrics compute; the panel polls this until it settles.
+         *
+         *     ``trace`` is only populated on failure in debug builds (mirrors the sanitized 500 handler), so
+         *     the panel can offer a copy-the-stack affordance.
+         */
+        RetrievalComputeJob: {
+            /** Dataset Ids */
+            dataset_ids?: string[];
+            /** Error */
+            error?: string | null;
+            /**
+             * Gold Source
+             * @default human
+             */
+            gold_source: string;
+            /** Id */
+            id: string;
+            /** Progress Current */
+            progress_current?: number | null;
+            /** Progress Total */
+            progress_total?: number | null;
+            /** Status */
+            status: string;
+            /** Trace */
+            trace?: string | null;
+            /**
+             * View
+             * @default overall
+             */
+            view: string;
+        };
+        /**
+         * RetrievalComputeStart
+         * @description Request to start a detached labels-path metrics compute.
+         */
+        RetrievalComputeStart: {
+            /** Dataset Ids */
+            dataset_ids?: string[];
+            /**
+             * Gold Source
+             * @default human
+             */
+            gold_source: string;
+            /**
+             * Refresh
+             * @default false
+             */
+            refresh: boolean;
+            /**
+             * View
+             * @default overall
+             */
+            view: string;
         };
         /**
          * RetrievalMetric
@@ -8587,6 +9142,50 @@ export interface components {
             traces_analyzed: number;
         };
         /**
+         * RetrievalRunBulkDelete
+         * @description Request to prune several saved runs at once.
+         */
+        RetrievalRunBulkDelete: {
+            /** Run Ids */
+            run_ids?: string[];
+        };
+        /**
+         * RetrievalRunCreate
+         * @description Request to snapshot the current labels-path metrics as a saved run.
+         */
+        RetrievalRunCreate: {
+            /** Dataset Ids */
+            dataset_ids?: string[];
+            /**
+             * Gold Source
+             * @default human
+             */
+            gold_source: string;
+            /** Name */
+            name?: string | null;
+        };
+        /** RetrievalRunListResponse */
+        RetrievalRunListResponse: {
+            /** Data */
+            data?: components["schemas"]["RetrievalRunSummary"][];
+        };
+        /**
+         * RetrievalRunMetadataUpdate
+         * @description Editable metadata on a saved run. Unset fields are left unchanged.
+         */
+        RetrievalRunMetadataUpdate: {
+            /** Index Name */
+            index_name?: string | null;
+            /** Index Version */
+            index_version?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Pipeline Version */
+            pipeline_version?: string | null;
+        };
+        /**
          * RetrievalRunMetrics
          * @description Retrieval-quality metrics for an eval run, macro-averaged across cases.
          *
@@ -8641,6 +9240,128 @@ export interface components {
             run_name?: string | null;
             /** Slices */
             slices?: components["schemas"]["SliceMetrics"][];
+            /**
+             * Total Cases
+             * @default 0
+             */
+            total_cases: number;
+        };
+        /**
+         * RetrievalRunRecord
+         * @description Full detail of a saved run, including the metric blobs for charts/compare.
+         */
+        RetrievalRunRecord: {
+            /** Bpref */
+            bpref?: number | null;
+            by_stage?: components["schemas"]["ByStageMetricsResponse"] | null;
+            /** Created At */
+            created_at: string;
+            /** Dataset Ids */
+            dataset_ids?: string[];
+            /** Dataset Names */
+            dataset_names?: string[];
+            /**
+             * Evaluated Cases
+             * @default 0
+             */
+            evaluated_cases: number;
+            /**
+             * Gold Source
+             * @default human
+             */
+            gold_source: string;
+            /**
+             * Has By Stage
+             * @default false
+             */
+            has_by_stage: boolean;
+            /** Hit Rate */
+            hit_rate?: number | null;
+            /** Id */
+            id: string;
+            /** Index Name */
+            index_name?: string | null;
+            /** Index Version */
+            index_version?: string | null;
+            /** Ks */
+            ks?: number[];
+            /** Max K */
+            max_k?: number | null;
+            metrics: components["schemas"]["RetrievalRunMetrics"];
+            /** Mrr */
+            mrr?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Ndcg */
+            ndcg?: number | null;
+            /** Notes */
+            notes?: string | null;
+            /** Pipeline Version */
+            pipeline_version?: string | null;
+            /** Precision */
+            precision?: number | null;
+            /** Recall */
+            recall?: number | null;
+            /**
+             * Total Cases
+             * @default 0
+             */
+            total_cases: number;
+        };
+        /**
+         * RetrievalRunSummary
+         * @description List-item view of a saved run: metadata + headline metrics (at the run's own max k).
+         */
+        RetrievalRunSummary: {
+            /** Bpref */
+            bpref?: number | null;
+            /** Created At */
+            created_at: string;
+            /** Dataset Ids */
+            dataset_ids?: string[];
+            /** Dataset Names */
+            dataset_names?: string[];
+            /**
+             * Evaluated Cases
+             * @default 0
+             */
+            evaluated_cases: number;
+            /**
+             * Gold Source
+             * @default human
+             */
+            gold_source: string;
+            /**
+             * Has By Stage
+             * @default false
+             */
+            has_by_stage: boolean;
+            /** Hit Rate */
+            hit_rate?: number | null;
+            /** Id */
+            id: string;
+            /** Index Name */
+            index_name?: string | null;
+            /** Index Version */
+            index_version?: string | null;
+            /** Ks */
+            ks?: number[];
+            /** Max K */
+            max_k?: number | null;
+            /** Mrr */
+            mrr?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Ndcg */
+            ndcg?: number | null;
+            /** Notes */
+            notes?: string | null;
+            /** Pipeline Version */
+            pipeline_version?: string | null;
+            /** Precision */
+            precision?: number | null;
+            /** Recall */
+            recall?: number | null;
             /**
              * Total Cases
              * @default 0
@@ -9044,6 +9765,7 @@ export interface components {
             };
             /** Label */
             label: string;
+            metrics?: components["schemas"]["RetrievalRunMetrics"] | null;
             /** Mrr */
             mrr?: number | null;
             /** Ndcg At K */
@@ -9060,6 +9782,8 @@ export interface components {
             };
             /** Stage */
             stage: string;
+            /** Threshold Sweep */
+            threshold_sweep?: components["schemas"]["RerankThresholdPoint"][];
         };
         /** StatusResponse */
         StatusResponse: {
@@ -11159,6 +11883,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestDatasetItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_duplicates_api_datasets_duplicates_get: {
+        parameters: {
+            query?: {
+                threshold?: number;
+                scope?: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DuplicatesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_duplicates_api_datasets_duplicates_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DuplicateDismissRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_duplicates_api_datasets_duplicates_merge_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DuplicateMergeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestCaseItem"];
                 };
             };
             /** @description Validation Error */
@@ -14234,6 +15060,146 @@ export interface operations {
             };
         };
     };
+    chunk_metadata_api_index_explorer_chunk_metadata_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+                chunk_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexChunkMetadataResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    file_chunks_api_index_explorer_file_chunks_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+                file_key: string;
+                file_value: string;
+                kind?: string;
+                label?: string | null;
+                limit?: number;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexFileChunksResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    file_types_api_index_explorer_file_types_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexFileTypesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    files_api_index_explorer_files_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+                q: string;
+                limit?: number;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexFileListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_grouping_suggestion_api_index_explorer_grouping_suggestion_get: {
         parameters: {
             query: {
@@ -15613,6 +16579,278 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ByStageMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_retrieval_metrics_compute_api_pipeline_retrieval_metrics_compute_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrievalComputeStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalComputeJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_retrieval_metrics_compute_api_pipeline_retrieval_metrics_compute__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalComputeJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_api_pipeline_retrieval_runs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalRunListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_run_api_pipeline_retrieval_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrievalRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalRunRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_delete_runs_api_pipeline_retrieval_runs_bulk_delete_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrievalRunBulkDelete"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_api_pipeline_retrieval_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalRunRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_run_api_pipeline_retrieval_runs__run_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_run_metadata_api_pipeline_retrieval_runs__run_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrievalRunMetadataUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalRunRecord"];
                 };
             };
             /** @description Validation Error */

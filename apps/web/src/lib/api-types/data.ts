@@ -52,6 +52,11 @@ export type TestCaseSuggestion = S["TestCaseSuggestion"];
 export type TestCaseCreateBody = S["TestCaseCreate"];
 export type TestCaseUpdateBody = S["TestCaseUpdate"];
 
+// --- Duplicate detection ---
+export type DuplicateMember = S["DuplicateMember"];
+export type DuplicateGroup = S["DuplicateGroup"];
+export type DuplicatesResponse = S["DuplicatesResponse"];
+
 // --- Import History ---
 export type JsonImportItem = S["JsonImportItem"];
 export type JsonImportListResponse = S["JsonImportListResponse"];

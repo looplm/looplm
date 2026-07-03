@@ -11,6 +11,7 @@ import type {
   TestCaseCreateBody,
   TestCaseUpdateBody,
   TestDatasetExport,
+  DuplicatesResponse,
 } from "../api-types";
 import { request } from "./client";
 
@@ -89,3 +90,27 @@ export const getTestCaseSuggestions = (params?: Record<string, string>) => {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return request<TestCaseSuggestion[]>(`/api/datasets/suggestions${qs}`);
 };
+
+// --- Duplicate detection ---
+
+export const getDuplicates = (params?: { threshold?: number; scope?: string }) => {
+  const qs = new URLSearchParams();
+  if (params?.threshold != null) qs.set("threshold", String(params.threshold));
+  if (params?.scope) qs.set("scope", params.scope);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return request<DuplicatesResponse>(`/api/datasets/duplicates${suffix}`);
+};
+
+/** Merge redundant cases into one and delete the merged ones. */
+export const mergeDuplicates = (keepCaseId: string, mergeCaseIds: string[]) =>
+  request<TestCaseItem>("/api/datasets/duplicates/merge", {
+    method: "POST",
+    body: JSON.stringify({ keep_case_id: keepCaseId, merge_case_ids: mergeCaseIds }),
+  });
+
+/** Record a set of cases as mutually non-duplicate so they stop resurfacing. */
+export const dismissDuplicates = (caseIds: string[]) =>
+  request<void>("/api/datasets/duplicates/dismiss", {
+    method: "POST",
+    body: JSON.stringify({ case_ids: caseIds }),
+  });

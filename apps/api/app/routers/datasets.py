@@ -38,6 +38,11 @@ router = APIRouter(prefix="/api/datasets", tags=["datasets"], dependencies=[requ
 from .dataset_cases import router as dataset_cases_router
 router.include_router(dataset_cases_router)
 
+# Registered before the ``/{dataset_id}`` routes so the static ``/duplicates``
+# path resolves ahead of the dynamic dataset-id matcher.
+from .dataset_duplicates import router as dataset_duplicates_router
+router.include_router(dataset_duplicates_router)
+
 
 # ── Dataset CRUD ──────────────────────────────────────────────
 

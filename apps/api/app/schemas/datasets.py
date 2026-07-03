@@ -171,6 +171,44 @@ class TestCaseSuggestion(BaseModel):
     suggested_dataset_id: Optional[UUID] = None
 
 
+# --- Duplicate detection schemas ---
+
+class DuplicateMember(BaseModel):
+    case_id: UUID
+    dataset_id: UUID
+    dataset_name: str
+    test_id: str
+    prompt: str
+    expected_answer: Optional[str] = None
+    status: str = "active"
+    score: float
+
+
+class DuplicateGroup(BaseModel):
+    match_type: str  # "exact" | "near"
+    score: float
+    members: list[DuplicateMember]
+
+
+class DuplicatesResponse(BaseModel):
+    groups: list[DuplicateGroup]
+    threshold: float
+    scope: str
+    total_cases: int
+    duplicate_cases: int
+
+
+class DuplicateMergeRequest(BaseModel):
+    keep_case_id: UUID
+    merge_case_ids: list[UUID] = Field(min_length=1)
+
+
+class DuplicateDismissRequest(BaseModel):
+    """Mark a set of cases as mutually non-duplicate (all pairs dismissed)."""
+
+    case_ids: list[UUID] = Field(min_length=2)
+
+
 # --- Export schema ---
 
 class ExportTestCase(BaseModel):
