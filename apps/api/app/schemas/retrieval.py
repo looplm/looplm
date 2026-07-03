@@ -408,6 +408,43 @@ class ChunkMetadataResponse(BaseModel):
     fields: dict[str, Any] | None = None
 
 
+class DiagnosedChunk(BaseModel):
+    """A judged-relevant chunk the retriever missed, with why-it-was-missed diagnostics."""
+
+    chunk_id: str
+    title: str | None = None
+    url: str | None = None
+    # Gold relevance grade (1..3) for this chunk on the case.
+    grade: int | None = None
+    # 1-based rank in the retriever's full ranked list, or None if it never surfaced at all.
+    rank: int | None = None
+    # not_in_index | missing_embedding | bad_chunk | buried | unretrievable
+    verdict: str
+    # Quality flags from score_chunk (tiny | giant | mojibake | table_heavy | markup_heavy | ...).
+    flags: list[str] = []
+    token_estimate: int | None = None
+    has_embedding: bool | None = None
+    content_preview: str | None = None
+
+
+class CaseDiagnosisResponse(BaseModel):
+    """Per-case retrieval diagnosis: which relevant chunks were missed and why."""
+
+    provider_connected: bool = False
+    available: bool = False
+    test_id: str
+    query: str | None = None
+    retriever: str = "agentic_rerank"
+    k: int = 10
+    relevant_count: int = 0
+    retrieved_count: int = 0
+    retrieved_relevant_count: int = 0
+    missed_count: int = 0
+    # verdict -> count, so the UI can show a one-line summary ("3 bad chunk, 1 missing embedding").
+    summary: dict[str, int] = {}
+    missed: list[DiagnosedChunk] = []
+
+
 class RetrievalRunMetrics(BaseModel):
     """Retrieval-quality metrics for an eval run, macro-averaged across cases.
 

@@ -60,6 +60,23 @@ STAGE_LABELS: tuple[tuple[str, str], ...] = (
 RERANK_THRESHOLDS: tuple[float, ...] = tuple(round(i * 0.1, 1) for i in range(0, 41))
 
 
+def ranked_chunks_for_head(chunks, head: str):
+    """Pool chunks in one retriever head's rank order.
+
+    Every head but ``agentic_rerank`` orders by its positional rank (``ranks[head]``, ascending);
+    ``agentic_rerank`` has no positional rank and orders by the semantic reranker score
+    (descending). Mirrors how :func:`build_by_stage_metrics` ranks each stage, so a per-case
+    diagnosis sees the same ordering the metrics scored.
+    """
+    if head == "agentic_rerank":
+        return sorted(
+            (c for c in chunks if c.agentic_rerank_score is not None),
+            key=lambda c: c.agentic_rerank_score,
+            reverse=True,
+        )
+    return sorted((c for c in chunks if head in c.ranks), key=lambda c: c.ranks[head])
+
+
 def compute_rerank_threshold_sweep(
     scores_by_test: dict[str, list[tuple[str, float]]],
     relevant_by_test: dict[str, set[str]],

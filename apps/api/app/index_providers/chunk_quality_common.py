@@ -35,6 +35,55 @@ ORDINAL_FIELDS = [
 GROUP_FIELDS = ["source_type", "content_type", "doc_type", "type", "tags", "sparte", "adapter_tag"]
 
 
+# Common UTF-8-decoded-as-Latin-1 mojibake signatures (e.g. "Ã¼" where a "ü" should be).
+MOJIBAKE_SIGNATURES = ("Ã¤", "Ã¶", "Ã¼", "ÃŸ", "Ã„", "Ã–", "Ãœ", "â€", "Â ", "Ã©", "Ã¨", "ï¿½")
+_TAG_RE = re.compile(r"<[a-zA-Z/][^>]{0,40}>")
+
+
+@dataclass
+class ChunkFlags:
+    """Per-chunk quality signals — the single-chunk core shared by the corpus content analysis
+    (``analyze_content``) and the per-case retrieval diagnosis endpoint."""
+
+    token_estimate: int
+    empty: bool
+    tiny: bool           # too short to carry a retrievable idea (< TINY_TOKENS)
+    giant: bool          # long enough that many embedding models truncate (> GIANT_TOKENS)
+    mojibake: bool       # mis-decoded characters, which break German keyword + embedding matching
+    table_heavy: bool    # dominated by pipe/tab table markup — poor for retrieval
+    markup_heavy: bool   # raw HTML/markup tags left in the text
+    missing_embedding: bool  # the chunk has no vector, so it is invisible to vector/hybrid search
+
+    def issues(self) -> list[str]:
+        """The flags that are set, as stable slugs (empty list = a clean chunk)."""
+        names = (
+            "empty", "tiny", "giant", "mojibake", "table_heavy", "markup_heavy", "missing_embedding",
+        )
+        return [n for n in names if getattr(self, n)]
+
+
+def score_chunk(text: str, has_vector: bool | None = None) -> ChunkFlags:
+    """Quality flags for a single chunk's text.
+
+    ``has_vector`` is the chunk's embedding presence when known (e.g. from a live index fetch);
+    ``None`` leaves ``missing_embedding`` unset (we can't tell). Thresholds mirror the corpus-wide
+    :func:`app.index_providers.chunk_quality_checks.analyze_content` so a per-chunk verdict and the
+    aggregate findings agree.
+    """
+    t = as_text(text)
+    toks = est_tokens(t)
+    return ChunkFlags(
+        token_estimate=toks,
+        empty=not t.strip(),
+        tiny=0 < toks < TINY_TOKENS,
+        giant=toks > GIANT_TOKENS,
+        mojibake=any(sig in t for sig in MOJIBAKE_SIGNATURES),
+        table_heavy=bool(t) and (t.count("|") + t.count("\t")) > max(10, len(t) / 40),
+        markup_heavy=len(_TAG_RE.findall(t)) > 5,
+        missing_embedding=has_vector is False,
+    )
+
+
 @dataclass
 class Finding:
     """One actionable observation, mirroring the index-explorer ``MetadataHint``."""

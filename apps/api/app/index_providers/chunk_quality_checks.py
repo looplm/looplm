@@ -8,7 +8,6 @@ checks).
 
 from __future__ import annotations
 
-import re
 from collections import Counter, defaultdict
 
 from app.index_providers.base import BaseIndexProvider
@@ -18,14 +17,12 @@ from app.index_providers.chunk_quality_common import (
     fold,
     normalize_text,
     pct,
+    score_chunk,
 )
 
 # Critical fields a retrievable, attributable chunk should carry.
 _CRITICAL = [("text", "chunk body"), ("title", "title"), ("url", "source URL"), ("parent", "parent id")]
 
-_TAG = re.compile(r"<[a-zA-Z/][^>]{0,40}>")
-# Common UTF-8-decoded-as-Latin-1 mojibake signatures.
-_MOJIBAKE = ("Ã¤", "Ã¶", "Ã¼", "ÃŸ", "Ã„", "Ã–", "Ãœ", "â€", "Â ", "Ã©", "Ã¨", "ï¿½")
 _FACET_DRIFT_MAX_CARD = 200  # only hunt enum-drift in reasonably low-card fields
 
 
@@ -155,14 +152,14 @@ def analyze_content(docs: list[dict], *, text_field: str | None) -> tuple[dict, 
         t = as_text(d.get(text_field))
         if not t:
             continue
-        if any(sig in t for sig in _MOJIBAKE):
+        flags = score_chunk(t)  # per-chunk core, shared with the per-case diagnosis endpoint
+        if flags.mojibake:
             mojibake += 1
             if len(mojibake_ex) < 5:
                 mojibake_ex.append(t[:120])
-        # Table-heavy: pipe/tab density typical of dumped tables.
-        if (t.count("|") + t.count("\t")) > max(10, len(t) / 40):
+        if flags.table_heavy:
             table_heavy += 1
-        if len(_TAG.findall(t)) > 5:
+        if flags.markup_heavy:
             markup_heavy += 1
         # Boilerplate: substantial lines repeated across many chunks.
         for line in {normalize_text(ln) for ln in t.splitlines()}:
