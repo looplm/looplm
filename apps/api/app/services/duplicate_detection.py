@@ -14,6 +14,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.chunk_labels import (
+    ChunkGoldLabel,
+    ChunkRelevanceLabel,
+    TestCaseLabelingStatus,
+)
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 # Trailing punctuation / quoting we strip so "Wie geht das?" == "wie geht das"
@@ -262,3 +272,84 @@ def merge_case_fields(keep: Any, others: list[Any]) -> None:
         if isinstance(keep_val, dict):
             merged_dict.update(keep_val)  # keep wins on conflicts
         setattr(keep, attr, merged_dict)
+
+
+async def merge_case_labeling(
+    db: AsyncSession,
+    project_id: UUID,
+    keep_test_id: str,
+    source_test_ids: list[str],
+) -> None:
+    """Fold the labeling (and hence retrieval) data of merged cases onto the kept case.
+
+    Chunk relevance labels, adjudicated gold verdicts, and the labeling-complete flag are all
+    keyed by ``(project_id, test_id)`` with no foreign key to the ``test_cases`` row (retrieval
+    metrics are derived from them by ``test_id``). So when duplicate cases are merged and the
+    losers deleted, their human judgments would be orphaned and the retrieval numbers that depend
+    on them lost. This re-points those rows from each merged case's ``test_id`` to the kept case's,
+    so no labeling effort is discarded.
+
+    Conflicts resolve in favour of the kept case's existing rows:
+
+    - relevance labels dedup by ``(chunk_id, annotator identity)`` — a human's judgment and an
+      ``AI`` judgment of the same chunk are distinct rows and both survive;
+    - gold verdicts dedup by ``chunk_id`` (one gold per chunk);
+    - labeling status is a single row per ``test_id`` — the kept case's wins if it has one, else a
+      ``complete`` source row (any) is moved over, otherwise the first.
+
+    Sources equal to ``keep_test_id`` are skipped: they already share the kept case's rows. Must be
+    called before the merged cases are flushed away (order relative to the delete does not matter —
+    there is no FK — but it must run in the same transaction).
+    """
+    sources = [t for t in dict.fromkeys(source_test_ids) if t and t != keep_test_id]
+    if not sources:
+        return
+
+    async def _rows(model):
+        keep_rows = (
+            await db.execute(
+                select(model).where(model.project_id == project_id, model.test_id == keep_test_id)
+            )
+        ).scalars().all()
+        src_rows = (
+            await db.execute(
+                select(model).where(model.project_id == project_id, model.test_id.in_(sources))
+            )
+        ).scalars().all()
+        return keep_rows, src_rows
+
+    # Relevance labels: dedup on (chunk_id, labeled_by, annotator) so distinct annotators are kept.
+    def _rel_key(row: ChunkRelevanceLabel) -> tuple:
+        return (row.chunk_id, str(row.labeled_by) if row.labeled_by else None, row.annotator)
+
+    keep_rel, src_rel = await _rows(ChunkRelevanceLabel)
+    claimed = {_rel_key(r) for r in keep_rel}
+    for row in src_rel:
+        key = _rel_key(row)
+        if key in claimed:
+            await db.delete(row)
+        else:
+            row.test_id = keep_test_id
+            claimed.add(key)
+
+    # Gold verdicts: one per chunk_id.
+    keep_gold, src_gold = await _rows(ChunkGoldLabel)
+    gold_claimed = {r.chunk_id for r in keep_gold}
+    for row in src_gold:
+        if row.chunk_id in gold_claimed:
+            await db.delete(row)
+        else:
+            row.test_id = keep_test_id
+            gold_claimed.add(row.chunk_id)
+
+    # Labeling status: single row per test_id.
+    keep_status, src_status = await _rows(TestCaseLabelingStatus)
+    if keep_status:
+        for row in src_status:
+            await db.delete(row)
+    elif src_status:
+        winner = next((r for r in src_status if r.complete), src_status[0])
+        winner.test_id = keep_test_id
+        for row in src_status:
+            if row is not winner:
+                await db.delete(row)

@@ -199,3 +199,74 @@ async def test_dismiss_hides_group_on_next_scan(client, auth_headers):
         json={"case_ids": [a, b]},
     )
     assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_merge_repoints_labeling_data(client, auth_headers, db_session, test_user, test_project):
+    """Chunk labels / gold / status of the merged case follow the merge onto the kept case."""
+    from sqlalchemy import select
+
+    from app.models.chunk_labels import (
+        ChunkGoldLabel,
+        ChunkRelevanceLabel,
+        TestCaseLabelingStatus,
+    )
+
+    d1 = await _make_dataset(client, auth_headers, "Label merge DS")
+    keep = await _add_case(client, auth_headers, d1, "keep", "Wie geht das genau?")
+    other = await _add_case(client, auth_headers, d1, "other", "wie geht das genau")
+
+    pid = test_project.id
+    db_session.add_all(
+        [
+            # Kept case already judged chunk c1 → its label must win over the conflicting one below.
+            ChunkRelevanceLabel(
+                project_id=pid, test_id="keep", chunk_id="c1", relevance=3, labeled_by=test_user.id
+            ),
+            # Merged case: c1 conflicts (same chunk + annotator → dropped); c2 is new → moves over.
+            ChunkRelevanceLabel(
+                project_id=pid, test_id="other", chunk_id="c1", relevance=1, labeled_by=test_user.id
+            ),
+            ChunkRelevanceLabel(
+                project_id=pid, test_id="other", chunk_id="c2", relevance=2, labeled_by=test_user.id
+            ),
+            # Gold + status live only on the merged case → both move to the kept case.
+            ChunkGoldLabel(
+                project_id=pid, test_id="other", chunk_id="c2", relevance=2, decided_by=test_user.id
+            ),
+            TestCaseLabelingStatus(
+                project_id=pid, test_id="other", complete=True, marked_by=test_user.id
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/datasets/duplicates/merge",
+        headers=auth_headers,
+        json={"keep_case_id": keep, "merge_case_ids": [other]},
+    )
+    assert resp.status_code == 200, resp.text
+    db_session.expire_all()
+
+    async def _labels(model, test_id):
+        return (
+            await db_session.execute(
+                select(model).where(model.project_id == pid, model.test_id == test_id)
+            )
+        ).scalars().all()
+
+    # Nothing is left dangling under the deleted case's test_id.
+    assert await _labels(ChunkRelevanceLabel, "other") == []
+    assert await _labels(ChunkGoldLabel, "other") == []
+    assert await _labels(TestCaseLabelingStatus, "other") == []
+
+    # Relevance: kept c1 (grade 3, kept won the conflict) + moved c2 (grade 2). No dupe of c1.
+    rel = {r.chunk_id: r.relevance for r in await _labels(ChunkRelevanceLabel, "keep")}
+    assert rel == {"c1": 3, "c2": 2}
+
+    gold = await _labels(ChunkGoldLabel, "keep")
+    assert len(gold) == 1 and gold[0].chunk_id == "c2"
+
+    status = await _labels(TestCaseLabelingStatus, "keep")
+    assert len(status) == 1 and status[0].complete is True

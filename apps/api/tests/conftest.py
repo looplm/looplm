@@ -58,7 +58,7 @@ def event_loop():
 async def setup_db():
     """Create all tables before each test, drop after."""
     # Patch PostgreSQL-specific server defaults so SQLite can create tables.
-    from sqlalchemy.schema import DefaultClause
+    from sqlalchemy.schema import ColumnDefault, DefaultClause
 
     for table in Base.metadata.tables.values():
         for col in table.columns:
@@ -69,6 +69,11 @@ async def setup_db():
                     col.server_default = DefaultClause(text("CURRENT_TIMESTAMP"))
                 elif default_text.endswith("::jsonb"):
                     col.server_default = DefaultClause(text(default_text.replace("::jsonb", "")))
+            # `onupdate=text("now()")` is emitted client-side into UPDATE statements, which SQLite
+            # rejects (no now() function). Rewrite it to CURRENT_TIMESTAMP so ORM updates work.
+            ou = col.onupdate
+            if ou is not None and hasattr(ou, "arg") and hasattr(ou.arg, "text") and ou.arg.text == "now()":
+                col.onupdate = ColumnDefault(text("CURRENT_TIMESTAMP"), for_update=True)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

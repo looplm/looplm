@@ -29,6 +29,7 @@ from app.services.duplicate_detection import (
     _pair_key,
     find_duplicate_groups,
     merge_case_fields,
+    merge_case_labeling,
 )
 
 from .dataset_helpers import _tc_to_item
@@ -134,7 +135,10 @@ async def merge_duplicates(
     """Merge ``merge_case_ids`` into ``keep_case_id`` and delete the merged ones.
 
     List fields are unioned and empty scalars on the kept case are backfilled;
-    the kept case wins on conflicting context-filter / metadata keys.
+    the kept case wins on conflicting context-filter / metadata keys. The merged
+    cases' chunk-relevance labels, gold verdicts, and labeling status (which the
+    retrieval metrics are derived from, all keyed by ``test_id``) are re-pointed
+    onto the kept case so no labeling effort is lost.
     """
     merge_ids = [cid for cid in body.merge_case_ids if cid != body.keep_case_id]
     if not merge_ids:
@@ -148,6 +152,9 @@ async def merge_duplicates(
     others = [cases[cid] for cid in merge_ids]
 
     merge_case_fields(keep, others)
+    await merge_case_labeling(
+        db, project.id, keep.test_id, [o.test_id for o in others]
+    )
     for other in others:
         await db.delete(other)
 
