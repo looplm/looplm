@@ -124,6 +124,7 @@ async def test_case_diagnosis_classifies_missed_chunks(
     data = resp.json()
 
     assert data["available"] is True
+    assert data["dataset_id"] == str(ds.id)  # so the UI can deep-link to labeling with ?dataset=
     assert data["relevant_count"] == 6
     assert data["retrieved_relevant_count"] == 1  # c_good
     assert data["missed_count"] == 5

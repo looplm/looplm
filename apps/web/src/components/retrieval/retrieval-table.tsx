@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { RetrievalCaseMetrics, SliceMetrics } from "@/lib/api";
 import { EXPLAIN, pct } from "./constants";
@@ -188,6 +188,16 @@ export function PerCaseResults({
     setSort((s) => (s.key === k ? { key: k, dir: s.dir === "asc" ? "desc" : "asc" } : { key: k, dir: INITIAL_DIR[k] }));
   // Which case's diagnosis is expanded (one at a time keeps the table compact).
   const [openId, setOpenId] = useState<string | null>(null);
+  // Expand the table to a near-fullscreen overlay for reviewing many cases at once.
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
   // Columns the expanded diagnosis row must span: query + relevant + metric + firsthit (4 fixed),
   // plus the optional detail (ratio) and diagnose columns.
   const colCount = 4 + (ratio ? 1 : 0) + (diagnose ? 1 : 0);
@@ -230,15 +240,7 @@ export function PerCaseResults({
     return arr;
   }, [cases, key, sort.dir, perCase, ratio, lk]);
 
-  return (
-    <div className="lg:col-span-2 flex flex-col rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-      <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <span className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-slate-500">
-          Per-case results
-        </span>
-        <span className="text-[11px] text-gray-400 dark:text-slate-500">click a column to sort</span>
-      </div>
-      <div className="overflow-y-auto flex-1 max-h-[360px]">
+  const renderTable = () => (
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-white dark:bg-slate-900 text-gray-400 dark:text-slate-500 border-b border-gray-100 dark:border-slate-800">
             <tr>
@@ -339,7 +341,57 @@ export function PerCaseResults({
             ))}
           </tbody>
         </table>
+  );
+
+  const header = (
+    <div className="flex items-center justify-between px-4 pt-4 pb-2">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-slate-500">
+        Per-case results
+      </span>
+      <div className="flex items-center gap-3">
+        <span className="text-[11px] text-gray-400 dark:text-slate-500">click a column to sort</span>
+        <button
+          type="button"
+          onClick={() => setFullscreen((f) => !f)}
+          className="text-gray-400 dark:text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400"
+          title={fullscreen ? "Exit full screen (Esc)" : "Expand to full screen"}
+          aria-label={fullscreen ? "Exit full screen" : "Expand to full screen"}
+        >
+          {fullscreen ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M15 9V4.5M15 9h4.5M15 9l5.25-5.25M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 15v4.5M15 15h4.5m-4.5 0 5.25 5.25" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15" />
+            </svg>
+          )}
+        </button>
       </div>
     </div>
+  );
+
+  return (
+    <>
+      <div className="lg:col-span-2 flex flex-col rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+        {header}
+        <div className="overflow-y-auto flex-1 max-h-[360px]">{renderTable()}</div>
+      </div>
+
+      {fullscreen && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col bg-black/40 p-4 sm:p-6"
+          onClick={() => setFullscreen(false)}
+        >
+          <div
+            className="flex flex-1 flex-col overflow-hidden rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {header}
+            <div className="flex-1 overflow-auto">{renderTable()}</div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

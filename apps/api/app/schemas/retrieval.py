@@ -433,6 +433,9 @@ class CaseDiagnosisResponse(BaseModel):
     provider_connected: bool = False
     available: bool = False
     test_id: str
+    # Dataset the case belongs to — so the UI can deep-link to the labeling workbench with the
+    # right ?dataset= scope (the labeling view resolves a case within a dataset).
+    dataset_id: str | None = None
     query: str | None = None
     retriever: str = "agentic_rerank"
     k: int = 10

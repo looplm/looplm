@@ -256,6 +256,7 @@ async def diagnose_case(
         provider_connected=True,
         available=True,
         test_id=test_id,
+        dataset_id=str(dataset_id),
         query=query,
         retriever=head,
         k=k,

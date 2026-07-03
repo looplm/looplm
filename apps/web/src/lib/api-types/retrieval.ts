@@ -302,6 +302,8 @@ export interface CaseDiagnosisResponse {
   provider_connected: boolean;
   available: boolean;
   test_id: string;
+  // Dataset the case belongs to, for deep-linking into the labeling workbench with ?dataset=.
+  dataset_id?: string | null;
   query?: string | null;
   retriever: string;
   k: number;
