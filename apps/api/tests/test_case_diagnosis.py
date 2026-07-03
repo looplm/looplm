@@ -148,6 +148,67 @@ async def test_case_diagnosis_classifies_missed_chunks(
 
 
 @pytest.mark.asyncio
+async def test_case_diagnosis_does_not_false_flag_missing_embedding(
+    client, auth_headers, db_session, test_user, test_project, monkeypatch
+):
+    """Azure vector fields are usually non-retrievable, so a fetched doc exposes no vector even
+    when the chunk is embedded. A retrieved chunk must read as 'buried', and an unretrieved one as
+    'unretrievable' — never 'missing_embedding' — when embeddings can't be observed."""
+    from uuid import uuid4
+
+    from app.models.base import IndexProviderType
+    from app.models.chunk_labels import ChunkRelevanceLabel
+    from app.models.datasets import TestCase, TestDataset
+    from app.models.index_providers import IndexProvider
+
+    ds = TestDataset(id=uuid4(), project_id=test_project.id, name="NoVec DS")
+    db_session.add(ds)
+    await db_session.flush()
+    db_session.add(TestCase(id=uuid4(), dataset_id=ds.id, test_id="nv", prompt="Frage?"))
+    db_session.add(
+        IndexProvider(
+            id=uuid4(), project_id=test_project.id, type=IndexProviderType.azure_search,
+            name="idx", api_key=b"x", config={},
+        )
+    )
+    for cid in ("c_top", "c_ranked2", "c_absent"):
+        db_session.add(
+            ChunkRelevanceLabel(
+                project_id=test_project.id, test_id="nv", chunk_id=cid, relevance=2,
+                labeled_by=test_user.id, content_preview=f"snap {cid}",
+            )
+        )
+    await db_session.commit()
+
+    # c_top @1, c_ranked2 @2 are retrieved (by every head, incl. dense). No fetched doc exposes a
+    # vector field — as with a real Azure index where the vector field isn't retrievable.
+    ranking = [CorpusDoc(id="c_top"), CorpusDoc(id="c_ranked2")]
+    docs = {
+        "c_ranked2": {"chunk_text": CLEAN},  # retrieved but no visible vector → must be "buried"
+        "c_absent": {"chunk_text": CLEAN},   # never retrieved, vectors unobservable → "unretrievable"
+    }
+    fake = _FakeProvider(ranking, docs)
+    monkeypatch.setattr("app.routers.chunk_labels._helpers.build_index_provider", lambda row: fake)
+    monkeypatch.setattr("app.routers.chunk_labels.diagnosis.build_index_provider", lambda row: fake)
+
+    async def _no_embed(settings, text):
+        return None
+
+    monkeypatch.setattr("app.routers.chunk_labels._helpers.embed_query", _no_embed)
+
+    resp = await client.get(
+        "/api/pipeline/case-diagnosis",
+        headers=auth_headers,
+        params={"test_id": "nv", "k": 1, "retriever": "keyword", "refresh": "true"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    verdicts = {c["chunk_id"]: c["verdict"] for c in data["missed"]}
+    assert verdicts == {"c_ranked2": "buried", "c_absent": "unretrievable"}
+    assert "missing_embedding" not in data["summary"]
+
+
+@pytest.mark.asyncio
 async def test_case_diagnosis_no_index_provider(client, auth_headers, test_project):
     resp = await client.get(
         "/api/pipeline/case-diagnosis", headers=auth_headers, params={"test_id": "nope"}

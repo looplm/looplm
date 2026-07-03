@@ -41,6 +41,10 @@ router = APIRouter()
 # Retrievers the candidate pool ranks (keyword/vector/hybrid/semantic/agentic/agentic_rerank).
 _POOL_HEADS = {head for head, _ in STAGE_LABELS}
 _DEFAULT_HEAD = "agentic_rerank"
+# Heads that can only return a chunk if it has an embedding — being found by one is positive proof
+# the chunk is embedded, regardless of whether the live fetch exposes the (usually non-retrievable)
+# vector field.
+_DENSE_HEADS = ("vector", "hybrid", "semantic")
 # Worst-first ordering for the missed list: the actionable-indexer verdicts before the ranking ones.
 _VERDICT_ORDER = {
     "not_in_index": 0,
@@ -174,6 +178,20 @@ async def diagnose_case(
     finally:
         await provider.aclose()
 
+    # A chunk found by a dense head provably has an embedding. And if NO fetched doc exposes a
+    # vector, the index simply isn't returning the vector field (Azure usually marks it
+    # non-retrievable) — so its absence is not evidence of a missing embedding, and we must not flag
+    # one. Embedding presence is therefore tri-state: True (proven) / False (observed absent) /
+    # None (unobservable).
+    pool_by_id = {c.chunk_id: c for c in pool.chunks}
+    vector_observable = any(_has_vector(doc) for doc in live.values())
+
+    def _dense_retrieved(cid: str) -> bool:
+        c = pool_by_id.get(cid)
+        return c is not None and (
+            c.agentic_rerank_score is not None or any(h in c.ranks for h in _DENSE_HEADS)
+        )
+
     diagnosed: list[DiagnosedChunk] = []
     for cid in missed:
         doc = live.get(cid)
@@ -190,17 +208,28 @@ async def diagnose_case(
         keys = set(doc.keys())
         text_field = pick_field(keys, TEXT_FIELDS)
         text = as_text(doc.get(text_field)) if text_field else ""
-        has_vec = _has_vector(doc)
+
+        if _dense_retrieved(cid) or _has_vector(doc):
+            has_vec: bool | None = True
+        elif vector_observable:
+            has_vec = False  # vectors are retrievable here, and this doc has none → truly missing
+        else:
+            has_vec = None  # can't observe embeddings at all → don't guess
+
         flags = score_chunk(text, has_vec)
-        issues = flags.issues()
-        if flags.missing_embedding:
+        quality = [f for f in flags.issues() if f != "missing_embedding"]
+        if rank is not None:
+            # It was retrieved, just past k — a ranking issue, unless the content itself is broken.
+            verdict = "bad_chunk" if quality else "buried"
+        elif flags.missing_embedding:
             verdict = "missing_embedding"
-        elif issues:
+        elif quality:
             verdict = "bad_chunk"
-        elif rank is not None:
-            verdict = "buried"
         else:
             verdict = "unretrievable"
+        # For a retrieved chunk, embedding presence is moot (the selected head found it) — show only
+        # the content-quality flags so "buried" isn't muddied by an embedding note.
+        display_flags = quality if rank is not None else flags.issues()
         title_field = pick_field(keys, TITLE_FIELDS)
         url_field = pick_field(keys, URL_FIELDS)
         diagnosed.append(
@@ -211,7 +240,7 @@ async def diagnose_case(
                 grade=grades.get(cid),
                 rank=rank,
                 verdict=verdict,
-                flags=issues,
+                flags=display_flags,
                 token_estimate=flags.token_estimate,
                 has_embedding=has_vec,
                 content_preview=_preview(text) or _preview(snap_cp),
