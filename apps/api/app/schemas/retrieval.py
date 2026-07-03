@@ -87,6 +87,14 @@ class RetrievalCaseMetrics(BaseModel):
     input: str | None = None
     expected_count: int = 0
     retrieved_count: int = 0
+    # Absolute hit counts behind recall (numerators + denominator), so the UI can show "14 / 78"
+    # beside the percentage. ``relevant_count`` is the normalized ground-truth denominator recall
+    # divides by (<= expected_count when near-duplicate URLs collapse). ``relevant_retrieved_at_k``
+    # is |relevant ∩ top-k| per k; ``relevant_retrieved_total`` is |relevant ∩ full retrieved|,
+    # the rank-independent ceiling that separates a coverage gap from a ranking gap.
+    relevant_count: int = 0
+    relevant_retrieved_at_k: dict[str, int] = Field(default_factory=dict)
+    relevant_retrieved_total: int = 0
     recall_at_k: dict[str, float] = Field(default_factory=dict)
     precision_at_k: dict[str, float] = Field(default_factory=dict)
     hit_rate_at_k: dict[str, float] = Field(default_factory=dict)
@@ -147,6 +155,8 @@ class ChunkForLabeling(BaseModel):
 class LabelingCase(BaseModel):
     test_id: str
     input: str | None = None
+    # The dataset case's reference answer, for the labeler to judge chunk relevance against.
+    expected_answer: str | None = None
     chunks: list[ChunkForLabeling] = Field(default_factory=list)
     labeled_count: int = 0
     relevant_count: int = 0

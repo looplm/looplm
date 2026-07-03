@@ -102,6 +102,7 @@ export function PerCaseResults({
   perCase = (c) => c.recall_at_k,
   metricTarget,
   metricInfo = EXPLAIN.caseRecall,
+  showRecallCounts = false,
 }: {
   cases: RetrievalCaseMetrics[];
   largestK: number;
@@ -112,6 +113,9 @@ export function PerCaseResults({
   metricTarget: number | null;
   // Tooltip for the metric column header.
   metricInfo?: string;
+  // When the selected metric is recall, show the raw hit count (found in top-k / expected)
+  // beside the percentage. Only recall's numerator/denominator map to these counts.
+  showRecallCounts?: boolean;
 }) {
   return (
     <div className="lg:col-span-2 flex flex-col rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
@@ -131,6 +135,9 @@ export function PerCaseResults({
               </th>
               <th className="text-right font-medium px-2 py-2">
                 <span className="inline-flex items-center">Retr<Info text={EXPLAIN.retrieved} /></span>
+              </th>
+              <th className="text-right font-medium px-2 py-2">
+                <span className="inline-flex items-center">Found<Info text={EXPLAIN.found} /></span>
               </th>
               <th className="text-right font-medium px-3 py-2">
                 <span className="inline-flex items-center">{metricLabel}@{largestK}<Info text={metricInfo} /></span>
@@ -170,11 +177,28 @@ export function PerCaseResults({
                 </td>
                 <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">{c.expected_count}</td>
                 <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">{c.retrieved_count}</td>
+                <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">
+                  {(() => {
+                    const denom = c.relevant_count ?? c.expected_count;
+                    return c.relevant_retrieved_total == null || !denom
+                      ? "-"
+                      : `${c.relevant_retrieved_total} / ${denom}`;
+                  })()}
+                </td>
                 <td className="px-3 py-2.5">
-                  <MiniBar
-                    v={perCase(c)[lk] ?? 0}
-                    ok={metricTarget != null ? (perCase(c)[lk] ?? 0) >= metricTarget : c.hit}
-                  />
+                  <div className="flex items-center justify-end gap-2">
+                    {showRecallCounts &&
+                      c.relevant_retrieved_at_k?.[lk] != null &&
+                      (c.relevant_count ?? c.expected_count) > 0 && (
+                        <span className="font-mono tabular-nums text-[11px] text-gray-400 dark:text-slate-500">
+                          {c.relevant_retrieved_at_k[lk]} / {c.relevant_count ?? c.expected_count}
+                        </span>
+                      )}
+                    <MiniBar
+                      v={perCase(c)[lk] ?? 0}
+                      ok={metricTarget != null ? (perCase(c)[lk] ?? 0) >= metricTarget : c.hit}
+                    />
+                  </div>
                 </td>
                 <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">
                   {c.first_relevant_rank ?? "-"}

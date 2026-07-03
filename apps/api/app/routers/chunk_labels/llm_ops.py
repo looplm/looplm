@@ -38,6 +38,7 @@ from app.services.llm_usage_tracker import record_llm_usage
 from ._helpers import (
     _as_uuid,
     _dataset_case_agentic_queries,
+    _dataset_case_expected_answer,
     _dataset_case_query,
     _resolve_dataset,
     assemble_case_pool,
@@ -127,8 +128,13 @@ async def ai_judge_case(
         )
         for pc in pool.chunks
     ]
+    # Reference answer, when the case has one, sharpens the judge's relevance calls (context, not
+    # a match target). Absent → the judge grades on query-relevance alone as before.
+    expected_answer = await _dataset_case_expected_answer(db, dataset.id, body.test_id)
     try:
-        grades, usage = await ai_judge_chunks(llm, query, chunks, instructions=body.instructions)
+        grades, usage = await ai_judge_chunks(
+            llm, query, chunks, instructions=body.instructions, expected_answer=expected_answer
+        )
     except AnalysisLlmConfigError as exc:
         raise HTTPException(
             status_code=400,
@@ -238,8 +244,10 @@ async def ai_judge_preview(
         )
         for pc in pool.chunks
     ]
+    # Mirror the judge: show the reference answer folded into the previewed prompt when present.
+    expected_answer = await _dataset_case_expected_answer(db, dataset.id, body.test_id)
     system_prompt, planned = plan_ai_judge_prompts(
-        query, chunks, instructions=body.instructions
+        query, chunks, instructions=body.instructions, expected_answer=expected_answer
     )
     batches = [
         AiJudgePromptBatch(user_prompt=up, chunk_count=n) for up, n in planned

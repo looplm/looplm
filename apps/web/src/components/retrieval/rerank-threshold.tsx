@@ -124,7 +124,9 @@ export function RerankThreshold({
             <Stat label="Recall" value={pct(point.recall)} accent="text-amber-600 dark:text-amber-400" />
             <Stat label="Chunks/q" value={point.avg_retrieved.toFixed(1)} accent="text-gray-700 dark:text-slate-200" />
           </div>
-          <p className="mt-2 text-[11px] text-gray-400 dark:text-slate-500">
+          {/* Reserve two lines so the row height (and the chart's vertical position) stays put
+              whether or not the "Below your precision target." suffix wraps to a second line. */}
+          <p className="mt-2 min-h-8 text-[11px] leading-4 text-gray-400 dark:text-slate-500">
             Feed chunks scoring ≥ {point.threshold.toFixed(1)} to the model.
             {precisionTarget != null && !precisionOk ? " Below your precision target." : ""}
           </p>

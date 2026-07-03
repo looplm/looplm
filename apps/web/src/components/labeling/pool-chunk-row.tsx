@@ -13,6 +13,7 @@ export function PoolChunkRow({
   relevance,
   disabled,
   indexConnected,
+  showAiLabels,
   onGrade,
   onClear,
 }: {
@@ -20,6 +21,9 @@ export function PoolChunkRow({
   relevance: number | null;
   disabled: boolean;
   indexConnected: boolean;
+  // Whether to show the LLM "AI judge" grade badge — hidden by default so it doesn't anchor
+  // the human labeler.
+  showAiLabels: boolean;
   onGrade: (grade: number) => void;
   onClear: () => void;
 }) {
@@ -109,7 +113,7 @@ export function PoolChunkRow({
       </div>
 
       <div className="shrink-0 flex items-center gap-2">
-        {chunk.ai_relevance != null && <AiGradeBadge grade={chunk.ai_relevance} />}
+        {showAiLabels && chunk.ai_relevance != null && <AiGradeBadge grade={chunk.ai_relevance} />}
         <GradeSelector value={relevance} disabled={disabled} onSelect={onGrade} onClear={onClear} />
       </div>
     </div>

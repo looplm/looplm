@@ -148,6 +148,36 @@ def compute_first_relevant_rank(
     return None
 
 
+def compute_relevant_retrieved(
+    expected: list[str], retrieved: list[str], ks: tuple[int, ...] = DEFAULT_KS
+) -> dict | None:
+    """Absolute hit counts behind recall — how many ground-truth items were retrieved.
+
+    Where recall@k is a fraction, this returns the raw counts it is built from, so a case can
+    show ``14 / 78`` alongside ``18%``:
+
+    - ``relevant_count`` — the ground-truth denominator recall divides by (normalized & deduped,
+      so it can be slightly below the raw ``expected_count`` when near-duplicate URLs collapse).
+    - ``at_k`` — ``|relevant ∩ top-k retrieved|`` for each k (the numerator of recall@k).
+    - ``total`` — ``|relevant ∩ retrieved|`` over the *full* ranked list, ignoring rank. This is
+      the "ceiling": how many relevant items retrieval surfaced *anywhere*, so the gap between
+      ``total`` and ``at_k`` separates a coverage problem (low ``total``) from a ranking problem
+      (``total`` high but ``at_k`` low).
+
+    Returns ``None`` when there are no expected items, matching the other metrics so the caller
+    skips the case rather than recording zeros.
+    """
+    relevant = set(_normalize_unique(expected))
+    if not relevant:
+        return None
+    ranked = _normalize_unique(retrieved)
+    return {
+        "relevant_count": len(relevant),
+        "at_k": {str(k): len(relevant.intersection(ranked[:k])) for k in ks},
+        "total": len(relevant.intersection(ranked)),
+    }
+
+
 def compute_ndcg_at_k(
     expected: list[str], retrieved: list[str], ks: tuple[int, ...] = DEFAULT_KS
 ) -> dict[str, float] | None:
@@ -324,6 +354,7 @@ def compute_retrieval_metrics(
     """
     if not _normalize_unique(expected):
         return None
+    relevant_retrieved = compute_relevant_retrieved(expected, retrieved, ks) or {}
     return {
         "recall_at_k": compute_recall_at_k(expected, retrieved, ks),
         "precision_at_k": compute_precision_at_k(expected, retrieved, ks),
@@ -331,4 +362,7 @@ def compute_retrieval_metrics(
         "ndcg_at_k": compute_ndcg_at_k(expected, retrieved, ks),
         "mrr": compute_mrr(expected, retrieved),
         "first_relevant_rank": compute_first_relevant_rank(expected, retrieved),
+        "relevant_count": relevant_retrieved.get("relevant_count", 0),
+        "relevant_retrieved_at_k": relevant_retrieved.get("at_k", {}),
+        "relevant_retrieved_total": relevant_retrieved.get("total", 0),
     }

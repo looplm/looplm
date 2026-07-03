@@ -11,21 +11,24 @@ export function dec(x: number | null | undefined): string {
 // Plain-language explanations shown on the info icons (kept simple, no jargon).
 export const EXPLAIN = {
   recall:
-    "Of all the documents that should have been found, this is the share that showed up in the top results. Higher is better.",
+    "Of all the chunks that should have been found, this is the share that showed up in the top results. Higher is better.",
   ndcg:
-    "Checks whether the most useful documents are ranked near the top, not just present somewhere. 100% means the best ones sit at the very top.",
+    "Checks whether the most useful chunks are ranked near the top, not just present somewhere. 100% means the best ones sit at the very top.",
   mrr:
-    "Looks at how high the first correct document appears. 1.00 means it was always the very first result, 0.50 means usually second, and so on.",
+    "Looks at how high the first correct chunk appears. 1.00 means it was always the very first result, 0.50 means usually second, and so on.",
   hit:
-    "The share of questions where at least one correct document appeared in the top results. It does not care how many were found, only that one was there.",
+    "The share of questions where at least one correct chunk appeared in the top results. It does not care how many were found, only that one was there.",
   precision:
-    "Of the documents that were returned, this is the share that were actually relevant. Higher means less noise in the results.",
+    "Of the chunks that were returned, this is the share that were actually relevant. Higher means less noise in the results.",
   recallCurve:
-    "How many of the correct documents appear as you widen the window from the top 1 result out to the deepest cutoff shown. The bars normally rise as k grows.",
-  expected: "How many documents this question was expected to find (the ground truth).",
-  retrieved: "How many documents the search actually returned for this question.",
-  caseRecall: "The share of the expected documents that were found for this single question.",
-  firstHit: "The position of the first correct document in the results. Lower is better. A dash means none were found.",
+    "How many of the correct chunks appear as you widen the window from the top 1 result out to the deepest cutoff shown. The bars normally rise as k grows.",
+  expected: "How many chunks this question was expected to find (the ground truth).",
+  retrieved: "How many chunks the search actually returned for this question.",
+  found:
+    "How many of the expected chunks the search surfaced anywhere in its results, regardless of rank. If this is high but recall is low, the right chunks were retrieved but ranked too deep (a ranking problem); if this is low too, they were not retrieved at all (a coverage problem).",
+  caseRecall:
+    "The share of the expected chunks that were found in the top results for this single question. The fraction beside it is the raw count: found in top-k / expected.",
+  firstHit: "The position of the first correct chunk in the results. Lower is better. A dash means none were found.",
   targets: "Set the score you want each metric to reach. Cards turn green when they hit the goal, amber when close, and red when below.",
   bpref:
     "A recall-style score that ignores chunks nobody has judged yet, so it stays fair when only part of the pool is labeled. Best used while judging is still incomplete.",
@@ -72,7 +75,7 @@ export interface MetricDef {
 }
 
 export const METRICS: MetricDef[] = [
-  { key: "recall", accent: "indigo", label: (k) => `Recall@${k}`, hint: "docs found", info: EXPLAIN.recall, kind: "pct", value: (m, lk) => m.recall_at_k[lk] },
+  { key: "recall", accent: "indigo", label: (k) => `Recall@${k}`, hint: "chunks found", info: EXPLAIN.recall, kind: "pct", value: (m, lk) => m.recall_at_k[lk] },
   { key: "ndcg", accent: "violet", label: (k) => `nDCG@${k}`, hint: "ranking quality", info: EXPLAIN.ndcg, kind: "pct", value: (m, lk) => m.ndcg_at_k[lk] },
   { key: "mrr", accent: "sky", label: () => "MRR", hint: "first hit rank", info: EXPLAIN.mrr, kind: "dec", value: (m) => m.mrr },
   { key: "hit_rate", accent: "emerald", label: (k) => `Hit-rate@${k}`, hint: "≥1 relevant", info: EXPLAIN.hit, kind: "pct", value: (m, lk) => m.hit_rate_at_k[lk] },

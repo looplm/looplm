@@ -139,6 +139,7 @@ export function OverallResults({
           perCase={metric.perCase}
           metricTarget={metricTarget}
           metricInfo={metric.info}
+          showRecallCounts={metricKey === "recall"}
         />
       </div>
     </>

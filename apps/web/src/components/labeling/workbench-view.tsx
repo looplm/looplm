@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type LabelingCase,
   type LabelingPoolResponse,
@@ -69,6 +69,21 @@ export function WorkbenchView({
   // open. The header "AI judge" button opens the panel (two-step); "Run AI judge" in it grades.
   const [judgeInstructions, setJudgeInstructions] = useState<string | null>(null);
   const [judgeOpen, setJudgeOpen] = useState(false);
+  // The reference answer is shown expanded by default (the labeler judges chunks against it).
+  const [answerOpen, setAnswerOpen] = useState(true);
+
+  // AI judge grades are hidden by default so they don't anchor the human labeler. The choice is
+  // remembered across cases (and reloads) via localStorage.
+  const [showAiLabels, setShowAiLabels] = useState(false);
+  useEffect(() => {
+    setShowAiLabels(localStorage.getItem("labeling:showAiLabels") === "1");
+  }, []);
+  const toggleAiLabels = () =>
+    setShowAiLabels((v) => {
+      const next = !v;
+      localStorage.setItem("labeling:showAiLabels", next ? "1" : "0");
+      return next;
+    });
 
   const chunks = useMemo(() => pool?.chunks ?? [], [pool]);
   const counts = useMemo(() => {
@@ -84,8 +99,10 @@ export function WorkbenchView({
 
   return (
     <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900">
-      {/* Sticky so the question stays visible while scrolling the case's chunks. */}
-      <div className="sticky top-0 z-10 flex items-start justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800 rounded-t-xl">
+      {/* The question, expected answer and queries stay frozen at the top while the case's chunks
+          scroll beneath them. Opaque background so scrolling chunks never bleed through. */}
+      <div className="sticky top-0 z-10 rounded-t-xl overflow-hidden bg-white dark:bg-slate-900">
+      <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800">
         <h2
           className="text-[15px] font-semibold text-gray-900 dark:text-white min-w-0"
           title={c.input ?? c.test_id}
@@ -93,14 +110,18 @@ export function WorkbenchView({
           {c.input || c.test_id}
         </h2>
         <div className="shrink-0 flex items-center gap-3 text-[11px] text-gray-400 dark:text-slate-500">
-          {c.labelers.length > 0 && (
-            <span
-              className="hidden sm:inline italic truncate max-w-[160px]"
-              title={`Labeled by ${c.labelers.join(", ")}`}
-            >
-              by {c.labelers.join(", ")}
-            </span>
-          )}
+          {(() => {
+            // When AI labels are hidden, keep the AI judge out of the "labeled by" line too.
+            const shownLabelers = showAiLabels ? c.labelers : c.labelers.filter((l) => l !== "AI");
+            return shownLabelers.length > 0 ? (
+              <span
+                className="hidden sm:inline italic truncate max-w-[160px]"
+                title={`Labeled by ${shownLabelers.join(", ")}`}
+              >
+                by {shownLabelers.join(", ")}
+              </span>
+            ) : null;
+          })()}
           <span>
             {counts.labeled}
             {counts.total != null ? `/${counts.total}` : ""} · {counts.relevant} relevant
@@ -131,6 +152,21 @@ export function WorkbenchView({
             </button>
           )}
           <button
+            onClick={toggleAiLabels}
+            title={
+              showAiLabels
+                ? "Hide the AI judge grades on each chunk"
+                : "Show the AI judge grades on each chunk"
+            }
+            className={`px-2 py-1 rounded-lg text-[11px] font-medium border disabled:opacity-40 ${
+              showAiLabels
+                ? "border-violet-400 bg-violet-500/10 text-violet-600 dark:text-violet-300"
+                : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-violet-400"
+            }`}
+          >
+            {showAiLabels ? "Hide AI labels" : "Show AI labels"}
+          </button>
+          <button
             disabled={!canEdit || !indexConnected}
             onClick={() => setJudgeOpen((v) => !v)}
             title="Open the AI judge prompt — review or edit it, then run it to grade this case's chunks"
@@ -156,7 +192,24 @@ export function WorkbenchView({
           </button>
         </div>
       </div>
-      <div className="overflow-hidden rounded-b-xl">
+        {c.expected_answer && (
+          <div className="px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-emerald-50/40 dark:bg-emerald-900/10">
+            <button
+              onClick={() => setAnswerOpen((v) => !v)}
+              className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300"
+            >
+              <span aria-hidden>{answerOpen ? "▾" : "▸"}</span>
+              Expected answer
+            </button>
+            {answerOpen && (
+              // Capped so a long reference answer can't eat the viewport while frozen — it
+              // scrolls internally instead, keeping the chunks below in view.
+              <p className="mt-1.5 max-h-[38vh] overflow-y-auto text-sm text-gray-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">
+                {c.expected_answer}
+              </p>
+            )}
+          </div>
+        )}
         {indexConnected && (
           <CasePromptsPanel
             testId={c.test_id}
@@ -174,6 +227,8 @@ export function WorkbenchView({
             aiJudging={aiJudging}
           />
         )}
+      </div>
+      <div className="overflow-hidden rounded-b-xl">
         {!indexConnected ? (
           <p className="px-4 py-6 text-[12px] text-gray-400 dark:text-slate-500">
             Connect an index provider (Settings → Integrations) to pool candidate chunks for this
@@ -197,6 +252,7 @@ export function WorkbenchView({
               relevance={chunk.relevance ?? null}
               disabled={!canEdit}
               indexConnected={indexConnected}
+              showAiLabels={showAiLabels}
               onGrade={(grade) => onGrade(c.test_id, chunk, grade)}
               onClear={() => onClearGrade(c.test_id, chunk)}
             />
@@ -207,6 +263,7 @@ export function WorkbenchView({
           datasetId={datasetId}
           canEdit={canEdit}
           indexConnected={indexConnected}
+          showAiLabels={showAiLabels}
           alreadyShownIds={shownIds}
         />
         {pool?.computed_at && (

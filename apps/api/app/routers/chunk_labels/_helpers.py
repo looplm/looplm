@@ -118,6 +118,23 @@ async def _dataset_case_query(db: AsyncSession, dataset_id: UUID, test_id: str) 
     ).scalar_one_or_none()
 
 
+async def _dataset_case_expected_answer(
+    db: AsyncSession, dataset_id: UUID, test_id: str
+) -> str | None:
+    """The reference answer for one test case, or None if the case has none.
+
+    Passed to the AI judge as optional context so it can judge whether a chunk supplies the
+    information an answer needs (not just topical overlap with the query).
+    """
+    return (
+        await db.execute(
+            select(TestCase.expected_answer).where(
+                TestCase.dataset_id == dataset_id, TestCase.test_id == test_id
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def _dataset_case_agentic_queries(
     db: AsyncSession, dataset_id: UUID, test_id: str
 ) -> list[str]:

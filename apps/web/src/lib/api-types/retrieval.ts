@@ -69,6 +69,8 @@ export interface ChunkForLabeling {
 export interface LabelingCase {
   test_id: string;
   input?: string | null;
+  // The dataset case's reference answer, shown so labelers can judge chunks against it.
+  expected_answer?: string | null;
   // The chunks to judge come from the per-case index pool, not the case; kept for compat.
   chunks: ChunkForLabeling[];
   labeled_count: number;
@@ -286,6 +288,13 @@ export interface RetrievalCaseMetrics {
   input?: string | null;
   expected_count: number;
   retrieved_count: number;
+  // Absolute hit counts behind recall (see backend RetrievalCaseMetrics). relevant_count is the
+  // normalized ground-truth denominator; relevant_retrieved_at_k is |relevant ∩ top-k| per k;
+  // relevant_retrieved_total is |relevant ∩ full retrieved| (the rank-independent ceiling).
+  // Optional: runs computed before these were added won't carry them.
+  relevant_count?: number;
+  relevant_retrieved_at_k?: Record<string, number>;
+  relevant_retrieved_total?: number;
   recall_at_k: Record<string, number>;
   precision_at_k?: Record<string, number>;
   hit_rate_at_k?: Record<string, number>;

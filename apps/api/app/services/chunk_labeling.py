@@ -37,7 +37,11 @@ def build_labeling_cases(test_cases: Iterable[TestCase]) -> tuple[list[LabelingC
             continue
         seen.add(tid)
         cases.append(
-            LabelingCase(test_id=tid, input=(tc.prompt or None) and str(tc.prompt)[:300])
+            LabelingCase(
+                test_id=tid,
+                input=(tc.prompt or None) and str(tc.prompt)[:300],
+                expected_answer=(tc.expected_answer or None) and str(tc.expected_answer),
+            )
         )
     return cases, len(seen)
 

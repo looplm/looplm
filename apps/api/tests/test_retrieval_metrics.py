@@ -11,6 +11,7 @@ from app.services.retrieval_metrics import (
     compute_ndcg_at_k,
     compute_precision_at_k,
     compute_recall_at_k,
+    compute_relevant_retrieved,
     compute_retrieval_metrics,
 )
 
@@ -170,13 +171,41 @@ def test_compute_retrieval_metrics_bundles_all():
     retrieved = ["https://a.example/p1"]
     m = compute_retrieval_metrics(expected, retrieved)
     assert m is not None
-    assert set(m) == {"recall_at_k", "precision_at_k", "hit_rate_at_k", "ndcg_at_k", "mrr", "first_relevant_rank"}
+    assert set(m) == {
+        "recall_at_k",
+        "precision_at_k",
+        "hit_rate_at_k",
+        "ndcg_at_k",
+        "mrr",
+        "first_relevant_rank",
+        "relevant_count",
+        "relevant_retrieved_at_k",
+        "relevant_retrieved_total",
+    }
     assert m["mrr"] == 1.0
     assert m["first_relevant_rank"] == 1
+    assert m["relevant_count"] == 1
+    assert m["relevant_retrieved_total"] == 1
 
 
 def test_compute_retrieval_metrics_none_without_truth():
     assert compute_retrieval_metrics([], ["https://a.example/p1"]) is None
+
+
+def test_compute_relevant_retrieved_ceiling_vs_at_k():
+    # 3 relevant docs; one sits at rank 5 (past k=3), one is never retrieved.
+    expected = ["r1", "r2", "r3"]
+    retrieved = ["r1", "x", "x2", "x3", "r2"]  # r1@1, r2@5, r3 missing
+    rr = compute_relevant_retrieved(expected, retrieved, ks=(3, 20))
+    assert rr is not None
+    assert rr["relevant_count"] == 3
+    assert rr["at_k"]["3"] == 1  # only r1 inside top-3
+    assert rr["at_k"]["20"] == 2  # r1 + r2 within the full list
+    assert rr["total"] == 2  # ceiling: r1 + r2 surfaced anywhere, r3 never retrieved
+
+
+def test_compute_relevant_retrieved_none_without_truth():
+    assert compute_relevant_retrieved([], ["r1"]) is None
 
 
 # --- bpref (incomplete-judgment-safe) ---

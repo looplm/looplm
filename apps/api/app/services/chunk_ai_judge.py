@@ -59,20 +59,24 @@ def _estimate_tokens(text: str) -> int:
     return math.ceil(len(text) / per_token)
 
 
-def _batch_chunks(system: str, query: str, chunks: list[AiJudgeChunk]) -> list[list[AiJudgeChunk]]:
+def _batch_chunks(
+    system: str, query: str, chunks: list[AiJudgeChunk], *, expected_answer: str | None = None
+) -> list[list[AiJudgeChunk]]:
     """Greedy-pack chunks into the fewest calls that fit the judge model's context window.
 
-    The budget is the model's context minus the response reserve, the system prompt and the
-    query (the fixed part of every user message). A chunk larger than the whole budget still goes
-    out on its own rather than being dropped. ``ai_judge_max_batch_chunks`` caps how many chunks
-    share one call so grading quality does not degrade on pools of many short chunks.
+    The budget is the model's context minus the response reserve, the system prompt and the fixed
+    part of every user message (the query, plus the reference answer when present). A chunk larger
+    than the whole budget still goes out on its own rather than being dropped.
+    ``ai_judge_max_batch_chunks`` caps how many chunks share one call so grading quality does not
+    degrade on pools of many short chunks.
     """
     budget = max(
         1,
         int(settings.ai_judge_context_tokens)
         - int(settings.ai_judge_response_reserve_tokens)
         - _estimate_tokens(system)
-        - _estimate_tokens(query),
+        - _estimate_tokens(query)
+        - _estimate_tokens(expected_answer or ""),
     )
     max_per_batch = max(1, int(settings.ai_judge_max_batch_chunks))
 
@@ -92,8 +96,22 @@ def _batch_chunks(system: str, query: str, chunks: list[AiJudgeChunk]) -> list[l
     return batches
 
 
-def _build_user_prompt(query: str, chunks: list[AiJudgeChunk]) -> str:
-    lines = [f"Query:\n{query}\n", "Chunks:"]
+def _build_user_prompt(
+    query: str, chunks: list[AiJudgeChunk], *, expected_answer: str | None = None
+) -> str:
+    lines = [f"Query:\n{query}\n"]
+    # Optional reference answer: context that sharpens what "relevant" means for THIS query,
+    # without turning the judge into an answer-matcher (a chunk supporting a valid alternative
+    # answer is still relevant).
+    if expected_answer and expected_answer.strip():
+        lines.append(
+            "Reference answer (context only — a known-good answer to the query. Use it to judge "
+            "whether a chunk supplies the kind of information an answer needs; do NOT require a "
+            "chunk to match it, and do NOT penalize a chunk that supports a different but valid "
+            "answer):\n"
+            f"{expected_answer.strip()}\n"
+        )
+    lines.append("Chunks:")
     for i, c in enumerate(chunks, start=1):
         body = _clean(c.text) or "(no text)"
         lines.append(f"\n[{i}]\n{body}")
@@ -110,17 +128,21 @@ def build_ai_judge_messages(
     chunks: list[AiJudgeChunk],
     *,
     instructions: str | None = None,
+    expected_answer: str | None = None,
 ) -> list[dict[str, str]]:
     """The exact ``[system, user]`` messages the judge sends for one batch of ``chunks``.
 
     Shared by :func:`ai_judge_chunks` and the labeling UI's prompt preview, so the text a
-    reviewer inspects (rubric + query + the full chunk text folded in) never drifts from what
-    actually runs.
+    reviewer inspects (rubric + query + optional reference answer + the full chunk text folded in)
+    never drifts from what actually runs.
     """
     system = (instructions or DEFAULT_AI_JUDGE_INSTRUCTIONS).strip()
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": _build_user_prompt(query, chunks)},
+        {
+            "role": "user",
+            "content": _build_user_prompt(query, chunks, expected_answer=expected_answer),
+        },
     ]
 
 
@@ -129,6 +151,7 @@ def plan_ai_judge_prompts(
     chunks: list[AiJudgeChunk],
     *,
     instructions: str | None = None,
+    expected_answer: str | None = None,
 ) -> tuple[str, list[tuple[str, int]]]:
     """Return ``(system_prompt, [(user_prompt, chunk_count) per batch])`` the judge would send.
 
@@ -136,8 +159,10 @@ def plan_ai_judge_prompts(
     is split across calls — the same batching :func:`ai_judge_chunks` runs.
     """
     system = (instructions or DEFAULT_AI_JUDGE_INSTRUCTIONS).strip()
-    batches = _batch_chunks(system, query, chunks)
-    return system, [(_build_user_prompt(query, b), len(b)) for b in batches]
+    batches = _batch_chunks(system, query, chunks, expected_answer=expected_answer)
+    return system, [
+        (_build_user_prompt(query, b, expected_answer=expected_answer), len(b)) for b in batches
+    ]
 
 
 def _parse_grades(content: str, chunk_count: int) -> dict[int, int]:
@@ -205,22 +230,26 @@ async def ai_judge_chunks(
     chunks: list[AiJudgeChunk],
     *,
     instructions: str | None = None,
+    expected_answer: str | None = None,
 ) -> tuple[dict[str, int], LlmUsageInfo]:
     """Grade each chunk's relevance to ``query`` with the LLM. Returns ``{chunk_id: grade}``.
 
     Chunks go out in full; the pool is split into context-budgeted batches, each graded in its
     own call, and the grades are merged. Chunks the model omits or returns an invalid grade for
     are simply absent from the result (the caller leaves them unjudged), so a partial response
-    never invents grades.
+    never invents grades. ``expected_answer``, when given, is folded into each user message as
+    context (never as a match target) so the judge can weigh what an answer actually needs.
     """
     system = (instructions or DEFAULT_AI_JUDGE_INSTRUCTIONS).strip()
-    batches = _batch_chunks(system, query, chunks)
+    batches = _batch_chunks(system, query, chunks, expected_answer=expected_answer)
 
     grades: dict[str, int] = {}
     usage = _empty_usage()
     for batch in batches:
         content, batch_usage = await llm.tracked_chat_completion(
-            messages=build_ai_judge_messages(query, batch, instructions=instructions),
+            messages=build_ai_judge_messages(
+                query, batch, instructions=instructions, expected_answer=expected_answer
+            ),
             temperature=0.0,
             response_format={"type": "json_object"},
         )

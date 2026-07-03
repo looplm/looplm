@@ -11,6 +11,7 @@ from httpx import AsyncClient
 from app.models.base import IndexProviderType
 from app.models.datasets import TestCase, TestDataset
 from app.models.index_providers import IndexProvider
+from app.services.chunk_ai_judge import AiJudgeChunk, build_ai_judge_messages
 from app.services.chunk_labeling import (
     build_labeling_cases,
     build_labeling_view,
@@ -21,9 +22,10 @@ from app.services.chunk_pool import PooledChunk, PoolResult
 from app.services.retrieval_metrics_aggregate import aggregate_retrieval_metrics_from_labels
 
 
-def _tc(test_id, prompt):
-    """A minimal stand-in for a TestCase row (build_labeling_cases reads .test_id / .prompt)."""
-    return SimpleNamespace(test_id=test_id, prompt=prompt)
+def _tc(test_id, prompt, expected_answer=None):
+    """A minimal stand-in for a TestCase row (build_labeling_cases reads .test_id / .prompt /
+    .expected_answer)."""
+    return SimpleNamespace(test_id=test_id, prompt=prompt, expected_answer=expected_answer)
 
 
 def test_build_pool_view_overlays_labels_and_provenance():
@@ -69,12 +71,31 @@ def test_build_pool_view_orders_reranked_first():
 
 
 def test_build_labeling_cases_from_test_cases():
-    cases, total = build_labeling_cases([_tc("a", "query a"), _tc("b", "query b")])
+    cases, total = build_labeling_cases(
+        [_tc("a", "query a", expected_answer="the answer"), _tc("b", "query b")]
+    )
     assert total == 2
     assert [c.test_id for c in cases] == ["a", "b"]
     assert cases[0].input == "query a"
+    # The case's reference answer is carried through for the labeler to judge against.
+    assert cases[0].expected_answer == "the answer"
+    assert cases[1].expected_answer is None
     # The skeleton carries no chunks (they're pooled per case) and no labels.
     assert cases[0].chunks == [] and cases[0].labeled_count == 0
+
+
+def test_ai_judge_prompt_folds_in_reference_answer_as_context():
+    chunks = [AiJudgeChunk(chunk_id="c1", text="some passage")]
+
+    # With a reference answer: it appears as context, framed so the judge does not match against it.
+    user = build_ai_judge_messages("q?", chunks, expected_answer="the gold answer")[1]["content"]
+    assert "the gold answer" in user
+    assert "Reference answer" in user and "context only" in user
+    assert "do NOT require a chunk to match it" in user
+
+    # Without one: no reference-answer block, so behavior is unchanged for cases that lack it.
+    plain = build_ai_judge_messages("q?", chunks)[1]["content"]
+    assert "Reference answer" not in plain
 
 
 def test_build_labeling_cases_dedupes_test_id():
@@ -128,10 +149,20 @@ def test_aggregate_metrics_skips_unlabeled_cases():
     assert out.available is False
 
 
-async def _seed_dataset(db_session, project, *, test_id="q1", prompt="how to X"):
+async def _seed_dataset(
+    db_session, project, *, test_id="q1", prompt="how to X", expected_answer=None
+):
     dataset = TestDataset(id=uuid4(), project_id=project.id, name="set")
     db_session.add(dataset)
-    db_session.add(TestCase(id=uuid4(), dataset_id=dataset.id, test_id=test_id, prompt=prompt))
+    db_session.add(
+        TestCase(
+            id=uuid4(),
+            dataset_id=dataset.id,
+            test_id=test_id,
+            prompt=prompt,
+            expected_answer=expected_answer,
+        )
+    )
     await db_session.commit()
     return dataset
 
@@ -184,7 +215,7 @@ async def test_ai_judge_stores_labels_under_ai_annotator(
     import app.routers.chunk_labels.llm_ops as ops
     from app.services.analysis_llm import LlmUsageInfo
 
-    await _seed_dataset(db_session, test_project)
+    await _seed_dataset(db_session, test_project, expected_answer="X is done via the Y dialog")
 
     # A human grades c1; the AI judge will grade both pooled chunks.
     await client.post(
@@ -208,7 +239,10 @@ async def test_ai_judge_stores_labels_under_ai_annotator(
         )
         return pool, None, True
 
-    async def _fake_judge(llm, query, chunks, *, instructions=None):
+    seen = {}
+
+    async def _fake_judge(llm, query, chunks, *, instructions=None, expected_answer=None):
+        seen["expected_answer"] = expected_answer
         return {"c1": 3, "c2": 0}, LlmUsageInfo(0, 0, 0, None, 0, 0, 0)
 
     monkeypatch.setattr(ops, "AnalysisLlmService", _FakeLlm)
@@ -220,6 +254,8 @@ async def test_ai_judge_stores_labels_under_ai_annotator(
     )
     assert judged.status_code == 200
     assert judged.json()["judged"] == 2 and judged.json()["grades"] == {"c1": 3, "c2": 0}
+    # The case's reference answer is passed to the judge as context.
+    assert seen["expected_answer"] == "X is done via the Y dialog"
 
     # The case lists the AI as an annotator; one human + the AI judge is enough for agreement.
     view = await client.get("/api/pipeline/labeling", headers=auth_headers)
