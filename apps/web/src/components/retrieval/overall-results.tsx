@@ -139,7 +139,9 @@ export function OverallResults({
           perCase={metric.perCase}
           metricTarget={metricTarget}
           metricInfo={metric.info}
-          showRecallCounts={metricKey === "recall"}
+          ratio={metric.ratio ? (c) => metric.ratio!(c, lk, activeK) : null}
+          ratioHeader={metric.ratioHeader}
+          ratioInfo={metric.ratioInfo}
         />
       </div>
     </>

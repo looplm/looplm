@@ -22,12 +22,14 @@ export const EXPLAIN = {
     "Of the chunks that were returned, this is the share that were actually relevant. Higher means less noise in the results.",
   recallCurve:
     "How many of the correct chunks appear as you widen the window from the top 1 result out to the deepest cutoff shown. The bars normally rise as k grows.",
-  expected: "How many chunks this question was expected to find (the ground truth).",
-  retrieved: "How many chunks the search actually returned for this question.",
-  found:
-    "How many of the expected chunks the search surfaced anywhere in its results, regardless of rank. If this is high but recall is low, the right chunks were retrieved but ranked too deep (a ranking problem); if this is low too, they were not retrieved at all (a coverage problem).",
+  expected:
+    "The total number of chunks labeled relevant for this question (the ground truth). This is recall's denominator.",
+  ratioRecall:
+    "The numerator and denominator behind recall: relevant chunks found in the top results, over the total expected (ground-truth) chunks.",
+  ratioPrecision:
+    "The numerator and denominator behind precision: relevant chunks found in the top-k, over the cutoff k — the number of slots scored (returning fewer still divides by k).",
   caseRecall:
-    "The share of the expected chunks that were found in the top results for this single question. The fraction beside it is the raw count: found in top-k / expected.",
+    "The share of the expected chunks that were found in the top results for this single question.",
   firstHit: "The position of the first correct chunk in the results. Lower is better. A dash means none were found.",
   targets: "Set the score you want each metric to reach. Cards turn green when they hit the goal, amber when close, and red when below.",
   bpref:
@@ -109,13 +111,32 @@ export interface PerKMetric {
   target: (t: RetrievalTargets) => number | null | undefined;
   // The metric's own explanation, shown on the chart + per-case info icons for that metric.
   info: string;
+  // The integer numerator/denominator that make up this metric's per-case percentage, shown as
+  // "num / den" in the per-case table so the % is self-explanatory. Recall divides by the expected
+  // count, precision by the cutoff k. `null` for metrics whose per-case score isn't a plain
+  // fraction (nDCG, hit-rate) — the table then drops the column rather than showing a misleading
+  // one. Otherwise returns null only when the per-case counts aren't available.
+  ratio: ((c: RetrievalCaseMetrics, lk: string, largestK: number) => { num: number; den: number } | null) | null;
+  // Header + tooltip for that fraction column, since the denominator differs per metric.
+  ratioHeader?: string;
+  ratioInfo?: string;
 }
 
+// Relevant chunks found within the top-k window (the shared numerator) and the expected total (the
+// recall denominator). nDCG/hit-rate reuse this as supporting context — they weight it by rank.
+const foundNum = (c: RetrievalCaseMetrics, lk: string) => c.relevant_retrieved_at_k?.[lk];
+const expectedDen = (c: RetrievalCaseMetrics) => c.relevant_count ?? c.expected_count;
+const foundRatio = (c: RetrievalCaseMetrics, lk: string) => {
+  const num = foundNum(c, lk);
+  const den = expectedDen(c);
+  return num == null || !den ? null : { num, den };
+};
+
 export const PERK_METRICS: PerKMetric[] = [
-  { key: "recall", label: "Recall", agg: (m) => m.recall_at_k, perCase: (c) => c.recall_at_k, target: (t) => t.recall, info: EXPLAIN.recall },
-  { key: "precision", label: "Precision", agg: (m) => m.precision_at_k, perCase: (c) => c.precision_at_k ?? {}, target: (t) => t.precision, info: EXPLAIN.precision },
-  { key: "ndcg", label: "nDCG", agg: (m) => m.ndcg_at_k, perCase: (c) => c.ndcg_at_k, target: (t) => t.ndcg, info: EXPLAIN.ndcg },
-  { key: "hit_rate", label: "Hit-rate", agg: (m) => m.hit_rate_at_k, perCase: (c) => c.hit_rate_at_k ?? {}, target: (t) => t.hit_rate, info: EXPLAIN.hit },
+  { key: "recall", label: "Recall", agg: (m) => m.recall_at_k, perCase: (c) => c.recall_at_k, target: (t) => t.recall, info: EXPLAIN.recall, ratio: foundRatio, ratioHeader: "Found / Exp", ratioInfo: EXPLAIN.ratioRecall },
+  { key: "precision", label: "Precision", agg: (m) => m.precision_at_k, perCase: (c) => c.precision_at_k ?? {}, target: (t) => t.precision, info: EXPLAIN.precision, ratio: (c, lk, largestK) => { const num = foundNum(c, lk); return num == null ? null : { num, den: largestK }; }, ratioHeader: "Found / k", ratioInfo: EXPLAIN.ratioPrecision },
+  { key: "ndcg", label: "nDCG", agg: (m) => m.ndcg_at_k, perCase: (c) => c.ndcg_at_k, target: (t) => t.ndcg, info: EXPLAIN.ndcg, ratio: null },
+  { key: "hit_rate", label: "Hit-rate", agg: (m) => m.hit_rate_at_k, perCase: (c) => c.hit_rate_at_k ?? {}, target: (t) => t.hit_rate, info: EXPLAIN.hit, ratio: null },
 ];
 
 export const RETRIEVER_NOTES: Record<string, string> = {

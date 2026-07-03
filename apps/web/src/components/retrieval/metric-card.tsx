@@ -24,7 +24,7 @@ export function Info({ text }: { text: string }) {
       </span>
       {pos && (
         <span
-          className="fixed z-50 w-60 -translate-x-1/2 -translate-y-full rounded-lg bg-slate-900 dark:bg-slate-800 px-3 py-2 text-left text-[11px] font-normal normal-case leading-snug tracking-normal text-slate-100 shadow-xl ring-1 ring-black/10 pointer-events-none"
+          className="fixed z-50 w-60 -translate-x-1/2 -translate-y-full whitespace-normal rounded-lg bg-slate-900 dark:bg-slate-800 px-3 py-2 text-left text-[11px] font-normal normal-case leading-snug tracking-normal text-slate-100 shadow-xl ring-1 ring-black/10 pointer-events-none"
           style={{ left: pos.x, top: pos.y - 8 }}
         >
           {text}

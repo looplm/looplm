@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { RetrievalCaseMetrics, SliceMetrics } from "@/lib/api";
 import { EXPLAIN, pct } from "./constants";
@@ -94,6 +95,57 @@ export function SliceBreakdown({ slices, largestK }: { slices: SliceMetrics[]; l
   );
 }
 
+type SortKey = "query" | "relevant" | "detail" | "metric" | "firsthit";
+
+// Direction a column jumps to on its first click. Metric defaults ascending so the worst cases
+// surface first (the old fixed "sorted by worst recall" behaviour, now applied to whichever metric
+// is selected); count columns default to highest-first, which is the more useful first look.
+const INITIAL_DIR: Record<SortKey, "asc" | "desc"> = {
+  query: "asc",
+  relevant: "desc",
+  detail: "desc",
+  metric: "asc",
+  firsthit: "asc",
+};
+
+// A clickable column header that sorts by `sortKey` and shows the active direction arrow.
+function SortTh({
+  children,
+  sortKey,
+  sort,
+  onSort,
+  info,
+  align = "right",
+  className = "",
+}: {
+  children: ReactNode;
+  sortKey: SortKey;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  onSort: (k: SortKey) => void;
+  info?: string;
+  align?: "left" | "right";
+  className?: string;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th className={`font-medium ${align === "left" ? "text-left" : "text-right"} ${className}`}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-0.5 cursor-pointer select-none hover:text-gray-600 dark:hover:text-slate-300 ${
+          active ? "text-gray-600 dark:text-slate-300" : ""
+        }`}
+      >
+        <span className="inline-flex items-center">
+          {children}
+          {info ? <Info text={info} /> : null}
+        </span>
+        <span className="w-2 text-[9px] leading-none">{active ? (sort.dir === "asc" ? "▲" : "▼") : ""}</span>
+      </button>
+    </th>
+  );
+}
+
 export function PerCaseResults({
   cases,
   largestK,
@@ -102,7 +154,13 @@ export function PerCaseResults({
   perCase = (c) => c.recall_at_k,
   metricTarget,
   metricInfo = EXPLAIN.caseRecall,
-  showRecallCounts = false,
+  ratio = (c) => {
+    const num = c.relevant_retrieved_at_k?.[lk];
+    const den = c.relevant_count ?? c.expected_count;
+    return num == null || !den ? null : { num, den };
+  },
+  ratioHeader = "Found / Exp",
+  ratioInfo = EXPLAIN.ratioRecall,
 }: {
   cases: RetrievalCaseMetrics[];
   largestK: number;
@@ -113,42 +171,88 @@ export function PerCaseResults({
   metricTarget: number | null;
   // Tooltip for the metric column header.
   metricInfo?: string;
-  // When the selected metric is recall, show the raw hit count (found in top-k / expected)
-  // beside the percentage. Only recall's numerator/denominator map to these counts.
-  showRecallCounts?: boolean;
+  // The numerator/denominator behind the selected metric's percentage, shown as "num / den" so the
+  // reader can see how the % is derived. `null` hides the whole column — used for nDCG/hit-rate,
+  // whose per-case score isn't a plain fraction.
+  ratio?: ((c: RetrievalCaseMetrics) => { num: number; den: number } | null) | null;
+  ratioHeader?: string;
+  ratioInfo?: string;
 }) {
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "metric", dir: "asc" });
+  const onSort = (k: SortKey) =>
+    setSort((s) => (s.key === k ? { key: k, dir: s.dir === "asc" ? "desc" : "asc" } : { key: k, dir: INITIAL_DIR[k] }));
+
+  // If the detail column is hidden (nDCG/hit-rate) but it was the active sort, fall back to metric.
+  const key: SortKey = sort.key === "detail" && !ratio ? "metric" : sort.key;
+
+  const sorted = useMemo(() => {
+    const arr = [...cases];
+    const mul = sort.dir === "asc" ? 1 : -1;
+    const valOf = (c: RetrievalCaseMetrics): string | number => {
+      switch (key) {
+        case "query":
+          return (c.input || c.test_id || "").toLowerCase();
+        case "relevant":
+          return c.expected_count ?? 0;
+        case "detail":
+          return ratio?.(c)?.num ?? -1;
+        case "firsthit":
+          return c.first_relevant_rank ?? Number.POSITIVE_INFINITY;
+        default:
+          return perCase(c)[lk] ?? 0;
+      }
+    };
+    arr.sort((a, b) => {
+      // "No first hit" always sorts to the bottom, whichever direction is active.
+      if (key === "firsthit") {
+        const ra = a.first_relevant_rank;
+        const rb = b.first_relevant_rank;
+        if (ra == null && rb == null) return 0;
+        if (ra == null) return 1;
+        if (rb == null) return -1;
+        return (ra - rb) * mul;
+      }
+      const va = valOf(a);
+      const vb = valOf(b);
+      if (typeof va === "string" || typeof vb === "string") return String(va).localeCompare(String(vb)) * mul;
+      return (va - vb) * mul;
+    });
+    return arr;
+  }, [cases, key, sort.dir, perCase, ratio, lk]);
+
   return (
     <div className="lg:col-span-2 flex flex-col rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
         <span className="text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-slate-500">
           Per-case results
         </span>
-        <span className="text-[11px] text-gray-400 dark:text-slate-500">sorted by worst recall</span>
+        <span className="text-[11px] text-gray-400 dark:text-slate-500">click a column to sort</span>
       </div>
       <div className="overflow-y-auto flex-1 max-h-[360px]">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-white dark:bg-slate-900 text-gray-400 dark:text-slate-500 border-b border-gray-100 dark:border-slate-800">
             <tr>
-              <th className="text-left font-medium px-4 py-2">Query</th>
-              <th className="text-right font-medium px-2 py-2">
-                <span className="inline-flex items-center">Exp<Info text={EXPLAIN.expected} /></span>
-              </th>
-              <th className="text-right font-medium px-2 py-2">
-                <span className="inline-flex items-center">Retr<Info text={EXPLAIN.retrieved} /></span>
-              </th>
-              <th className="text-right font-medium px-2 py-2">
-                <span className="inline-flex items-center">Found<Info text={EXPLAIN.found} /></span>
-              </th>
-              <th className="text-right font-medium px-3 py-2">
-                <span className="inline-flex items-center">{metricLabel}@{largestK}<Info text={metricInfo} /></span>
-              </th>
-              <th className="text-right font-medium px-2 py-2">
-                <span className="inline-flex items-center">1st hit<Info text={EXPLAIN.firstHit} /></span>
-              </th>
+              <SortTh sortKey="query" sort={sort} onSort={onSort} align="left" className="px-4 py-2">
+                Query
+              </SortTh>
+              <SortTh sortKey="relevant" sort={sort} onSort={onSort} info={EXPLAIN.expected} className="px-2 py-2 whitespace-nowrap">
+                Relevant
+              </SortTh>
+              {ratio && (
+                <SortTh sortKey="detail" sort={sort} onSort={onSort} info={ratioInfo} className="px-2 py-2 whitespace-nowrap">
+                  {ratioHeader}
+                </SortTh>
+              )}
+              <SortTh sortKey="metric" sort={sort} onSort={onSort} info={metricInfo} className="px-3 py-2 whitespace-nowrap">
+                {metricLabel}@{largestK}
+              </SortTh>
+              <SortTh sortKey="firsthit" sort={sort} onSort={onSort} info={EXPLAIN.firstHit} className="px-2 py-2 whitespace-nowrap">
+                1st hit
+              </SortTh>
             </tr>
           </thead>
           <tbody>
-            {cases.map((c) => (
+            {sorted.map((c) => (
               <tr
                 key={c.test_id}
                 className="border-b border-gray-50 dark:border-slate-800/50 hover:bg-gray-50/60 dark:hover:bg-slate-800/30"
@@ -176,24 +280,16 @@ export function PerCaseResults({
                   </div>
                 </td>
                 <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">{c.expected_count}</td>
-                <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">{c.retrieved_count}</td>
-                <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">
-                  {(() => {
-                    const denom = c.relevant_count ?? c.expected_count;
-                    return c.relevant_retrieved_total == null || !denom
-                      ? "-"
-                      : `${c.relevant_retrieved_total} / ${denom}`;
-                  })()}
-                </td>
+                {ratio && (
+                  <td className="px-2 py-2.5 text-right font-mono tabular-nums text-gray-500 dark:text-slate-400">
+                    {(() => {
+                      const r = ratio(c);
+                      return r ? `${r.num} / ${r.den}` : "-";
+                    })()}
+                  </td>
+                )}
                 <td className="px-3 py-2.5">
-                  <div className="flex items-center justify-end gap-2">
-                    {showRecallCounts &&
-                      c.relevant_retrieved_at_k?.[lk] != null &&
-                      (c.relevant_count ?? c.expected_count) > 0 && (
-                        <span className="font-mono tabular-nums text-[11px] text-gray-400 dark:text-slate-500">
-                          {c.relevant_retrieved_at_k[lk]} / {c.relevant_count ?? c.expected_count}
-                        </span>
-                      )}
+                  <div className="flex items-center justify-end">
                     <MiniBar
                       v={perCase(c)[lk] ?? 0}
                       ok={metricTarget != null ? (perCase(c)[lk] ?? 0) >= metricTarget : c.hit}
