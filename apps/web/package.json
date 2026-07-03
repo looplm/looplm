@@ -1,6 +1,6 @@
 {
   "name": "@looplm/web",
-  "version": "0.22.2",
+  "version": "0.23.0",
   "private": true,
   "scripts": {
     "dev": "next dev --port 3100",
