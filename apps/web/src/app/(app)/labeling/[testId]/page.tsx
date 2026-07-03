@@ -42,6 +42,8 @@ export default function LabelingWorkbenchPage() {
   const [aiJudging, setAiJudging] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [recomputing, setRecomputing] = useState(false);
+  // Fold the case's reference answer into the AI judge prompt (defaults to the prior behavior).
+  const [includeExpectedAnswer, setIncludeExpectedAnswer] = useState(true);
 
   useEffect(() => {
     getIndexProviders()
@@ -207,7 +209,7 @@ export default function LabelingWorkbenchPage() {
     async (instructions?: string) => {
       setAiJudging(true);
       try {
-        const res = await aiJudgeCase(testId, { datasetId, instructions });
+        const res = await aiJudgeCase(testId, { datasetId, instructions, includeExpectedAnswer });
         setPool((prev) =>
           prev
             ? {
@@ -237,7 +239,7 @@ export default function LabelingWorkbenchPage() {
         setAiJudging(false);
       }
     },
-    [testId, datasetId],
+    [testId, datasetId, includeExpectedAnswer],
   );
 
   const onPlan = useCallback(
@@ -352,6 +354,8 @@ export default function LabelingWorkbenchPage() {
           onClearGrade={onClearGrade}
           onAiJudge={onAiJudge}
           aiJudging={aiJudging}
+          includeExpectedAnswer={includeExpectedAnswer}
+          onIncludeExpectedAnswerChange={setIncludeExpectedAnswer}
           onPlan={onPlan}
           planning={planning}
           promptDefaults={promptDefaults}

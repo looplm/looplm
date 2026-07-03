@@ -129,8 +129,13 @@ async def ai_judge_case(
         for pc in pool.chunks
     ]
     # Reference answer, when the case has one, sharpens the judge's relevance calls (context, not
-    # a match target). Absent → the judge grades on query-relevance alone as before.
-    expected_answer = await _dataset_case_expected_answer(db, dataset.id, body.test_id)
+    # a match target). Absent, or opted out via the request, → the judge grades on query-relevance
+    # alone.
+    expected_answer = (
+        await _dataset_case_expected_answer(db, dataset.id, body.test_id)
+        if body.include_expected_answer
+        else None
+    )
     try:
         grades, usage = await ai_judge_chunks(
             llm, query, chunks, instructions=body.instructions, expected_answer=expected_answer
@@ -244,8 +249,13 @@ async def ai_judge_preview(
         )
         for pc in pool.chunks
     ]
-    # Mirror the judge: show the reference answer folded into the previewed prompt when present.
-    expected_answer = await _dataset_case_expected_answer(db, dataset.id, body.test_id)
+    # Mirror the judge: show the reference answer folded into the previewed prompt when present and
+    # not opted out via the request.
+    expected_answer = (
+        await _dataset_case_expected_answer(db, dataset.id, body.test_id)
+        if body.include_expected_answer
+        else None
+    )
     system_prompt, planned = plan_ai_judge_prompts(
         query, chunks, instructions=body.instructions, expected_answer=expected_answer
     )

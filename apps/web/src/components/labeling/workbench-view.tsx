@@ -38,6 +38,8 @@ export function WorkbenchView({
   onClearGrade,
   onAiJudge,
   aiJudging,
+  includeExpectedAnswer,
+  onIncludeExpectedAnswerChange,
   onPlan,
   planning,
   promptDefaults,
@@ -60,6 +62,9 @@ export function WorkbenchView({
   // rubric (edited in the prompts panel).
   onAiJudge: (instructions?: string) => void;
   aiJudging: boolean;
+  // Whether the AI judge folds this case's reference answer into its prompt.
+  includeExpectedAnswer: boolean;
+  onIncludeExpectedAnswerChange: (value: boolean) => void;
   // Plan (or re-plan) the agentic sub-queries for this case, then re-pool.
   onPlan: (instructions?: string) => void;
   planning: boolean;
@@ -225,6 +230,8 @@ export function WorkbenchView({
             judgeOpen={judgeOpen}
             onRunJudge={onAiJudge}
             aiJudging={aiJudging}
+            includeExpectedAnswer={includeExpectedAnswer}
+            onIncludeExpectedAnswerChange={onIncludeExpectedAnswerChange}
           />
         )}
       </div>

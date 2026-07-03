@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -13,7 +13,6 @@ import {
 import { usePermissions } from "@/components/permissions-context";
 import { AgreementPanel } from "@/components/labeling/agreement-panel";
 import { LabelingControls } from "@/components/labeling/labeling-controls";
-import { JudgeAllButton } from "@/components/retrieval/judge-all-button";
 import { runBounded } from "@/lib/run-bounded";
 
 const SLICE_BADGE: Record<string, string> = {
@@ -33,8 +32,13 @@ export default function LabelingIndexPage() {
   const [indexConnected, setIndexConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [bulkBusy, setBulkBusy] = useState<"recompute" | "judge" | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<"recompute" | "judge" | "judge_all" | null>(null);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  // Fold each case's reference answer into the AI judge prompt (governs both the per-dataset
+  // "AI-judge all" and the header's cross-dataset "Judge all"). Defaults to the prior behavior.
+  const [includeExpectedAnswer, setIncludeExpectedAnswer] = useState(true);
+  // Set while a bulk action runs so "Stop" can halt scheduling and cancel in-flight requests.
+  const bulkAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     getIndexProviders()
@@ -58,10 +62,14 @@ export default function LabelingIndexPage() {
     load(datasetId);
   }, [datasetId, load]);
 
+  const stopBulk = useCallback(() => bulkAbortRef.current?.abort(), []);
+
   const recomputeAll = useCallback(async () => {
     if (!view) return;
     const ids = view.cases.map((c) => c.test_id);
     if (ids.length === 0) return;
+    const controller = new AbortController();
+    bulkAbortRef.current = controller;
     setBulkBusy("recompute");
     setBulkProgress({ done: 0, total: ids.length });
     try {
@@ -70,9 +78,12 @@ export default function LabelingIndexPage() {
         4,
         (id) => getLabelingPool(id, { datasetId: view.dataset_id ?? undefined, refresh: true }).then(() => {}),
         (done) => setBulkProgress({ done, total: ids.length }),
+        controller.signal,
       );
-      toast.success(`Recomputed ${ids.length} pool${ids.length === 1 ? "" : "s"}`);
+      if (controller.signal.aborted) toast.info("Stopped recomputing pools");
+      else toast.success(`Recomputed ${ids.length} pool${ids.length === 1 ? "" : "s"}`);
     } finally {
+      bulkAbortRef.current = null;
       setBulkBusy(null);
       setBulkProgress(null);
     }
@@ -82,6 +93,8 @@ export default function LabelingIndexPage() {
     if (!view) return;
     const ids = view.cases.map((c) => c.test_id);
     if (ids.length === 0) return;
+    const controller = new AbortController();
+    bulkAbortRef.current = controller;
     setBulkBusy("judge");
     setBulkProgress({ done: 0, total: ids.length });
     const judged = new Set<string>();
@@ -90,10 +103,15 @@ export default function LabelingIndexPage() {
         ids,
         3,
         (id) =>
-          aiJudgeCase(id, { datasetId: view.dataset_id ?? undefined }).then(() => {
+          aiJudgeCase(id, {
+            datasetId: view.dataset_id ?? undefined,
+            includeExpectedAnswer,
+            signal: controller.signal,
+          }).then(() => {
             judged.add(id);
           }),
         (done) => setBulkProgress({ done, total: ids.length }),
+        controller.signal,
       );
       // Reflect the AI annotator now present on judged cases.
       setView((prev) =>
@@ -108,12 +126,68 @@ export default function LabelingIndexPage() {
             }
           : prev,
       );
-      toast.success(`AI judged ${judged.size} question${judged.size === 1 ? "" : "s"}`);
+      if (controller.signal.aborted) toast.info(`Stopped — AI judged ${judged.size} question${judged.size === 1 ? "" : "s"}`);
+      else toast.success(`AI judged ${judged.size} question${judged.size === 1 ? "" : "s"}`);
     } finally {
+      bulkAbortRef.current = null;
       setBulkBusy(null);
       setBulkProgress(null);
     }
-  }, [view]);
+  }, [view, includeExpectedAnswer]);
+
+  // Judge every case across *all* datasets in the project (the cross-dataset gold), not just the
+  // one open. Enumerate each dataset's cases, dedupe by test_id (labels are shared across datasets),
+  // then judge with bounded concurrency — one shared busy/progress/abort with the other bulk actions.
+  const judgeAllDatasets = useCallback(async () => {
+    const targetIds = (view?.datasets ?? []).map((d) => d.id);
+    if (targetIds.length === 0) return;
+    const controller = new AbortController();
+    bulkAbortRef.current = controller;
+    setBulkBusy("judge_all");
+    setBulkProgress(null); // unknown until every dataset's cases are enumerated
+    try {
+      const seen = new Set<string>();
+      const cases: { testId: string; datasetId: string }[] = [];
+      const views = await Promise.all(targetIds.map((id) => getLabelingView(id).catch(() => null)));
+      if (controller.signal.aborted) {
+        toast.info("Stopped");
+        return;
+      }
+      views.forEach((v, i) => {
+        for (const cc of v?.cases ?? []) {
+          if (!seen.has(cc.test_id)) {
+            seen.add(cc.test_id);
+            cases.push({ testId: cc.test_id, datasetId: targetIds[i] });
+          }
+        }
+      });
+      if (cases.length === 0) {
+        toast.info("No cases to judge across the datasets.");
+        return;
+      }
+      setBulkProgress({ done: 0, total: cases.length });
+      let judged = 0;
+      await runBounded(
+        cases,
+        6,
+        (cc) =>
+          aiJudgeCase(cc.testId, {
+            datasetId: cc.datasetId,
+            includeExpectedAnswer,
+            signal: controller.signal,
+          }).then(() => void judged++),
+        (done) => setBulkProgress({ done, total: cases.length }),
+        controller.signal,
+      );
+      if (controller.signal.aborted) toast.info(`Stopped — AI judged ${judged} of ${cases.length} question${cases.length === 1 ? "" : "s"}`);
+      else toast.success(`AI judged ${judged} of ${cases.length} question${cases.length === 1 ? "" : "s"}`);
+      void load(datasetId);
+    } finally {
+      bulkAbortRef.current = null;
+      setBulkBusy(null);
+      setBulkProgress(null);
+    }
+  }, [view, includeExpectedAnswer, load, datasetId]);
 
   const datasets = view?.datasets ?? [];
   const completeCount = useMemo(() => (view?.cases ?? []).filter((c) => c.complete).length, [view]);
@@ -127,9 +201,6 @@ export default function LabelingIndexPage() {
         <h1 className="text-3xl font-bold">Labeling</h1>
         {datasets.length > 0 && (
           <div className="flex items-center gap-2">
-            {canEdit && indexConnected && (
-              <JudgeAllButton datasets={datasets} selectedIds={[]} onDone={() => load(datasetId)} />
-            )}
             <select
               value={datasetId ?? ""}
               onChange={(e) => setDatasetId(e.target.value || undefined)}
@@ -189,6 +260,11 @@ export default function LabelingIndexPage() {
             bulkProgress={bulkProgress}
             onRecomputeAll={recomputeAll}
             onAiJudgeAll={aiJudgeAll}
+            onJudgeAllDatasets={judgeAllDatasets}
+            datasetCount={datasets.length}
+            onStop={stopBulk}
+            includeExpectedAnswer={includeExpectedAnswer}
+            onIncludeExpectedAnswerChange={setIncludeExpectedAnswer}
           />
 
           <AgreementPanel canEdit={canEdit} />

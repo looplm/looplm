@@ -277,6 +277,9 @@ class AiJudgeRequest(BaseModel):
     dataset_id: str | None = None
     # Optional override of the default grading rubric (system prompt) for this run.
     instructions: str | None = None
+    # Fold the case's reference answer into the judge prompt as context. Defaults to True (prior
+    # behavior); set False to grade on query-relevance alone.
+    include_expected_answer: bool = True
 
 
 class AiJudgeResponse(BaseModel):

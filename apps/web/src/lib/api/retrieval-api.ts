@@ -180,14 +180,17 @@ export const deleteChunkLabel = (testId: string, chunkId: string) => {
 
 export const aiJudgeCase = (
   testId: string,
-  opts: { datasetId?: string; instructions?: string } = {},
+  opts: { datasetId?: string; instructions?: string; includeExpectedAnswer?: boolean; signal?: AbortSignal } = {},
 ) =>
   request<AiJudgeResponse>(`/api/pipeline/labeling/ai-judge`, {
     method: "POST",
+    signal: opts.signal,
     body: JSON.stringify({
       test_id: testId,
       dataset_id: opts.datasetId,
       instructions: opts.instructions,
+      // Omit when true so the request matches the server default (include).
+      include_expected_answer: opts.includeExpectedAnswer === false ? false : undefined,
     }),
   });
 
@@ -195,7 +198,7 @@ export const aiJudgeCase = (
 // rendered server-side so the preview never drifts from what actually runs. No LLM call.
 export const aiJudgePreviewCase = (
   testId: string,
-  opts: { datasetId?: string; instructions?: string } = {},
+  opts: { datasetId?: string; instructions?: string; includeExpectedAnswer?: boolean } = {},
 ) =>
   request<AiJudgePreviewResponse>(`/api/pipeline/labeling/ai-judge/preview`, {
     method: "POST",
@@ -203,6 +206,7 @@ export const aiJudgePreviewCase = (
       test_id: testId,
       dataset_id: opts.datasetId,
       instructions: opts.instructions,
+      include_expected_answer: opts.includeExpectedAnswer === false ? false : undefined,
     }),
   });
 

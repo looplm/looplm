@@ -29,6 +29,8 @@ export function CasePromptsPanel({
   judgeOpen,
   onRunJudge,
   aiJudging,
+  includeExpectedAnswer,
+  onIncludeExpectedAnswerChange,
 }: {
   testId: string;
   datasetId?: string;
@@ -49,6 +51,10 @@ export function CasePromptsPanel({
   // Run the AI judge with the current (possibly edited) rubric.
   onRunJudge: (instructions?: string) => void;
   aiJudging: boolean;
+  // Fold this case's reference answer into the judge prompt (also reflected in the full-prompt
+  // preview). Owned by the parent so a run and its preview stay in sync.
+  includeExpectedAnswer: boolean;
+  onIncludeExpectedAnswerChange: (value: boolean) => void;
 }) {
   const [openPlanner, setOpenPlanner] = useState(false);
   const [plannerText, setPlannerText] = useState<string | null>(null);
@@ -70,6 +76,7 @@ export function CasePromptsPanel({
       const res = await aiJudgePreviewCase(testId, {
         datasetId,
         instructions: judgeInstructions ?? undefined,
+        includeExpectedAnswer,
       });
       setPreview(res);
     } catch (e) {
@@ -172,6 +179,22 @@ export function CasePromptsPanel({
             disabled={!canEdit}
             className="w-full rounded-md border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-[12px] font-mono leading-relaxed disabled:opacity-50"
           />
+          <label
+            title="Fold this case's reference answer into the judge prompt as context. Uncheck to grade on query-relevance alone."
+            className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-slate-400 cursor-pointer select-none"
+          >
+            <input
+              type="checkbox"
+              checked={includeExpectedAnswer}
+              disabled={!canEdit}
+              onChange={(e) => {
+                onIncludeExpectedAnswerChange(e.target.checked);
+                setPreview(null); // the shown full prompt no longer matches
+              }}
+              className="accent-violet-500 disabled:opacity-40"
+            />
+            Include expected answer in prompt
+          </label>
           <div className="flex items-center gap-2">
             <button
               disabled={!canEdit || aiJudging || !indexConnected}
