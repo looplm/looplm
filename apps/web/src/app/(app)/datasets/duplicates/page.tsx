@@ -22,7 +22,11 @@ function groupKey(group: DuplicateGroup): string {
 
 type PendingAction =
   | { kind: "delete"; group: DuplicateGroup; keepId: string }
-  | { kind: "merge"; group: DuplicateGroup; keepId: string };
+  | { kind: "merge"; group: DuplicateGroup; keepId: string }
+  | { kind: "merge_all" };
+
+/** Sentinel busy key for the project-wide "merge all" action (not tied to one group). */
+const MERGE_ALL_KEY = "__merge_all__";
 
 export default function DuplicatesPage() {
   const { canWrite } = usePermissions();
@@ -58,6 +62,8 @@ export default function DuplicatesPage() {
   }, [load]);
 
   const groups = resp?.groups ?? [];
+  // Cases that "Merge all" would fold away (every member except the kept one, per group).
+  const totalOthers = groups.reduce((n, g) => n + g.members.length - 1, 0);
 
   function keepFor(group: DuplicateGroup): string {
     return keepById[groupKey(group)] ?? group.members[0].case_id;
@@ -89,11 +95,32 @@ export default function DuplicatesPage() {
 
   async function handleConfirm() {
     if (!pending) return;
-    const { group, keepId } = pending;
+    const action = pending;
+    setPending(null);
+
+    if (action.kind === "merge_all") {
+      // Merge every group in parallel, each folding its non-kept members into that group's
+      // kept case. Groups are disjoint sets of cases, so the merges don't contend.
+      await runAction(
+        () =>
+          Promise.all(
+            groups.map((g) => {
+              const keepId = keepFor(g);
+              const others = g.members
+                .filter((m) => m.case_id !== keepId)
+                .map((m) => m.case_id);
+              return mergeDuplicates(keepId, others);
+            }),
+          ),
+        MERGE_ALL_KEY,
+      );
+      return;
+    }
+
+    const { group, keepId } = action;
     const others = group.members.filter((m) => m.case_id !== keepId);
     const key = groupKey(group);
-    setPending(null);
-    if (pending.kind === "delete") {
+    if (action.kind === "delete") {
       await runAction(
         () => Promise.all(others.map((m) => deleteTestCase(m.dataset_id, m.case_id))),
         key,
@@ -175,6 +202,22 @@ export default function DuplicatesPage() {
         </div>
       </div>
 
+      {/* Bulk action */}
+      {!loading && groups.length > 0 && canEdit && (
+        <div className="flex items-center justify-end mb-4">
+          <button
+            onClick={() => setPending({ kind: "merge_all" })}
+            disabled={busyKey !== null}
+            title="For every group, merge the others into its kept case, then delete them"
+            className="px-3 py-1.5 rounded-lg text-sm text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-900/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {busyKey === MERGE_ALL_KEY
+              ? "Merging all..."
+              : `Merge all ${groups.length} group${groups.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      )}
+
       {/* Groups */}
       {loading ? (
         <p className="text-gray-500 dark:text-slate-400">Scanning...</p>
@@ -208,11 +251,19 @@ export default function DuplicatesPage() {
       {/* Confirm modal */}
       {pending && (
         <ConfirmModal
-          title={pending.kind === "delete" ? "Delete Duplicate Cases" : "Merge Duplicate Cases"}
+          title={
+            pending.kind === "delete"
+              ? "Delete Duplicate Cases"
+              : pending.kind === "merge_all"
+                ? "Merge All Groups"
+                : "Merge Duplicate Cases"
+          }
           message={
             pending.kind === "delete"
               ? `Delete ${pending.group.members.length - 1} case(s) and keep only the selected one? This cannot be undone.`
-              : `Merge ${pending.group.members.length - 1} case(s) into the selected one (unioning their sources, tags, and answers) and delete the rest? This cannot be undone.`
+              : pending.kind === "merge_all"
+                ? `Merge all ${groups.length} group(s): for each, its other cases are folded into the kept one (unioning their sources, tags, and answers) and deleted. This removes ${totalOthers} case(s) and cannot be undone.`
+                : `Merge ${pending.group.members.length - 1} case(s) into the selected one (unioning their sources, tags, and answers) and delete the rest? This cannot be undone.`
           }
           confirmLabel={pending.kind === "delete" ? "Delete" : "Merge"}
           confirmVariant="danger"

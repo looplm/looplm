@@ -97,13 +97,51 @@ export function DuplicateGroupCard({
                 <p className="text-sm text-gray-700 dark:text-slate-200 mt-1 line-clamp-2" title={m.prompt}>
                   {m.prompt}
                 </p>
+                {m.expected_answer && (
+                  <details className="group/answer mt-2">
+                    <summary className="flex items-center gap-1 cursor-pointer select-none list-none text-xs text-gray-500 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="w-3 h-3 transition-transform group-open/answer:rotate-90"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                        stroke="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                      </svg>
+                      Expected answer
+                    </summary>
+                    <p className="mt-1 whitespace-pre-wrap border-l-2 border-gray-200 dark:border-slate-700 pl-3 text-sm text-gray-600 dark:text-slate-300">
+                      {m.expected_answer}
+                    </p>
+                  </details>
+                )}
               </div>
               <Link
                 href={`/datasets/${m.dataset_id}?edit=${m.case_id}`}
-                className="shrink-0 text-xs text-gray-500 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 hover:underline pt-0.5"
-                title="Open to edit and differentiate"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 text-gray-400 dark:text-slate-500 hover:text-indigo-500 dark:hover:text-indigo-400 pt-0.5"
+                title="Open in a new tab to edit and differentiate"
+                aria-label="Edit case in a new tab"
               >
-                Edit
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={1.8}
+                  stroke="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"
+                  />
+                </svg>
               </Link>
             </li>
           );
