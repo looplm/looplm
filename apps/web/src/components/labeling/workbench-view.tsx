@@ -98,10 +98,10 @@ export function WorkbenchView({
   const shownIds = useMemo(() => new Set(chunks.map((ch) => ch.chunk_id)), [chunks]);
 
   return (
-    <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900">
-      {/* The question, expected answer and queries stay frozen at the top while the case's chunks
-          scroll beneath them. Opaque background so scrolling chunks never bleed through. */}
-      <div className="sticky top-0 z-10 rounded-t-xl overflow-hidden bg-white dark:bg-slate-900">
+    <div className="flex flex-col min-h-0 flex-1 rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+      {/* The question, expected answer and queries are a fixed pane; only the chunk list below
+          scrolls. flex-none keeps this block at its natural height. */}
+      <div className="flex-none rounded-t-xl overflow-hidden">
       <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-800">
         <h2
           className="text-[15px] font-semibold text-gray-900 dark:text-white min-w-0"
@@ -228,7 +228,7 @@ export function WorkbenchView({
           />
         )}
       </div>
-      <div className="overflow-hidden rounded-b-xl">
+      <div className="flex-1 min-h-0 overflow-y-auto rounded-b-xl">
         {!indexConnected ? (
           <p className="px-4 py-6 text-[12px] text-gray-400 dark:text-slate-500">
             Connect an index provider (Settings → Integrations) to pool candidate chunks for this

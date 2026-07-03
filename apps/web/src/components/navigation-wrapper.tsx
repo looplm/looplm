@@ -98,7 +98,7 @@ export default function NavigationWrapper({ children }: { children: React.ReactN
 
   return (
     <PermissionsProvider>
-      <div className="flex min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-white flex-col md:flex-row">
+      <div className="flex h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-white flex-col md:flex-row">
         {/* Mobile Header */}
         <div className="md:hidden flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-30">
           <span className="text-xl font-bold tracking-tight">

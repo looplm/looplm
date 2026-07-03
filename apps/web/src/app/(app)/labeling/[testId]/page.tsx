@@ -263,8 +263,11 @@ export default function LabelingWorkbenchPage() {
   const backHref = `/labeling${datasetId ? `?dataset=${encodeURIComponent(datasetId)}` : ""}`;
 
   return (
-    <div>
-      <div className="flex items-center justify-between gap-4 mb-4">
+    // Fill the scroll area and lay out as a column so the top bar + workbench header stay put and
+    // only the chunk list scrolls (see WorkbenchView). ``min-h-0`` lets the inner list shrink to
+    // enable its own overflow.
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex items-center justify-between gap-4 mb-4 flex-none">
         <Link
           href={backHref}
           className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"
@@ -309,13 +312,13 @@ export default function LabelingWorkbenchPage() {
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm flex-none">
           {error}
         </div>
       )}
 
       {indexConnected === false && !loading && (
-        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-600 dark:text-amber-400 text-sm">
+        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-600 dark:text-amber-400 text-sm flex-none">
           No index provider is connected. Connect one in Settings → Integrations so candidate chunks
           can be pooled for this query.
         </div>
