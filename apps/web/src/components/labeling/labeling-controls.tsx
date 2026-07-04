@@ -34,6 +34,8 @@ export function LabelingControls({
   onStop,
   includeExpectedAnswer,
   onIncludeExpectedAnswerChange,
+  refreshChunks,
+  onRefreshChunksChange,
 }: {
   complete: number;
   total: number;
@@ -54,6 +56,9 @@ export function LabelingControls({
   // Whether the AI judge folds each case's reference answer into its prompt.
   includeExpectedAnswer: boolean;
   onIncludeExpectedAnswerChange: (value: boolean) => void;
+  // Whether the AI judge re-queries the index (bypassing the pool cache) before grading.
+  refreshChunks: boolean;
+  onRefreshChunksChange: (value: boolean) => void;
 }) {
   const busy = bulkBusy !== null;
   return (
@@ -110,6 +115,18 @@ export function LabelingControls({
                   className="accent-violet-500"
                 />
                 Include expected answer
+              </label>
+              <label
+                title="Re-query the index for each question before grading, bypassing the pool cache. Slower (an embedding + index call per question); use after re-indexing. Off grades the already-pooled chunks."
+                className="flex items-center gap-1.5 cursor-pointer select-none"
+              >
+                <input
+                  type="checkbox"
+                  checked={refreshChunks}
+                  onChange={(e) => onRefreshChunksChange(e.target.checked)}
+                  className="accent-violet-500"
+                />
+                Recompute chunks first
               </label>
               <button
                 onClick={onAiJudgeAll}

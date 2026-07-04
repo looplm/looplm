@@ -297,6 +297,9 @@ class AiJudgeRequest(BaseModel):
     # Fold the case's reference answer into the judge prompt as context. Defaults to True (prior
     # behavior); set False to grade on query-relevance alone.
     include_expected_answer: bool = True
+    # Bypass the pool cache and re-query the index before grading. Default False (grade the
+    # already-pooled chunks). Set True to judge against freshly retrieved chunks after re-indexing.
+    refresh: bool = False
 
 
 class AiJudgeResponse(BaseModel):

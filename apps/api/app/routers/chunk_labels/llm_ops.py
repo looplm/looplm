@@ -100,7 +100,7 @@ async def ai_judge_case(
         db, project, user, dataset_id=dataset.id, test_id=body.test_id, query=query
     )
     pool, _computed_at, _connected = await assemble_case_pool(
-        db, project, body.test_id, query, agentic_queries=agentic
+        db, project, body.test_id, query, agentic_queries=agentic, refresh=body.refresh
     )
     if not pool.chunks:
         raise HTTPException(
@@ -238,7 +238,7 @@ async def ai_judge_preview(
     # already-planned queries (no user context here to plan); the judge itself plans if missing.
     agentic = await _dataset_case_agentic_queries(db, dataset.id, body.test_id)
     pool, _computed_at, _connected = await assemble_case_pool(
-        db, project, body.test_id, query, agentic_queries=agentic
+        db, project, body.test_id, query, agentic_queries=agentic, refresh=body.refresh
     )
     # Preview the FULL chunk text the judge grades, not the truncated display preview.
     full_texts = await fetch_full_chunk_texts(db, project, [pc.chunk_id for pc in pool.chunks])

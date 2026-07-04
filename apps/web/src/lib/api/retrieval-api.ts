@@ -213,7 +213,13 @@ export const deleteChunkLabel = (testId: string, chunkId: string) => {
 
 export const aiJudgeCase = (
   testId: string,
-  opts: { datasetId?: string; instructions?: string; includeExpectedAnswer?: boolean; signal?: AbortSignal } = {},
+  opts: {
+    datasetId?: string;
+    instructions?: string;
+    includeExpectedAnswer?: boolean;
+    refresh?: boolean;
+    signal?: AbortSignal;
+  } = {},
 ) =>
   request<AiJudgeResponse>(`/api/pipeline/labeling/ai-judge`, {
     method: "POST",
@@ -224,6 +230,8 @@ export const aiJudgeCase = (
       instructions: opts.instructions,
       // Omit when true so the request matches the server default (include).
       include_expected_answer: opts.includeExpectedAnswer === false ? false : undefined,
+      // Re-query the index before grading; omit when false to match the server default (cached).
+      refresh: opts.refresh === true ? true : undefined,
     }),
   });
 

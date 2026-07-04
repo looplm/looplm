@@ -232,6 +232,7 @@ async def test_ai_judge_stores_labels_under_ai_annotator(
             pass
 
     async def _fake_pool(db, project, test_id, query, **kwargs):
+        seen["refresh"] = kwargs.get("refresh")
         pool = PoolResult(
             chunks=[PooledChunk(chunk_id="c1"), PooledChunk(chunk_id="c2")],
             heads_ran=["keyword"],
@@ -256,6 +257,17 @@ async def test_ai_judge_stores_labels_under_ai_annotator(
     assert judged.json()["judged"] == 2 and judged.json()["grades"] == {"c1": 3, "c2": 0}
     # The case's reference answer is passed to the judge as context.
     assert seen["expected_answer"] == "X is done via the Y dialog"
+    # Default: grade the cached pool (no forced recompute).
+    assert seen["refresh"] is False
+
+    # refresh=True threads through to the pool assembly, bypassing the cache.
+    judged_fresh = await client.post(
+        "/api/pipeline/labeling/ai-judge",
+        headers=auth_headers,
+        json={"test_id": "q1", "refresh": True},
+    )
+    assert judged_fresh.status_code == 200
+    assert seen["refresh"] is True
 
     # The case lists the AI as an annotator; one human + the AI judge is enough for agreement.
     view = await client.get("/api/pipeline/labeling", headers=auth_headers)

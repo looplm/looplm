@@ -38,6 +38,10 @@ export default function LabelingIndexPage() {
   // Fold each case's reference answer into the AI judge prompt (governs both the per-dataset
   // "AI-judge all" and the header's cross-dataset "Judge all"). Defaults to the prior behavior.
   const [includeExpectedAnswer, setIncludeExpectedAnswer] = useState(true);
+  // Re-query the index for each case before grading (bypassing the pool cache), so the judge grades
+  // freshly retrieved chunks. Governs both judge scopes. Default off — recompute costs an embedding
+  // + index call per case; leave it off to grade the already-pooled chunks.
+  const [refreshChunks, setRefreshChunks] = useState(false);
   // Set while a bulk action runs so "Stop" can halt scheduling and cancel in-flight requests.
   const bulkAbortRef = useRef<AbortController | null>(null);
 
@@ -107,6 +111,7 @@ export default function LabelingIndexPage() {
           aiJudgeCase(id, {
             datasetId: view.dataset_id ?? undefined,
             includeExpectedAnswer,
+            refresh: refreshChunks,
             signal: controller.signal,
           }).then(() => {
             judged.add(id);
@@ -134,7 +139,7 @@ export default function LabelingIndexPage() {
       setBulkBusy(null);
       setBulkProgress(null);
     }
-  }, [view, includeExpectedAnswer]);
+  }, [view, includeExpectedAnswer, refreshChunks]);
 
   // Judge every case across *all* datasets in the project (the cross-dataset gold), not just the
   // one open. Enumerate each dataset's cases, dedupe by test_id (labels are shared across datasets),
@@ -175,6 +180,7 @@ export default function LabelingIndexPage() {
           aiJudgeCase(cc.testId, {
             datasetId: cc.datasetId,
             includeExpectedAnswer,
+            refresh: refreshChunks,
             signal: controller.signal,
           }).then(() => void judged++),
         (done) => setBulkProgress({ done, total: cases.length }),
@@ -188,7 +194,7 @@ export default function LabelingIndexPage() {
       setBulkBusy(null);
       setBulkProgress(null);
     }
-  }, [view, includeExpectedAnswer, load, datasetId]);
+  }, [view, includeExpectedAnswer, refreshChunks, load, datasetId]);
 
   const datasets = view?.datasets ?? [];
   const completeCount = useMemo(() => (view?.cases ?? []).filter((c) => c.complete).length, [view]);
@@ -268,6 +274,8 @@ export default function LabelingIndexPage() {
             onStop={stopBulk}
             includeExpectedAnswer={includeExpectedAnswer}
             onIncludeExpectedAnswerChange={setIncludeExpectedAnswer}
+            refreshChunks={refreshChunks}
+            onRefreshChunksChange={setRefreshChunks}
           />
 
           <AgreementPanel canEdit={canEdit} />
