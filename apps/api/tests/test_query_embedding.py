@@ -189,11 +189,44 @@ async def test_test_embedding_endpoint_unconfigured(client: AsyncClient, auth_he
     assert body["ok"] is False and body["configured"] is False
 
 
+# --- retrieval-readiness endpoint ---
+
+
+@pytest.mark.asyncio
+async def test_retrieval_readiness_unconfigured(client: AsyncClient, auth_headers, test_project):
+    """No embedding model and no index → banner-driving flags all report 'not ready'."""
+    resp = await client.get("/api/pipeline/retrieval-readiness", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["embedding"]["configured"] is False
+    assert body["embedding"]["ok"] is False
+    assert body["index_connected"] is False
+    assert body["semantic_configured"] is False
+
+
+@pytest.mark.asyncio
+async def test_retrieval_readiness_reports_embedding_ok(
+    client: AsyncClient, auth_headers, monkeypatch
+):
+    """A working embedding probe surfaces ok=True with the model + dimensions."""
+    import app.services.retrieval_readiness as readiness
+
+    monkeypatch.setattr(readiness, "build_query_embedder", lambda s: _StubEmbedder())
+    resp = await client.get(
+        "/api/pipeline/retrieval-readiness?refresh=true", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["embedding"]["ok"] is True
+    assert body["embedding"]["dimensions"] == 3
+    assert body["embedding"]["model"] == "text-embedding-3-large"
+
+
 @pytest.mark.asyncio
 async def test_test_embedding_endpoint_ok(client: AsyncClient, auth_headers, test_project, monkeypatch):
-    import app.routers.projects as projects_router
+    import app.services.retrieval_readiness as readiness
 
-    monkeypatch.setattr(projects_router, "build_query_embedder", lambda s: _StubEmbedder())
+    monkeypatch.setattr(readiness, "build_query_embedder", lambda s: _StubEmbedder())
     resp = await client.post(
         f"/api/projects/{test_project.id}/test-embedding", headers=auth_headers
     )
@@ -206,9 +239,9 @@ async def test_test_embedding_endpoint_ok(client: AsyncClient, auth_headers, tes
 async def test_test_embedding_endpoint_reports_provider_error(
     client: AsyncClient, auth_headers, test_project, monkeypatch
 ):
-    import app.routers.projects as projects_router
+    import app.services.retrieval_readiness as readiness
 
-    monkeypatch.setattr(projects_router, "build_query_embedder", lambda s: _StubEmbedder(fail=True))
+    monkeypatch.setattr(readiness, "build_query_embedder", lambda s: _StubEmbedder(fail=True))
     resp = await client.post(
         f"/api/projects/{test_project.id}/test-embedding", headers=auth_headers
     )

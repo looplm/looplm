@@ -13,6 +13,7 @@ import {
 import { usePermissions } from "@/components/permissions-context";
 import { AgreementPanel } from "@/components/labeling/agreement-panel";
 import { LabelingControls } from "@/components/labeling/labeling-controls";
+import { RetrievalReadinessBanner } from "@/components/retrieval/readiness-banner";
 import { runBounded } from "@/lib/run-bounded";
 
 const SLICE_BADGE: Record<string, string> = {
@@ -235,6 +236,8 @@ export default function LabelingIndexPage() {
           can be pooled from the index for each query.
         </div>
       )}
+
+      <RetrievalReadinessBanner />
 
       {loading ? (
         <div className="rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-10 text-center text-gray-500 dark:text-slate-400">

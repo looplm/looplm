@@ -440,3 +440,19 @@ export interface RetrievalComputeJob {
   error?: string | null;
   trace?: string | null;
 }
+
+// Live (cached) embedding-config probe returned inside RetrievalReadiness.
+export interface EmbeddingStatus {
+  ok: boolean;
+  configured: boolean;
+  model?: string | null;
+  dimensions?: number | null;
+  error?: string | null;
+}
+
+// Whether the project is configured to *measure* retrieval quality — drives the warning banner.
+export interface RetrievalReadiness {
+  embedding: EmbeddingStatus;
+  index_connected: boolean;
+  semantic_configured: boolean;
+}

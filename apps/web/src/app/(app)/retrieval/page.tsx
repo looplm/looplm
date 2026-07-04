@@ -6,6 +6,7 @@ import { RetrievalTargetsConfig } from "@/components/retrieval/targets-config";
 import { RunMetadataEditor } from "@/components/retrieval/run-metadata-editor";
 import RetrievalMetricsPanel from "@/components/retrieval-metrics-panel";
 import { RunHistory } from "@/components/retrieval/run-history";
+import { RetrievalReadinessBanner } from "@/components/retrieval/readiness-banner";
 import type { RetrievalRunRecord } from "@/lib/api";
 
 export default function RetrievalPage() {
@@ -28,6 +29,8 @@ export default function RetrievalPage() {
         datasets you pick), with a per-stage breakdown for sparse, dense, RRF, reranking and the
         agentic path.
       </p>
+
+      <RetrievalReadinessBanner />
 
       <RetrievalMetricsPanel
         onRunSaved={() => setRunsRefresh((n) => n + 1)}

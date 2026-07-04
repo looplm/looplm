@@ -24,7 +24,7 @@ from app.schemas.projects import (
 )
 from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService, merge_llm_settings
 from app.services.llm_usage_tracker import record_llm_usage
-from app.services.query_embedding import build_query_embedder
+from app.services.retrieval_readiness import probe_embedding_status
 from app.services.retrieval_detection import detect_retrieval_source
 
 logger = logging.getLogger(__name__)
@@ -231,25 +231,7 @@ async def test_embedding(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    embedder = build_query_embedder(merge_llm_settings(project.settings, _user.settings))
-    if embedder is None:
-        return EmbeddingTestResult(
-            ok=False,
-            configured=False,
-            error="No embedding model configured. Set the embedding deployment/model and save.",
-        )
-    try:
-        vector = await embedder.embed("connection test")
-        return EmbeddingTestResult(
-            ok=True, configured=True, model=embedder.model, dimensions=len(vector)
-        )
-    except Exception as exc:  # noqa: BLE001 — surface the provider error to the user
-        logger.warning("Embedding test failed for project %s: %s", project_id, exc)
-        return EmbeddingTestResult(
-            ok=False, configured=True, model=embedder.model, error=str(exc)[:500]
-        )
-    finally:
-        await embedder.aclose()
+    return await probe_embedding_status(merge_llm_settings(project.settings, _user.settings))
 
 
 @router.post("/{project_id}/transfer-ownership", response_model=ProjectResponse)

@@ -25,6 +25,7 @@ import type {
   RetrievalRunMetadataUpdate,
   RetrievalComputeStartBody,
   RetrievalComputeJob,
+  RetrievalReadiness,
 } from "../api-types/retrieval";
 
 function buildQuery(filters: AnalyticsFilters): string {
@@ -40,6 +41,14 @@ function buildQuery(filters: AnalyticsFilters): string {
 
 export const getRetrievalPipeline = (filters: AnalyticsFilters = {}) =>
   request<RetrievalPipelineResponse>(`/api/pipeline/graph${buildQuery(filters)}`);
+
+// Is the project configured to measure retrieval quality (embedding model + index semantic config)?
+// Drives the readiness banner on the Retrieval/Labeling pages. The embed probe is cached server-side.
+export const getRetrievalReadiness = (opts: { refresh?: boolean } = {}, signal?: AbortSignal) =>
+  request<RetrievalReadiness>(
+    `/api/pipeline/retrieval-readiness${opts.refresh ? "?refresh=true" : ""}`,
+    { signal },
+  );
 
 export const getRetrievalMetrics = (
   opts: {

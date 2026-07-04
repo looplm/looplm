@@ -69,6 +69,8 @@ export type {
   RetrievalRunRecord,
   RetrievalRunCreateBody,
   RetrievalRunMetadataUpdate,
+  RetrievalReadiness,
+  EmbeddingStatus,
   PooledChunkForLabeling,
   ChunkForLabeling,
   ChunkLabelUpsert,

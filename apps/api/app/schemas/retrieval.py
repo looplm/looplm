@@ -13,6 +13,23 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.projects import EmbeddingTestResult
+
+
+class RetrievalReadiness(BaseModel):
+    """Whether the project is configured to *measure* retrieval quality.
+
+    Drives a warning banner on the Retrieval/Labeling pages so a missing embedding model or index
+    semantic configuration surfaces as an explanation rather than a silently empty per-stage chart.
+    """
+
+    # Live (cached) embedding-config probe: configured?, reachable?, dimensions/model, error.
+    embedding: EmbeddingTestResult
+    # An index provider is connected (dense/RRF/semantic stages need one at all).
+    index_connected: bool
+    # The connected index declares a semantic configuration (required for the reranked / agentic+rerank stages).
+    semantic_configured: bool
+
 
 class RetrievalMetric(BaseModel):
     """A single preformatted stat shown on a pipeline node.
