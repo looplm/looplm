@@ -589,7 +589,10 @@ export interface paths {
          * @description Merge ``merge_case_ids`` into ``keep_case_id`` and delete the merged ones.
          *
          *     List fields are unioned and empty scalars on the kept case are backfilled;
-         *     the kept case wins on conflicting context-filter / metadata keys.
+         *     the kept case wins on conflicting context-filter / metadata keys. The merged
+         *     cases' chunk-relevance labels, gold verdicts, and labeling status (which the
+         *     retrieval metrics are derived from, all keyed by ``test_id``) are re-pointed
+         *     onto the kept case so no labeling effort is lost.
          */
         post: operations["merge_duplicates_api_datasets_duplicates_merge_post"];
         delete?: never;
@@ -2576,6 +2579,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipeline/case-diagnosis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Diagnose Case
+         * @description Diagnose why a case's relevant chunks were missed at top-``k`` under ``retriever``.
+         *
+         *     ``retriever`` is one of the pool heads (keyword | vector | hybrid | semantic | agentic |
+         *     agentic_rerank); anything else falls back to ``agentic_rerank``. ``gold_source`` selects whose
+         *     labels are ground truth (human | ai | both). Returns ``available=False`` when the project has no
+         *     index provider, the case has no gold relevant chunks, or the case isn't found.
+         */
+        get: operations["diagnose_case_api_pipeline_case_diagnosis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipeline/chunk-metadata": {
         parameters: {
             query?: never;
@@ -2973,6 +3001,26 @@ export interface paths {
          * @description Poll a compute job's status; carries the error + traceback (debug) when it failed.
          */
         get: operations["get_retrieval_metrics_compute_api_pipeline_retrieval_metrics_compute__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/retrieval-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieval Readiness
+         * @description Is the project configured to measure retrieval quality (embedding model + index semantic)?
+         */
+        get: operations["retrieval_readiness_api_pipeline_retrieval_readiness_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4544,8 +4592,18 @@ export interface components {
         AiJudgeRequest: {
             /** Dataset Id */
             dataset_id?: string | null;
+            /**
+             * Include Expected Answer
+             * @default true
+             */
+            include_expected_answer: boolean;
             /** Instructions */
             instructions?: string | null;
+            /**
+             * Refresh
+             * @default false
+             */
+            refresh: boolean;
             /** Test Id */
             test_id: string;
         };
@@ -4848,6 +4906,70 @@ export interface components {
         CallbackResponse: {
             /** Installations */
             installations: components["schemas"]["CallbackInstallation"][];
+        };
+        /**
+         * CaseDiagnosisResponse
+         * @description Per-case retrieval diagnosis: which relevant chunks were missed and why.
+         */
+        CaseDiagnosisResponse: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /**
+             * K
+             * @default 10
+             */
+            k: number;
+            /**
+             * Missed
+             * @default []
+             */
+            missed: components["schemas"]["DiagnosedChunk"][];
+            /**
+             * Missed Count
+             * @default 0
+             */
+            missed_count: number;
+            /**
+             * Provider Connected
+             * @default false
+             */
+            provider_connected: boolean;
+            /** Query */
+            query?: string | null;
+            /**
+             * Relevant Count
+             * @default 0
+             */
+            relevant_count: number;
+            /**
+             * Retrieved Count
+             * @default 0
+             */
+            retrieved_count: number;
+            /**
+             * Retrieved Relevant Count
+             * @default 0
+             */
+            retrieved_relevant_count: number;
+            /**
+             * Retriever
+             * @default agentic_rerank
+             */
+            retriever: string;
+            /**
+             * Summary
+             * @default {}
+             */
+            summary: {
+                [key: string]: number;
+            };
+            /** Test Id */
+            test_id: string;
         };
         /**
          * ChunkForLabeling
@@ -5495,6 +5617,35 @@ export interface components {
             signals: number;
             /** Used Llm */
             used_llm: boolean;
+        };
+        /**
+         * DiagnosedChunk
+         * @description A judged-relevant chunk the retriever missed, with why-it-was-missed diagnostics.
+         */
+        DiagnosedChunk: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Content Preview */
+            content_preview?: string | null;
+            /**
+             * Flags
+             * @default []
+             */
+            flags: string[];
+            /** Grade */
+            grade?: number | null;
+            /** Has Embedding */
+            has_embedding?: boolean | null;
+            /** Rank */
+            rank?: number | null;
+            /** Title */
+            title?: string | null;
+            /** Token Estimate */
+            token_estimate?: number | null;
+            /** Url */
+            url?: string | null;
+            /** Verdict */
+            verdict: string;
         };
         /** Disagreement */
         Disagreement: {
@@ -9140,6 +9291,20 @@ export interface components {
              * @default 0
              */
             traces_analyzed: number;
+        };
+        /**
+         * RetrievalReadiness
+         * @description Whether the project is configured to *measure* retrieval quality.
+         *
+         *     Drives a warning banner on the Retrieval/Labeling pages so a missing embedding model or index
+         *     semantic configuration surfaces as an explanation rather than a silently empty per-stage chart.
+         */
+        RetrievalReadiness: {
+            embedding: components["schemas"]["EmbeddingTestResult"];
+            /** Index Connected */
+            index_connected: boolean;
+            /** Semantic Configured */
+            semantic_configured: boolean;
         };
         /**
          * RetrievalRunBulkDelete
@@ -16036,6 +16201,43 @@ export interface operations {
             };
         };
     };
+    diagnose_case_api_pipeline_case_diagnosis_get: {
+        parameters: {
+            query: {
+                test_id: string;
+                k?: number;
+                retriever?: string;
+                gold_source?: string;
+                refresh?: boolean;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseDiagnosisResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_chunk_metadata_api_pipeline_chunk_metadata_get: {
         parameters: {
             query: {
@@ -16647,6 +16849,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetrievalComputeJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retrieval_readiness_api_pipeline_retrieval_readiness_get: {
+        parameters: {
+            query?: {
+                /** @description Bypass the cached embedding probe and re-check live. */
+                refresh?: boolean;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalReadiness"];
                 };
             };
             /** @description Validation Error */
