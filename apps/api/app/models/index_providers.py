@@ -50,6 +50,10 @@ class IndexProvider(Base):
     # null until the grouping advisor has run for this provider.
     grouping_suggestion = Column(JSONB, nullable=True)
     grouping_suggested_at = Column(DateTime(timezone=True), nullable=True)
+    # Cached LLM field documentation (IndexFieldDocs): per-field purpose + groups
+    # of confusable fields with their distinctions. Null until generated.
+    field_docs = Column(JSONB, nullable=True)
+    field_docs_generated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 

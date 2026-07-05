@@ -24,6 +24,9 @@ from app.models.user import User
 from app.index_providers.chunk_quality_common import pick_field
 from app.schemas.index_explorer import (
     IndexChunkMetadataResponse,
+    IndexFieldDocs,
+    IndexFieldDocsRequest,
+    IndexFieldDocsResponse,
     IndexFieldSchemaItem,
     IndexFieldSchemaResponse,
     IndexFileChunk,
@@ -44,6 +47,7 @@ from app.schemas.index_explorer import (
     IndexTreeSection,
 )
 from app.services.analysis_llm import AnalysisLlmConfigError, merge_llm_settings
+from app.services.index_field_docs import explain_fields
 from app.services.index_grouping_advisor import suggest_grouping
 
 logger = logging.getLogger(__name__)
@@ -395,6 +399,52 @@ async def field_schema(
             for f in fields
         ],
     )
+
+
+@router.get("/field-docs", response_model=IndexFieldDocsResponse)
+async def get_field_docs(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """The cached LLM field documentation for this provider (no LLM call).
+
+    Returns ``docs: null`` when none has been generated yet; the frontend then
+    triggers ``POST`` to generate them.
+    """
+    provider = await _get_provider_or_404(db, provider_id, project)
+    docs = IndexFieldDocs.model_validate(provider.field_docs) if provider.field_docs else None
+    return IndexFieldDocsResponse(docs=docs, generated_at=provider.field_docs_generated_at)
+
+
+@router.post("/field-docs", response_model=IndexFieldDocsResponse)
+async def compute_field_docs(
+    body: IndexFieldDocsRequest,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """Generate field documentation with an LLM, persist it, and return it."""
+    provider = await _get_provider_or_404(db, body.provider_id, project)
+    client = build_index_provider(provider)
+    try:
+        docs, model = await explain_fields(
+            client, project_id=project.id, db=db,
+            user_settings=merge_llm_settings(project.settings, user.settings),
+        )
+    except AnalysisLlmConfigError as e:
+        raise HTTPException(
+            status_code=400, detail={"error": {"code": "LLM_NOT_CONFIGURED", "message": str(e)}}
+        )
+    except Exception as e:
+        raise _provider_error(e)
+    finally:
+        await client.aclose()
+
+    generated_at = datetime.now(timezone.utc)
+    provider.field_docs = docs.model_dump(mode="json")
+    provider.field_docs_generated_at = generated_at
+    return IndexFieldDocsResponse(docs=docs, generated_at=generated_at, model=model)
 
 
 @router.get("/grouping-suggestion", response_model=IndexGroupingSuggestionResponse)
