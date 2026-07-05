@@ -4,6 +4,8 @@
 
 import type {
   IndexChunkMetadataResponse,
+  IndexFieldDocsResponse,
+  IndexFieldSchemaResponse,
   IndexFileChunksResponse,
   IndexFileListResponse,
   IndexFileTypesResponse,
@@ -89,6 +91,27 @@ export const getIndexChunkMetadata = (providerId: string, chunkId: string) => {
     `/api/index-explorer/chunk-metadata?${qs.toString()}`,
   );
 };
+
+// --- Fields tab: index schema (attributes + example values) + LLM field docs ---
+
+// Every index field with its attributes, example values, and fill rate (no LLM).
+export const getIndexFieldSchema = (providerId: string) =>
+  request<IndexFieldSchemaResponse>(
+    `/api/index-explorer/field-schema?provider_id=${encodeURIComponent(providerId)}`,
+  );
+
+// Read the cached LLM field documentation (no LLM call; docs may be null).
+export const getIndexFieldDocs = (providerId: string) =>
+  request<IndexFieldDocsResponse>(
+    `/api/index-explorer/field-docs?provider_id=${encodeURIComponent(providerId)}`,
+  );
+
+// Generate (and cache) fresh field documentation via the LLM.
+export const computeIndexFieldDocs = (providerId: string) =>
+  request<IndexFieldDocsResponse>("/api/index-explorer/field-docs", {
+    method: "POST",
+    body: JSON.stringify({ provider_id: providerId }),
+  });
 
 // Read the cached LLM grouping suggestion (no LLM call; suggestion may be null).
 export const getGroupingSuggestion = (providerId: string) =>

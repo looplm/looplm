@@ -95,6 +95,51 @@ export interface IndexChunkMetadataResponse {
   fields: Record<string, unknown>;
 }
 
+// --- Fields tab: index schema (attributes + example values) + LLM field docs ---
+
+export interface IndexFieldSchemaItem {
+  name: string;
+  type: string;
+  is_key: boolean;
+  is_collection: boolean;
+  is_vector: boolean;
+  searchable: boolean;
+  filterable: boolean;
+  facetable: boolean;
+  sortable: boolean;
+  retrievable: boolean;
+  example_values: string[];
+  fill_rate: number;
+}
+
+export interface IndexFieldSchemaResponse {
+  fields: IndexFieldSchemaItem[];
+  sample_size: number;
+}
+
+export interface IndexFieldDoc {
+  name: string;
+  purpose: string;
+}
+
+export interface IndexFieldGroup {
+  title: string;
+  field_names: string[];
+  distinction: string;
+}
+
+export interface IndexFieldDocs {
+  summary: string;
+  fields: IndexFieldDoc[];
+  groups: IndexFieldGroup[];
+}
+
+export interface IndexFieldDocsResponse {
+  docs: IndexFieldDocs | null;
+  generated_at: string | null;
+  model: string | null;
+}
+
 // --- Grouping advisor: LLM-suggested hierarchy + metadata-quality hints ---
 
 export interface GroupingLevel {
