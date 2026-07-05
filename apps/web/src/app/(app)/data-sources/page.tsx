@@ -123,7 +123,11 @@ export default function DataSourcesPage() {
             <IndexBreakdownTab providerId={providerId} canEdit={canEdit} />
           )}
           {tab === "fields" && providerId && (
-            <FieldSchemaTab providerId={providerId} canEdit={canEdit} />
+            <FieldSchemaTab
+              providerId={providerId}
+              providerName={providers.find((p) => p.id === providerId)?.name}
+              canEdit={canEdit}
+            />
           )}
           {tab === "files" && providerId && <FileSearchTab providerId={providerId} />}
           {tab === "wanted" && providerId && (

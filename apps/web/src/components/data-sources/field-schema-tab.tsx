@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import {
   computeIndexFieldDocs,
@@ -13,6 +14,10 @@ import type {
   IndexFieldSchemaItem,
 } from "@/lib/api-types/index-explorer";
 import { ErrorNotice } from "@/components/error-notice";
+import {
+  buildFieldsMarkdown,
+  shortType,
+} from "@/components/data-sources/field-schema-markdown";
 
 // The capability flags we surface as chips, in display order, with a tone.
 const ATTR_CHIPS: {
@@ -64,13 +69,6 @@ const ATTR_CHIPS: {
     title: "Not returned in results (used for search/filtering only)",
   },
 ];
-
-/** Compact, human-friendly rendering of an Edm type (Collection(Edm.String) -> String[]). */
-function shortType(type: string): string {
-  const collection = type.match(/^Collection\((.+)\)$/);
-  const inner = (collection ? collection[1] : type).replace(/^Edm\./, "");
-  return collection ? `${inner}[]` : inner;
-}
 
 function AttrChips({ field }: { field: IndexFieldSchemaItem }) {
   const chips = ATTR_CHIPS.filter((c) => c.test(field));
@@ -192,9 +190,11 @@ function RelatedGroupCard({ group }: { group: IndexFieldGroup }) {
 
 export function FieldSchemaTab({
   providerId,
+  providerName,
   canEdit,
 }: {
   providerId: string;
+  providerName?: string;
   canEdit: boolean;
 }) {
   const [fields, setFields] = useState<IndexFieldSchemaItem[] | null>(null);
@@ -252,6 +252,24 @@ export function FieldSchemaTab({
     return map;
   }, [docs]);
 
+  const onCopyMarkdown = useCallback(async () => {
+    if (!fields) return;
+    const markdown = buildFieldsMarkdown({
+      fields,
+      docs,
+      generatedAt,
+      model,
+      sampleSize,
+      providerName,
+    });
+    try {
+      await navigator.clipboard.writeText(markdown);
+      toast.success("Markdown report copied to clipboard");
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  }, [fields, docs, generatedAt, model, sampleSize, providerName]);
+
   if (loading) {
     return <p className="py-8 text-sm text-gray-400 dark:text-slate-500">Loading fields…</p>;
   }
@@ -277,15 +295,24 @@ export function FieldSchemaTab({
           is populated, and example values. Use AI to describe each field and clarify how similar
           fields differ from one another.
         </p>
-        {canEdit && (
+        <div className="flex flex-shrink-0 items-center gap-2">
           <button
-            onClick={onExplain}
-            disabled={explaining}
-            className="flex-shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onCopyMarkdown}
+            className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-700 hover:bg-gray-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            title="Copy a Markdown report of these fields to the clipboard"
           >
-            {explaining ? "Explaining…" : docs ? "Re-explain fields" : "✨ Explain fields"}
+            Copy Markdown
           </button>
-        )}
+          {canEdit && (
+            <button
+              onClick={onExplain}
+              disabled={explaining}
+              className="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {explaining ? "Explaining…" : docs ? "Re-explain fields" : "✨ Explain fields"}
+            </button>
+          )}
+        </div>
       </div>
 
       {explainError != null && (
