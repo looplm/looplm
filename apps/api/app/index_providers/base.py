@@ -68,6 +68,34 @@ class CorpusDoc:
 
 
 @dataclass
+class FieldSchema:
+    """One field of the index's schema, with attributes and sampled example values.
+
+    Powers the Data Sources "Fields" tab: what every metadata field is, what it
+    can do (the search attributes), and what its values actually look like.
+    ``attributes`` are the backend's capability flags for the field (Azure:
+    searchable/filterable/facetable/sortable/retrievable); a backend that has no
+    equivalent leaves them ``False``. ``example_values`` are a few distinct
+    non-empty sampled values (stringified, truncated); ``fill_rate`` is the
+    fraction of sampled documents that carry any value for the field. ``is_vector``
+    marks an embedding field, whose values are never sampled (they are noise).
+    """
+
+    name: str
+    type: str
+    is_key: bool = False
+    is_collection: bool = False
+    is_vector: bool = False
+    searchable: bool = False
+    filterable: bool = False
+    facetable: bool = False
+    sortable: bool = False
+    retrievable: bool = True
+    example_values: list[str] = field(default_factory=list)
+    fill_rate: float = 0.0
+
+
+@dataclass
 class FileMatch:
     """A distinct file surfaced by a filename/title search.
 
@@ -193,6 +221,17 @@ class BaseIndexProvider(ABC):
         from. Optional capability — backends without it keep the empty default.
         """
         return []
+
+    async def get_field_schema(self, *, sample_size: int = 50) -> list["FieldSchema"]:
+        """The index's field schema with sampled example values, in schema order.
+
+        For each field: its type, capability flags, up to a few distinct non-empty
+        example values, and the fraction of a sample that carries a value. Powers
+        the Data Sources "Fields" tab. Embedding-vector fields report their flags
+        but never their values. Optional capability — backends without schema
+        introspection keep the default.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support get_field_schema")
 
     async def sample_corpus(self, n: int, *, stratify_by: str | None = None) -> list[dict]:
         """Up to ``n`` full-field chunk documents, sampled across the whole corpus.

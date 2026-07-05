@@ -24,6 +24,8 @@ from app.models.user import User
 from app.index_providers.chunk_quality_common import pick_field
 from app.schemas.index_explorer import (
     IndexChunkMetadataResponse,
+    IndexFieldSchemaItem,
+    IndexFieldSchemaResponse,
     IndexFileChunk,
     IndexFileChunksResponse,
     IndexFileListResponse,
@@ -348,6 +350,50 @@ async def chunk_metadata(
         id=chunk_id,
         found=fields is not None,
         fields=_visible_fields(fields) if fields else {},
+    )
+
+
+_FIELD_SCHEMA_SAMPLE = 50  # docs sampled to derive example values + fill rates
+
+
+@router.get("/field-schema", response_model=IndexFieldSchemaResponse)
+async def field_schema(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Every index field with its attributes, example values, and fill rate.
+
+    Live-computed (no LLM): powers the "Fields" tab overview. The human-readable
+    field purposes + confusable-field groups come from ``/field-docs``.
+    """
+    provider = await _get_provider_or_404(db, provider_id, project)
+    client = build_index_provider(provider)
+    try:
+        fields = await client.get_field_schema(sample_size=_FIELD_SCHEMA_SAMPLE)
+    except Exception as e:
+        raise _provider_error(e)
+    finally:
+        await client.aclose()
+    return IndexFieldSchemaResponse(
+        sample_size=_FIELD_SCHEMA_SAMPLE,
+        fields=[
+            IndexFieldSchemaItem(
+                name=f.name,
+                type=f.type,
+                is_key=f.is_key,
+                is_collection=f.is_collection,
+                is_vector=f.is_vector,
+                searchable=f.searchable,
+                filterable=f.filterable,
+                facetable=f.facetable,
+                sortable=f.sortable,
+                retrievable=f.retrievable,
+                example_values=f.example_values,
+                fill_rate=f.fill_rate,
+            )
+            for f in fields
+        ],
     )
 
 

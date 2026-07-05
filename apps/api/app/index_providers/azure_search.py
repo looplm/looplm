@@ -10,6 +10,7 @@ read-only with an admin or query key.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from azure.core.credentials import AzureKeyCredential
@@ -19,6 +20,7 @@ from azure.search.documents.indexes.aio import SearchIndexClient
 from app.index_providers.base import (
     BaseIndexProvider,
     CorpusDoc,
+    FieldSchema,
     FileMatch,
     PartitionKey,
     PartitionValue,
@@ -38,6 +40,8 @@ _PREFERRED_SAMPLE_FIELDS = [
     "chunk_text",
 ]
 _MAX_FACET_VALUES = 1000  # Azure caps facet buckets; 1000 is the practical max.
+_MAX_EXAMPLE_VALUES = 3  # distinct sampled example values shown per field
+_EXAMPLE_MAX_LEN = 160  # truncate long example values (e.g. chunk_text bodies)
 
 
 def _odata_escape(value: str) -> str:
@@ -45,15 +49,69 @@ def _odata_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
-class _FieldInfo:
-    __slots__ = ("name", "type", "facetable", "is_collection", "is_key")
+def _is_empty(v: object) -> bool:
+    """True for values that mean 'the field carries nothing' in a sampled doc."""
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return not v.strip()
+    if isinstance(v, (list, dict)):
+        return len(v) == 0
+    return False
 
-    def __init__(self, name: str, type_: str, facetable: bool, is_key: bool):
+
+def _stringify_example(v: object) -> str:
+    """A short, human-readable rendering of one example value."""
+    if isinstance(v, str):
+        s = v.strip()
+    elif isinstance(v, (dict, list)):
+        s = json.dumps(v, ensure_ascii=False)
+    else:
+        s = str(v)
+    if len(s) > _EXAMPLE_MAX_LEN:
+        s = s[:_EXAMPLE_MAX_LEN] + "…"
+    return s
+
+
+class _FieldInfo:
+    __slots__ = (
+        "name",
+        "type",
+        "facetable",
+        "is_collection",
+        "is_key",
+        "searchable",
+        "filterable",
+        "sortable",
+        "retrievable",
+    )
+
+    def __init__(
+        self,
+        name: str,
+        type_: str,
+        facetable: bool,
+        is_key: bool,
+        *,
+        searchable: bool = False,
+        filterable: bool = False,
+        sortable: bool = False,
+        retrievable: bool = True,
+    ):
         self.name = name
         self.type = type_
         self.facetable = bool(facetable)
         self.is_collection = type_.startswith("Collection(")
         self.is_key = bool(is_key)
+        self.searchable = bool(searchable)
+        self.filterable = bool(filterable)
+        self.sortable = bool(sortable)
+        self.retrievable = bool(retrievable)
+
+    @property
+    def is_vector(self) -> bool:
+        # Azure represents embedding fields as Collection(Edm.Single).
+        return self.type == "Collection(Edm.Single)"
 
 
 class AzureSearchIndexProvider(BaseIndexProvider):
@@ -81,11 +139,31 @@ class AzureSearchIndexProvider(BaseIndexProvider):
     async def _get_fields(self) -> dict[str, _FieldInfo]:
         if self._fields is None:
             index = await self._index_client.get_index(self._index_name)
-            self._fields = {
-                f.name: _FieldInfo(f.name, f.type, getattr(f, "facetable", False), getattr(f, "key", False))
-                for f in index.fields
-            }
+            self._fields = {f.name: self._field_info(f) for f in index.fields}
         return self._fields
+
+    @staticmethod
+    def _field_info(f) -> _FieldInfo:
+        # Azure marks a field non-retrievable via ``hidden`` (newer SDK) or a
+        # ``retrievable=False`` (older); default to retrievable when neither is set.
+        hidden = getattr(f, "hidden", None)
+        retrievable = getattr(f, "retrievable", None)
+        if hidden is not None:
+            is_retrievable = not hidden
+        elif retrievable is not None:
+            is_retrievable = bool(retrievable)
+        else:
+            is_retrievable = True
+        return _FieldInfo(
+            f.name,
+            f.type,
+            getattr(f, "facetable", False),
+            getattr(f, "key", False),
+            searchable=getattr(f, "searchable", False),
+            filterable=getattr(f, "filterable", False),
+            sortable=getattr(f, "sortable", False),
+            retrievable=is_retrievable,
+        )
 
     async def _field(self, key: str) -> _FieldInfo:
         fields = await self._get_fields()
@@ -417,6 +495,56 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         out: list[dict] = []
         async for doc in results:
             out.append(self._strip_internal(dict(doc)))
+        return out
+
+    async def get_field_schema(self, *, sample_size: int = 50) -> list[FieldSchema]:
+        fields = await self._get_fields()
+        # Sample real documents to derive example values + fill rates. Vector
+        # fields are counted for fill rate but never surfaced as example values.
+        try:
+            sample = await self.sample_corpus(sample_size)
+        except Exception as e:  # sampling is best-effort; schema still returns
+            logger.warning("Field-schema sampling failed for %s: %s", self._index_name, e)
+            sample = []
+        n = len(sample)
+
+        out: list[FieldSchema] = []
+        for info in fields.values():
+            filled = 0
+            examples: list[str] = []
+            seen: set[str] = set()
+            for doc in sample:
+                val = doc.get(info.name)
+                if _is_empty(val):
+                    continue
+                filled += 1
+                if info.is_vector or len(examples) >= _MAX_EXAMPLE_VALUES:
+                    continue
+                for item in val if isinstance(val, list) else [val]:
+                    if _is_empty(item):
+                        continue
+                    s = _stringify_example(item)
+                    if s and s not in seen:
+                        seen.add(s)
+                        examples.append(s)
+                        if len(examples) >= _MAX_EXAMPLE_VALUES:
+                            break
+            out.append(
+                FieldSchema(
+                    name=info.name,
+                    type=info.type,
+                    is_key=info.is_key,
+                    is_collection=info.is_collection,
+                    is_vector=info.is_vector,
+                    searchable=info.searchable,
+                    filterable=info.filterable,
+                    facetable=info.facetable,
+                    sortable=info.sortable,
+                    retrievable=info.retrievable,
+                    example_values=examples,
+                    fill_rate=round(filled / n, 3) if n else 0.0,
+                )
+            )
         return out
 
     async def sample_corpus(self, n: int, *, stratify_by: str | None = None) -> list[dict]:

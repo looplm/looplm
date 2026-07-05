@@ -160,6 +160,78 @@ class IndexChunkMetadataResponse(BaseModel):
     fields: dict[str, Any] = Field(default_factory=dict)
 
 
+# --- Fields tab: index schema (attributes + example values) + LLM field docs ---
+
+
+class IndexFieldSchemaItem(BaseModel):
+    """One field of the index schema, with capability flags and example values.
+
+    ``type`` is the backend-native type (e.g. ``Edm.String``,
+    ``Collection(Edm.String)``). The boolean flags are Azure's field attributes.
+    ``example_values`` are a few distinct non-empty sampled values;
+    ``fill_rate`` is the fraction of the sample carrying any value (0..1).
+    """
+
+    name: str
+    type: str
+    is_key: bool = False
+    is_collection: bool = False
+    is_vector: bool = False
+    searchable: bool = False
+    filterable: bool = False
+    facetable: bool = False
+    sortable: bool = False
+    retrievable: bool = True
+    example_values: list[str] = Field(default_factory=list)
+    fill_rate: float = 0.0
+
+
+class IndexFieldSchemaResponse(BaseModel):
+    """The index's field schema plus the sample size the examples came from."""
+
+    fields: list[IndexFieldSchemaItem] = Field(default_factory=list)
+    sample_size: int = 0
+
+
+class IndexFieldDoc(BaseModel):
+    """LLM-written explanation of one field: what it is for."""
+
+    name: str
+    purpose: str
+
+
+class IndexFieldGroup(BaseModel):
+    """A cluster of related/confusable fields with the distinction between them.
+
+    ``field_names`` are the fields in the cluster; ``distinction`` explains how
+    they differ from one another (e.g. ``page_url`` vs ``attachment_url``).
+    """
+
+    title: str
+    field_names: list[str] = Field(default_factory=list)
+    distinction: str
+
+
+class IndexFieldDocs(BaseModel):
+    """The LLM's per-field explanations and groups of confusable fields."""
+
+    summary: str = ""
+    fields: list[IndexFieldDoc] = Field(default_factory=list)
+    groups: list[IndexFieldGroup] = Field(default_factory=list)
+
+
+class IndexFieldDocsResponse(BaseModel):
+    """Cached or freshly-computed field documentation for a provider."""
+
+    docs: Optional[IndexFieldDocs] = None
+    generated_at: Optional[datetime] = None
+    model: Optional[str] = None
+
+
+class IndexFieldDocsRequest(BaseModel):
+    provider_id: UUID
+
+
 # --- Grouping advisor: LLM-suggested hierarchy + metadata-quality hints ---
 
 
