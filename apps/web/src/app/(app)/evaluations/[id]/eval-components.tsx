@@ -337,8 +337,7 @@ function UrlListItem({
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        title={url}
-        className="text-blue-600 dark:text-blue-400 hover:underline truncate"
+        className="text-blue-600 dark:text-blue-400 hover:underline min-w-0 break-all"
       >
         {url}
       </a>
