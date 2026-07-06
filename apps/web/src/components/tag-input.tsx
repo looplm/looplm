@@ -43,13 +43,14 @@ export function TagInput({
       {value.map((v, i) => (
         <span
           key={i}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300"
+          title={v}
+          className="inline-flex max-w-full min-w-0 items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300"
         >
-          {v}
+          <span className="truncate">{v}</span>
           <button
             type="button"
             onClick={() => remove(i)}
-            className="hover:text-red-500 dark:hover:text-red-400 ml-0.5"
+            className="shrink-0 hover:text-red-500 dark:hover:text-red-400 ml-0.5"
           >
             &times;
           </button>
