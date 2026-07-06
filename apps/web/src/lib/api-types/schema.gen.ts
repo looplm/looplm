@@ -2134,6 +2134,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/index-explorer/field-docs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Field Docs
+         * @description The cached LLM field documentation for this provider (no LLM call).
+         *
+         *     Returns ``docs: null`` when none has been generated yet; the frontend then
+         *     triggers ``POST`` to generate them.
+         */
+        get: operations["get_field_docs_api_index_explorer_field_docs_get"];
+        put?: never;
+        /**
+         * Compute Field Docs
+         * @description Generate field documentation with an LLM, persist it, and return it.
+         */
+        post: operations["compute_field_docs_api_index_explorer_field_docs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/index-explorer/field-schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Field Schema
+         * @description Every index field with its attributes, example values, and fill rate.
+         *
+         *     Live-computed (no LLM): powers the "Fields" tab overview. The human-readable
+         *     field purposes + confusable-field groups come from ``/field-docs``.
+         */
+        get: operations["field_schema_api_index_explorer_field_schema_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/index-explorer/file-chunks": {
         parameters: {
             query?: never;
@@ -7101,6 +7151,140 @@ export interface components {
             found: boolean;
             /** Id */
             id: string;
+        };
+        /**
+         * IndexFieldDoc
+         * @description LLM-written explanation of one field: what it is for.
+         */
+        IndexFieldDoc: {
+            /** Name */
+            name: string;
+            /** Purpose */
+            purpose: string;
+        };
+        /**
+         * IndexFieldDocs
+         * @description The LLM's per-field explanations and groups of confusable fields.
+         */
+        IndexFieldDocs: {
+            /** Fields */
+            fields?: components["schemas"]["IndexFieldDoc"][];
+            /** Groups */
+            groups?: components["schemas"]["IndexFieldGroup"][];
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+        };
+        /** IndexFieldDocsRequest */
+        IndexFieldDocsRequest: {
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+        };
+        /**
+         * IndexFieldDocsResponse
+         * @description Cached or freshly-computed field documentation for a provider.
+         */
+        IndexFieldDocsResponse: {
+            docs?: components["schemas"]["IndexFieldDocs"] | null;
+            /** Generated At */
+            generated_at?: string | null;
+            /** Model */
+            model?: string | null;
+        };
+        /**
+         * IndexFieldGroup
+         * @description A cluster of related/confusable fields with the distinction between them.
+         *
+         *     ``field_names`` are the fields in the cluster; ``distinction`` explains how
+         *     they differ from one another (e.g. ``page_url`` vs ``attachment_url``).
+         */
+        IndexFieldGroup: {
+            /** Distinction */
+            distinction: string;
+            /** Field Names */
+            field_names?: string[];
+            /** Title */
+            title: string;
+        };
+        /**
+         * IndexFieldSchemaItem
+         * @description One field of the index schema, with capability flags and example values.
+         *
+         *     ``type`` is the backend-native type (e.g. ``Edm.String``,
+         *     ``Collection(Edm.String)``). The boolean flags are Azure's field attributes.
+         *     ``example_values`` are a few distinct non-empty sampled values;
+         *     ``fill_rate`` is the fraction of the sample carrying any value (0..1).
+         */
+        IndexFieldSchemaItem: {
+            /** Example Values */
+            example_values?: string[];
+            /**
+             * Facetable
+             * @default false
+             */
+            facetable: boolean;
+            /**
+             * Fill Rate
+             * @default 0
+             */
+            fill_rate: number;
+            /**
+             * Filterable
+             * @default false
+             */
+            filterable: boolean;
+            /**
+             * Is Collection
+             * @default false
+             */
+            is_collection: boolean;
+            /**
+             * Is Key
+             * @default false
+             */
+            is_key: boolean;
+            /**
+             * Is Vector
+             * @default false
+             */
+            is_vector: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Retrievable
+             * @default true
+             */
+            retrievable: boolean;
+            /**
+             * Searchable
+             * @default false
+             */
+            searchable: boolean;
+            /**
+             * Sortable
+             * @default false
+             */
+            sortable: boolean;
+            /** Type */
+            type: string;
+        };
+        /**
+         * IndexFieldSchemaResponse
+         * @description The index's field schema plus the sample size the examples came from.
+         */
+        IndexFieldSchemaResponse: {
+            /** Fields */
+            fields?: components["schemas"]["IndexFieldSchemaItem"][];
+            /**
+             * Sample Size
+             * @default 0
+             */
+            sample_size: number;
         };
         /**
          * IndexFileChunk
@@ -15246,6 +15430,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IndexChunkMetadataResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_field_docs_api_index_explorer_field_docs_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexFieldDocsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compute_field_docs_api_index_explorer_field_docs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IndexFieldDocsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexFieldDocsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    field_schema_api_index_explorer_field_schema_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexFieldSchemaResponse"];
                 };
             };
             /** @description Validation Error */
