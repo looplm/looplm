@@ -289,6 +289,12 @@ function RunRow({
               ? run.dataset_names[0]
               : `${run.dataset_names.length} datasets`}{" "}
             · {run.gold_source === "ai" ? "AI" : run.gold_source} gold
+            {(run.min_grade ?? 1) > 1 && (
+              <span title="Strict binarization: only chunks labeled at or above this grade counted as relevant">
+                {" "}
+                · grade {run.min_grade}+
+              </span>
+            )}
           </div>
           {run.notes && (
             <div className="text-[11px] text-gray-500 dark:text-slate-400 mt-0.5 max-w-xs truncate" title={run.notes}>

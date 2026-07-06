@@ -30,6 +30,7 @@ import { Info } from "@/components/retrieval/metric-card";
 import { OverallSection } from "@/components/retrieval/overall-section";
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
+import { GoldControls, type GoldSource, type MinGrade } from "@/components/retrieval/gold-controls";
 import { KSelector } from "@/components/retrieval/k-selector";
 import { RetrieverSelector } from "@/components/retrieval/retriever-selector";
 import { RerankThreshold } from "@/components/retrieval/rerank-threshold";
@@ -38,13 +39,13 @@ import { ErrorNotice } from "@/components/error-notice";
 import { ComputedAt } from "@/components/retrieval/computed-at";
 
 type Source = "urls" | "labels";
-type GoldSource = "human" | "ai" | "both";
 
 // The settings the user is editing. Computation only runs against the *applied* copy (below).
 // The labels path always computes and shows both the Overall and By-stage views together.
 type Draft = {
   source: Source;
   goldSource: GoldSource;
+  minGrade: MinGrade;
   datasetIds: string[];
   runId: string | null;
 };
@@ -55,6 +56,7 @@ type Applied = Draft & { refresh: boolean; nonce: number };
 const sameSettings = (a: Draft, b: Draft): boolean =>
   a.source === b.source &&
   a.goldSource === b.goldSource &&
+  a.minGrade === b.minGrade &&
   a.runId === b.runId &&
   a.datasetIds.length === b.datasetIds.length &&
   a.datasetIds.every((id) => b.datasetIds.includes(id));
@@ -82,6 +84,7 @@ export default function RetrievalMetricsPanel({
   const [draft, setDraft] = useState<Draft>({
     source: "labels",
     goldSource: "human",
+    minGrade: 1,
     datasetIds: [],
     runId: null,
   });
@@ -163,13 +166,13 @@ export default function RetrievalMetricsPanel({
         return m;
       }
       const job = await startRetrievalCompute(
-        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, view: "overall", refresh: applied.refresh },
+        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, min_grade: applied.minGrade, view: "overall", refresh: applied.refresh },
         signal,
       );
       await pollRetrievalCompute(job.id, signal);
       if (signal.aborted) return null;
       const m = await getRetrievalMetrics(
-        { datasetIds: applied.datasetIds, source: "labels", goldSource: applied.goldSource, refresh: false },
+        { datasetIds: applied.datasetIds, source: "labels", goldSource: applied.goldSource, minGrade: applied.minGrade, refresh: false },
         signal,
       );
       if (!signal.aborted) setOverall(m);
@@ -178,13 +181,13 @@ export default function RetrievalMetricsPanel({
 
     const runByStage = async () => {
       const job = await startRetrievalCompute(
-        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, view: "byStage", refresh: applied.refresh },
+        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, min_grade: applied.minGrade, view: "byStage", refresh: applied.refresh },
         signal,
       );
       await pollRetrievalCompute(job.id, signal);
       if (signal.aborted) return;
       const d = await getRetrievalByStageMetrics(
-        { datasetIds: applied.datasetIds, goldSource: applied.goldSource, refresh: false },
+        { datasetIds: applied.datasetIds, goldSource: applied.goldSource, minGrade: applied.minGrade, refresh: false },
         signal,
       );
       if (!signal.aborted) setByStage(d);
@@ -197,7 +200,7 @@ export default function RetrievalMetricsPanel({
       savedNonceRef.current = applied.nonce;
       try {
         const rec = await createRetrievalRun(
-          { dataset_ids: applied.datasetIds, gold_source: applied.goldSource },
+          { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, min_grade: applied.minGrade },
           signal,
         );
         if (!signal.aborted) {
@@ -265,6 +268,7 @@ export default function RetrievalMetricsPanel({
           ...d,
           source: "labels",
           goldSource: (rec.gold_source as GoldSource) || "human",
+          minGrade: (rec.min_grade as MinGrade) || 1,
           datasetIds: rec.dataset_ids,
         }));
       })
@@ -300,6 +304,8 @@ export default function RetrievalMetricsPanel({
   const displaySource: Source | null = applied?.source ?? (savedRun ? "labels" : null);
   const displayGold: GoldSource =
     applied?.goldSource ?? (savedRun?.gold_source as GoldSource) ?? "human";
+  const displayMinGrade: MinGrade =
+    applied?.minGrade ?? (savedRun?.min_grade as MinGrade) ?? 1;
   const showByStage = displaySource === "labels";
   const computedAt = overall?.computed_at ?? byStage?.computed_at;
 
@@ -357,19 +363,12 @@ export default function RetrievalMetricsPanel({
             ))}
           </div>
           {draft.source === "labels" && (
-            <div
-              className="flex items-center gap-1.5 text-xs"
-              title="Which chunk labels resolve the gold: human only, the AI judge only, or both"
-            >
-              <span className="text-gray-400 dark:text-slate-500">Gold</span>
-              <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700">
-                {(["human", "ai", "both"] as const).map((g) => (
-                  <button key={g} onClick={() => setDraftField("goldSource", g)} className={`${toggleClass(draft.goldSource === g)} capitalize`}>
-                    {g === "ai" ? "AI" : g}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <GoldControls
+              goldSource={draft.goldSource}
+              minGrade={draft.minGrade}
+              onGoldSource={(g) => setDraftField("goldSource", g)}
+              onMinGrade={(g) => setDraftField("minGrade", g)}
+            />
           )}
           {displayMetrics?.available && targets && (
             <span
@@ -473,6 +472,7 @@ export default function RetrievalMetricsPanel({
             retrieverNote={RETRIEVER_NOTES[selectedRetriever]}
             retriever={selectedRetriever}
             goldSource={displayGold}
+            minGrade={displayMinGrade}
             perRetriever={!useBest}
             bestAvailable={!!overall?.available}
           />

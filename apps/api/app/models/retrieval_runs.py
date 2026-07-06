@@ -48,6 +48,8 @@ class RetrievalRun(Base):
 
     # Settings snapshot — what was measured.
     gold_source = Column(String(16), nullable=False, server_default=text("'human'"))
+    # Binary-metrics strictness: only gold grade >= min_grade counts as relevant (1..3).
+    min_grade = Column(Integer, nullable=False, server_default=text("1"))
     dataset_ids = Column(JSONB, nullable=False, server_default=text("'[]'"))  # list[str]
     # Dataset names captured at save time, so history stays readable if a dataset is renamed/deleted.
     dataset_names = Column(JSONB, nullable=False, server_default=text("'[]'"))  # list[str]

@@ -126,19 +126,23 @@ async def compute_overall_labels_metrics(
     datasets: list[TestDataset],
     gold_source: str,
     refresh: bool,
+    min_grade: int = 1,
 ) -> RetrievalRunMetrics:
     """Labels-vs-live-probe overall metrics over the given datasets' cases.
 
     ``gold_source`` selects which annotators' chunk labels resolve the gold: ``human`` (default),
     ``ai`` (the AI judge only), or ``both`` (union). Gold overrides (adjudicated) always win.
-    Multiple datasets pool their cases (deduped by test_id) and aggregate together. Cached in Redis
-    keyed by dataset set + gold source; a warm cache does no index/embedding work.
+    ``min_grade`` (1..3) is the binary-metrics strictness: only chunks with gold grade >=
+    min_grade count as relevant; lower relevant grades become unjudged (graded nDCG is
+    unaffected). Multiple datasets pool their cases (deduped by test_id) and aggregate together.
+    Cached in Redis keyed by dataset set + gold source + min grade; a warm cache does no
+    index/embedding work.
     """
     if not datasets:
         return RetrievalRunMetrics(available=False, ks=list(AGG_KS))
 
     dataset_uuids = [d.id for d in datasets]
-    cache_key = result_cache_key(project.id, "overall", dataset_uuids, gold_source)
+    cache_key = result_cache_key(project.id, "overall", dataset_uuids, gold_source, min_grade)
     if not refresh:
         cached = await get_cached(cache_key, RetrievalRunMetrics)
         if cached is not None:
@@ -148,7 +152,7 @@ async def compute_overall_labels_metrics(
     ds_id, ds_name = datasets_label(datasets)
 
     relevant_by_test, nonrelevant_by_test, grade_by_test = await resolve_project_gold(
-        db, project, gold_source
+        db, project, gold_source, min_grade
     )
     slice_by_test = await resolve_slices(db, project)
 
@@ -222,18 +226,21 @@ async def compute_by_stage_metrics(
     datasets: list[TestDataset],
     gold_source: str,
     refresh: bool,
+    min_grade: int = 1,
 ) -> ByStageMetricsResponse:
     """Deterministic per-stage retrieval metrics (sparse/dense/RRF/reranked/agentic) vs gold.
 
     For each case we assemble the candidate pool (which records each chunk's rank per head),
     reconstruct each stage's ranked list, and score it against the chunk-label gold. Cached in
-    Redis keyed by dataset set + gold source.
+    Redis keyed by dataset set + gold source + min grade.
     """
     if not datasets:
-        return ByStageMetricsResponse(available=False, gold_source=gold_source, ks=list(AGG_KS))
+        return ByStageMetricsResponse(
+            available=False, gold_source=gold_source, min_grade=min_grade, ks=list(AGG_KS)
+        )
 
     dataset_uuids = [d.id for d in datasets]
-    cache_key = result_cache_key(project.id, "by-stage", dataset_uuids, gold_source)
+    cache_key = result_cache_key(project.id, "by-stage", dataset_uuids, gold_source, min_grade)
     if not refresh:
         cached = await get_cached(cache_key, ByStageMetricsResponse)
         if cached is not None:
@@ -243,7 +250,7 @@ async def compute_by_stage_metrics(
     cases = await dataset_cases(db, dataset_uuids)
 
     relevant_by_test, nonrelevant_by_test, grade_by_test = await resolve_project_gold(
-        db, project, gold_source
+        db, project, gold_source, min_grade
     )
     slice_by_test = await resolve_slices(db, project)
 
@@ -316,6 +323,7 @@ async def compute_by_stage_metrics(
         dataset_id=ds_id,
         dataset_name=ds_name,
         gold_source=gold_source,
+        min_grade=min_grade,
         ks=list(AGG_KS),
         total_cases=len(cases),
         evaluated_cases=evaluated,
@@ -328,8 +336,8 @@ async def compute_by_stage_metrics(
 
 
 async def get_cached_by_stage(
-    project: Project, dataset_ids: list[UUID], gold_source: str
+    project: Project, dataset_ids: list[UUID], gold_source: str, min_grade: int = 1
 ) -> ByStageMetricsResponse | None:
     """Return a previously cached by-stage result for these settings, or None (no recompute)."""
-    key = result_cache_key(project.id, "by-stage", dataset_ids, gold_source)
+    key = result_cache_key(project.id, "by-stage", dataset_ids, gold_source, min_grade)
     return await get_cached(key, ByStageMetricsResponse)

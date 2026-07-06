@@ -147,6 +147,40 @@ async def test_case_diagnosis_classifies_missed_chunks(
     missing = next(c for c in data["missed"] if c["chunk_id"] == "c_missing")
     assert missing["content_preview"] == "snapshot of c_missing"  # label fallback
 
+    # A marginally-relevant (grade 1) miss shows up at the lenient threshold but is excluded
+    # from the miss list at min_grade=2, matching what the strict metrics count as relevant.
+    db_session.add(
+        ChunkRelevanceLabel(
+            project_id=test_project.id, test_id="diag", chunk_id="c_low", relevance=1,
+            labeled_by=test_user.id, content_preview="snapshot of c_low",
+        )
+    )
+    await db_session.commit()
+    lenient = await client.get(
+        "/api/pipeline/case-diagnosis",
+        headers=auth_headers,
+        params={"test_id": "diag", "k": 1, "retriever": "keyword", "refresh": "true"},
+    )
+    assert lenient.json()["missed_count"] == 6
+    strict = await client.get(
+        "/api/pipeline/case-diagnosis",
+        headers=auth_headers,
+        params={
+            "test_id": "diag", "k": 1, "retriever": "keyword", "min_grade": 2, "refresh": "true",
+        },
+    )
+    assert strict.json()["min_grade"] == 2
+    assert strict.json()["missed_count"] == 5
+    assert all(c["chunk_id"] != "c_low" for c in strict.json()["missed"])
+
+    # Every gold grade here is < 3, so the strictest threshold has no gold to diagnose against.
+    strictest = await client.get(
+        "/api/pipeline/case-diagnosis",
+        headers=auth_headers,
+        params={"test_id": "diag", "k": 1, "retriever": "keyword", "min_grade": 3},
+    )
+    assert strictest.json()["available"] is False
+
 
 @pytest.mark.asyncio
 async def test_case_diagnosis_does_not_false_flag_missing_embedding(

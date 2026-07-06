@@ -58,6 +58,7 @@ export const getRetrievalMetrics = (
     source?: "urls" | "labels";
     refresh?: boolean;
     goldSource?: "human" | "ai" | "both";
+    minGrade?: number;
   } = {},
   signal?: AbortSignal,
 ) => {
@@ -67,6 +68,7 @@ export const getRetrievalMetrics = (
   for (const id of opts.datasetIds ?? []) params.append("dataset_ids", id);
   if (opts.refresh) params.set("refresh", "true");
   if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
+  if (opts.minGrade && opts.minGrade !== 1) params.set("min_grade", String(opts.minGrade));
   return request<RetrievalRunMetrics>(`/api/pipeline/retrieval-metrics?${params.toString()}`, {
     signal,
   });
@@ -74,12 +76,18 @@ export const getRetrievalMetrics = (
 
 // Per-stage deterministic retrieval metrics (sparse/dense/RRF/reranked/agentic) vs chunk-label gold.
 export const getRetrievalByStageMetrics = (
-  opts: { datasetIds?: string[]; goldSource?: "human" | "ai" | "both"; refresh?: boolean } = {},
+  opts: {
+    datasetIds?: string[];
+    goldSource?: "human" | "ai" | "both";
+    minGrade?: number;
+    refresh?: boolean;
+  } = {},
   signal?: AbortSignal,
 ) => {
   const params = new URLSearchParams();
   for (const id of opts.datasetIds ?? []) params.append("dataset_ids", id);
   if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
+  if (opts.minGrade && opts.minGrade !== 1) params.set("min_grade", String(opts.minGrade));
   if (opts.refresh) params.set("refresh", "true");
   const qs = params.toString();
   return request<ByStageMetricsResponse>(
@@ -96,6 +104,7 @@ export const getCaseDiagnosis = (
     k?: number;
     retriever?: string;
     goldSource?: "human" | "ai" | "both";
+    minGrade?: number;
     refresh?: boolean;
   },
   signal?: AbortSignal,
@@ -104,6 +113,7 @@ export const getCaseDiagnosis = (
   if (opts.k) params.set("k", String(opts.k));
   if (opts.retriever) params.set("retriever", opts.retriever);
   if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
+  if (opts.minGrade && opts.minGrade !== 1) params.set("min_grade", String(opts.minGrade));
   if (opts.refresh) params.set("refresh", "true");
   return request<CaseDiagnosisResponse>(
     `/api/pipeline/case-diagnosis?${params.toString()}`,

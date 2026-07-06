@@ -12,21 +12,23 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.chunk_labels import RELEVANT_GRADE, ChunkGoldLabel, ChunkRelevanceLabel
+from app.models.chunk_labels import GRADE_MAX, RELEVANT_GRADE, ChunkGoldLabel, ChunkRelevanceLabel
 from app.models.project import Project
 from app.services.chunk_agreement import resolve_gold
 from app.services.retrieval_config import normalize_source_url
 
 
 async def resolve_project_gold(
-    db: AsyncSession, project: Project, gold_source: str
+    db: AsyncSession, project: Project, gold_source: str, min_grade: int = RELEVANT_GRADE
 ) -> tuple[dict[str, set[str]], dict[str, set[str]], dict[str, dict[str, int]]]:
     """Resolve gold chunk relevance for the project from the chosen annotator source.
 
     ``gold_source`` picks whose labels count: ``human`` (default, human labels only), ``ai`` (the
     AI judge's labels only), or ``both`` (as independent annotators). Human labels carry
     ``annotator=None`` (keyed by user); the AI judge carries ``annotator="AI"``. Adjudicated gold
-    overrides always win. Returns ``(relevant_by_test, nonrelevant_by_test, grade_by_test)``.
+    overrides always win. ``min_grade`` (clamped to 1..3) is the binary-metrics strictness — see
+    :func:`app.services.chunk_agreement.resolve_gold` for the exact semantics. Returns
+    ``(relevant_by_test, nonrelevant_by_test, grade_by_test)``.
     """
     # Select only the scalar fields gold resolution needs — not full ORM rows. The label table
     # carries Text snapshots (content_preview/url/title) that would otherwise load the whole
@@ -66,6 +68,7 @@ async def resolve_project_gold(
             if _included(annotator)
         ),
         overrides,
+        min_grade=max(RELEVANT_GRADE, min(min_grade, GRADE_MAX)),
     )
 
 

@@ -181,7 +181,7 @@ export function PerCaseResults({
   ratioInfo?: string;
   // When set (chunk-labels path), each row gets a "Diagnose" toggle that expands the per-case
   // chunk diagnosis for this retriever + k. Null on the URLs path (no chunk-level truth).
-  diagnose?: { retriever: string; goldSource: "human" | "ai" | "both" } | null;
+  diagnose?: { retriever: string; goldSource: "human" | "ai" | "both"; minGrade?: number } | null;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "metric", dir: "asc" });
   const onSort = (k: SortKey) =>
@@ -333,6 +333,7 @@ export function PerCaseResults({
                       k={largestK}
                       retriever={diagnose.retriever}
                       goldSource={diagnose.goldSource}
+                      minGrade={diagnose.minGrade}
                     />
                   </td>
                 </tr>

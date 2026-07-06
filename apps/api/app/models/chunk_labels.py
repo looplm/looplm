@@ -33,7 +33,9 @@ DEFAULT_SLICE = "broad"
 # Graded relevance scale (TREC-style): 0 irrelevant, 1 marginally relevant, 2 relevant,
 # 3 highly relevant. nDCG uses the grade directly as gain; the set-based metrics
 # (recall/precision/hit/bpref) and Cohen's kappa binarize at ``RELEVANT_GRADE`` — any
-# grade >= 1 is "relevant".
+# grade >= 1 is "relevant". The retrieval metrics additionally accept a stricter
+# ``min_grade`` threshold (see ``resolve_gold``); grades in [1, min_grade) then count as
+# unjudged for the set-based metrics, while nDCG stays graded and unaffected.
 GRADE_MIN = 0
 GRADE_MAX = 3
 RELEVANT_GRADE = 1

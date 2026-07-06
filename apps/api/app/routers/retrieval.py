@@ -69,6 +69,7 @@ def _job_view(job: RetrievalMetricsJob) -> RetrievalComputeJob:
         status=job.status,
         view=job.view,
         gold_source=job.gold_source,
+        min_grade=job.min_grade or 1,
         dataset_ids=list(job.dataset_ids or []),
         progress_current=job.progress_current,
         progress_total=job.progress_total,
@@ -121,6 +122,7 @@ async def get_retrieval_metrics(
     source: str = "urls",
     refresh: bool = False,
     gold_source: str = "human",
+    min_grade: int = Query(1, ge=1, le=3),
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
@@ -129,14 +131,17 @@ async def get_retrieval_metrics(
     ``source=labels`` measures pooled chunk labels against a *live retrieval probe* of the
     connected index, over one or more datasets' test cases (``dataset_ids``; ``dataset_id`` is the
     single-dataset alias; default most-recent). This is the data-labeling lens and needs no eval
-    run. ``source=urls`` measures each case's ground-truth URLs via the ``contains_urls`` evaluator
-    captures of an eval run (``run_id``, default most-recent). Returns ``available=False`` when
-    there is nothing to measure against.
+    run. ``min_grade`` (labels path only) is the binary-metrics strictness: only chunks with gold
+    grade >= min_grade count as relevant. ``source=urls`` measures each case's ground-truth URLs
+    via the ``contains_urls`` evaluator captures of an eval run (``run_id``, default most-recent).
+    Returns ``available=False`` when there is nothing to measure against.
     """
     if source == "labels":
         ids = dataset_ids or ([dataset_id] if dataset_id else None)
         datasets = await resolve_datasets(db, project, ids)
-        return await compute_overall_labels_metrics(db, project, datasets, gold_source, refresh)
+        return await compute_overall_labels_metrics(
+            db, project, datasets, gold_source, refresh, min_grade
+        )
 
     # Risk slice per test case, for the per-slice metric breakdown on the URLs path.
     slice_by_test = await resolve_slices(db, project)
@@ -168,6 +173,7 @@ async def get_retrieval_metrics_by_stage(
     dataset_id: UUID | None = None,
     dataset_ids: list[UUID] | None = Query(None),
     gold_source: str = "human",
+    min_grade: int = Query(1, ge=1, le=3),
     refresh: bool = False,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
@@ -177,11 +183,11 @@ async def get_retrieval_metrics_by_stage(
     For each case (pooled across ``dataset_ids``; ``dataset_id`` is the single-dataset alias) we
     assemble the candidate pool (which records each chunk's rank per head), reconstruct each
     stage's ranked list, and score it against the chunk-label gold (``gold_source`` = human | ai |
-    both). Stages are compared side by side, with a per-case grid.
+    both, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
     """
     ids = dataset_ids or ([dataset_id] if dataset_id else None)
     datasets = await resolve_datasets(db, project, ids)
-    return await compute_by_stage_metrics(db, project, datasets, gold_source, refresh)
+    return await compute_by_stage_metrics(db, project, datasets, gold_source, refresh, min_grade)
 
 
 @router.post("/retrieval-metrics/compute", response_model=RetrievalComputeJob)
@@ -204,6 +210,7 @@ async def start_retrieval_metrics_compute(
         created_by=user.id,
         view=view,
         gold_source=body.gold_source,
+        min_grade=body.min_grade,
         dataset_ids=list(body.dataset_ids or []),
         status="pending",
     )

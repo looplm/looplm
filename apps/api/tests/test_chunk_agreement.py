@@ -59,6 +59,33 @@ def test_resolve_gold_single_annotator_matches_their_grade():
     assert grades == {"t": {"c1": 3}}
 
 
+def test_resolve_gold_min_grade_makes_marginal_unjudged():
+    rows = [("t", "c1", 1, "a"), ("t", "c2", 2, "a"), ("t", "c3", 3, "a"), ("t", "c4", 0, "a")]
+    rel, non, grades = resolve_gold(rows, min_grade=2)
+    # Grade 1 is relevant-but-below-threshold: in NEITHER set (unjudged for the binary metrics),
+    # grade 0 stays a judged negative.
+    assert rel == {"t": {"c2", "c3"}}
+    assert non == {"t": {"c4"}}
+    # nDCG gains keep every grade >= 1 regardless of the threshold.
+    assert grades == {"t": {"c1": 1, "c2": 2, "c3": 3}}
+
+
+def test_resolve_gold_min_grade_3_keeps_only_must_haves():
+    rows = [("t", "c1", 1, "a"), ("t", "c2", 2, "a"), ("t", "c3", 3, "a")]
+    rel, non, grades = resolve_gold(rows, min_grade=3)
+    assert rel == {"t": {"c3"}}
+    assert non == {}
+    assert grades == {"t": {"c1": 1, "c2": 2, "c3": 3}}
+
+
+def test_resolve_gold_min_grade_applies_to_overrides():
+    # An adjudicated grade below the threshold is unjudged for the binary metrics too.
+    rel, non, grades = resolve_gold([("t", "c", 3, "a")], overrides={("t", "c"): 1}, min_grade=2)
+    assert rel == {}
+    assert non == {}
+    assert grades == {"t": {"c": 1}}
+
+
 # --- Cohen's kappa ---
 
 def test_cohen_kappa_perfect_agreement():
@@ -169,3 +196,37 @@ async def test_agreement_and_gold_endpoints(
     assert metrics.status_code == 200
     assert metrics.json()["available"] is True
     assert metrics.json()["recall_at_k"]["10"] == 1.0
+
+    # Add a marginally-relevant (grade 1) chunk the probe never returns: lenient recall drops,
+    # strict (min_grade=2) recall ignores it, and graded nDCG is identical at both thresholds.
+    await client.post(
+        "/api/pipeline/labels", headers=auth_headers,
+        json={"labels": [{"test_id": "q1", "chunk_id": "c2", "relevance": 1}]},
+    )
+    lenient = await client.get(
+        "/api/pipeline/retrieval-metrics?source=labels&refresh=true", headers=auth_headers
+    )
+    assert lenient.status_code == 200
+    assert lenient.json()["recall_at_k"]["10"] == 0.5
+    strict = await client.get(
+        "/api/pipeline/retrieval-metrics?source=labels&min_grade=2&refresh=true",
+        headers=auth_headers,
+    )
+    assert strict.status_code == 200
+    assert strict.json()["recall_at_k"]["10"] == 1.0
+    assert strict.json()["ndcg_at_k"]["10"] == lenient.json()["ndcg_at_k"]["10"]
+
+    # A case whose gold is entirely below the threshold drops out of the aggregate.
+    db_session.add(TestCase(id=uuid4(), dataset_id=dataset.id, test_id="q2", prompt="q2"))
+    await db_session.commit()
+    await client.post(
+        "/api/pipeline/labels", headers=auth_headers,
+        json={"labels": [{"test_id": "q2", "chunk_id": "d1", "relevance": 1}]},
+    )
+    strict2 = await client.get(
+        "/api/pipeline/retrieval-metrics?source=labels&min_grade=2&refresh=true",
+        headers=auth_headers,
+    )
+    assert strict2.status_code == 200
+    assert strict2.json()["evaluated_cases"] == 1
+    assert strict2.json()["recall_at_k"]["10"] == 1.0

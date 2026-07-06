@@ -2668,8 +2668,10 @@ export interface paths {
          *
          *     ``retriever`` is one of the pool heads (keyword | vector | hybrid | semantic | agentic |
          *     agentic_rerank); anything else falls back to ``agentic_rerank``. ``gold_source`` selects whose
-         *     labels are ground truth (human | ai | both). Returns ``available=False`` when the project has no
-         *     index provider, the case has no gold relevant chunks, or the case isn't found.
+         *     labels are ground truth (human | ai | both); ``min_grade`` is the binary-metrics strictness,
+         *     so the miss list matches what the metrics counted as relevant. Returns ``available=False``
+         *     when the project has no index provider, the case has no gold relevant chunks, or the case
+         *     isn't found.
          */
         get: operations["diagnose_case_api_pipeline_case_diagnosis_get"];
         put?: never;
@@ -3002,9 +3004,10 @@ export interface paths {
          *     ``source=labels`` measures pooled chunk labels against a *live retrieval probe* of the
          *     connected index, over one or more datasets' test cases (``dataset_ids``; ``dataset_id`` is the
          *     single-dataset alias; default most-recent). This is the data-labeling lens and needs no eval
-         *     run. ``source=urls`` measures each case's ground-truth URLs via the ``contains_urls`` evaluator
-         *     captures of an eval run (``run_id``, default most-recent). Returns ``available=False`` when
-         *     there is nothing to measure against.
+         *     run. ``min_grade`` (labels path only) is the binary-metrics strictness: only chunks with gold
+         *     grade >= min_grade count as relevant. ``source=urls`` measures each case's ground-truth URLs
+         *     via the ``contains_urls`` evaluator captures of an eval run (``run_id``, default most-recent).
+         *     Returns ``available=False`` when there is nothing to measure against.
          */
         get: operations["get_retrieval_metrics_api_pipeline_retrieval_metrics_get"];
         put?: never;
@@ -3029,7 +3032,7 @@ export interface paths {
          *     For each case (pooled across ``dataset_ids``; ``dataset_id`` is the single-dataset alias) we
          *     assemble the candidate pool (which records each chunk's rank per head), reconstruct each
          *     stage's ranked list, and score it against the chunk-label gold (``gold_source`` = human | ai |
-         *     both). Stages are compared side by side, with a per-case grid.
+         *     both, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
          */
         get: operations["get_retrieval_metrics_by_stage_api_pipeline_retrieval_metrics_by_stage_get"];
         put?: never;
@@ -4954,6 +4957,11 @@ export interface components {
             gold_source: string;
             /** Ks */
             ks?: number[];
+            /**
+             * Min Grade
+             * @default 1
+             */
+            min_grade: number;
             /** Stages */
             stages?: components["schemas"]["StageMetrics"][];
             /**
@@ -5000,6 +5008,11 @@ export interface components {
              * @default 10
              */
             k: number;
+            /**
+             * Min Grade
+             * @default 1
+             */
+            min_grade: number;
             /**
              * Missed
              * @default []
@@ -9434,6 +9447,11 @@ export interface components {
             gold_source: string;
             /** Id */
             id: string;
+            /**
+             * Min Grade
+             * @default 1
+             */
+            min_grade: number;
             /** Progress Current */
             progress_current?: number | null;
             /** Progress Total */
@@ -9460,6 +9478,11 @@ export interface components {
              * @default human
              */
             gold_source: string;
+            /**
+             * Min Grade
+             * @default 1
+             */
+            min_grade: number;
             /**
              * Refresh
              * @default false
@@ -9590,6 +9613,11 @@ export interface components {
              * @default human
              */
             gold_source: string;
+            /**
+             * Min Grade
+             * @default 1
+             */
+            min_grade: number;
             /** Name */
             name?: string | null;
         };
@@ -9717,6 +9745,11 @@ export interface components {
             /** Max K */
             max_k?: number | null;
             metrics: components["schemas"]["RetrievalRunMetrics"];
+            /**
+             * Min Grade
+             * @default 1
+             */
+            min_grade: number;
             /** Mrr */
             mrr?: number | null;
             /** Name */
@@ -9777,6 +9810,11 @@ export interface components {
             ks?: number[];
             /** Max K */
             max_k?: number | null;
+            /**
+             * Min Grade
+             * @default 1
+             */
+            min_grade: number;
             /** Mrr */
             mrr?: number | null;
             /** Name */
@@ -16610,6 +16648,7 @@ export interface operations {
                 k?: number;
                 retriever?: string;
                 gold_source?: string;
+                min_grade?: number;
                 refresh?: boolean;
             };
             header?: {
@@ -17131,6 +17170,7 @@ export interface operations {
                 source?: string;
                 refresh?: boolean;
                 gold_source?: string;
+                min_grade?: number;
             };
             header?: {
                 "x-project-id"?: string | null;
@@ -17166,6 +17206,7 @@ export interface operations {
                 dataset_id?: string | null;
                 dataset_ids?: string[] | null;
                 gold_source?: string;
+                min_grade?: number;
                 refresh?: boolean;
             };
             header?: {

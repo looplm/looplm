@@ -40,9 +40,11 @@ from app.services.retrieval_labels_metrics import (
 _GOLD_LABELS = {"human": "Human labels", "ai": "AI labels", "both": "Human+AI labels"}
 
 
-def _default_run_name(gold_source: str, dataset_name: str) -> str:
-    """A readable default run name: dataset(s) · gold source · date."""
+def _default_run_name(gold_source: str, dataset_name: str, min_grade: int = 1) -> str:
+    """A readable default run name: dataset(s) · gold source (+ strictness) · date."""
     label = _GOLD_LABELS.get(gold_source, gold_source)
+    if min_grade > 1:
+        label = f"{label} (grade>={min_grade})"
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return f"{dataset_name} · {label} · {today}"
 
@@ -99,6 +101,7 @@ def _summary(run: RetrievalRun) -> RetrievalRunSummary:
         id=str(run.id),
         created_at=run.created_at.isoformat() if run.created_at else "",
         gold_source=run.gold_source,
+        min_grade=run.min_grade or 1,
         dataset_ids=list(run.dataset_ids or []),
         dataset_names=list(run.dataset_names or []),
         ks=list(run.ks or []),
@@ -154,7 +157,9 @@ async def create_run(
     """
     ids = [UUID(d) for d in body.dataset_ids] or None
     datasets = await resolve_datasets(db, project, ids)
-    metrics = await compute_overall_labels_metrics(db, project, datasets, body.gold_source, False)
+    metrics = await compute_overall_labels_metrics(
+        db, project, datasets, body.gold_source, False, body.min_grade
+    )
     if not metrics.available:
         raise HTTPException(
             status_code=400,
@@ -166,7 +171,9 @@ async def create_run(
             },
         )
 
-    by_stage = await get_cached_by_stage(project, [d.id for d in datasets], body.gold_source)
+    by_stage = await get_cached_by_stage(
+        project, [d.id for d in datasets], body.gold_source, body.min_grade
+    )
 
     # Auto-capture the connected index name (Azure config.index_name, else the provider label).
     provider = (
@@ -191,6 +198,7 @@ async def create_run(
         project_id=project.id,
         created_by=user.id,
         gold_source=body.gold_source,
+        min_grade=body.min_grade,
         dataset_ids=[str(d.id) for d in datasets],
         dataset_names=[d.name for d in datasets],
         ks=list(metrics.ks),
@@ -198,7 +206,7 @@ async def create_run(
         by_stage=by_stage.model_dump() if by_stage is not None else None,
         total_cases=metrics.total_cases,
         evaluated_cases=metrics.evaluated_cases,
-        name=body.name or _default_run_name(body.gold_source, ds_name),
+        name=body.name or _default_run_name(body.gold_source, ds_name, body.min_grade),
         index_name=index_name,
         pipeline_version=pipeline_version,
     )

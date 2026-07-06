@@ -4,9 +4,9 @@ The overall and by-stage metrics are only computed when the user presses Compute
 so the full computed response is cached keyed by the exact settings, stamped with the time it was
 computed. Re-opening the page then serves instantly and the UI can show when the numbers are from.
 
-Keyed by ``(project, view, sorted dataset ids, gold source)``. The TTL matches the underlying
-probe cache (6h) so a stale result naturally ages out with the retrieval data it was built from.
-Bump ``_VERSION`` to invalidate every cached result when the metric logic changes.
+Keyed by ``(project, view, sorted dataset ids, gold source, min grade)``. The TTL matches the
+underlying probe cache (6h) so a stale result naturally ages out with the retrieval data it was
+built from. Bump ``_VERSION`` to invalidate every cached result when the metric logic changes.
 """
 
 from __future__ import annotations
@@ -21,17 +21,17 @@ from pydantic import BaseModel
 from app.cache import cache_get_json, cache_set_json
 
 _RESULT_TTL = 21_600  # 6 hours, matching the probe cache
-_VERSION = "v1"
+_VERSION = "v2"
 
 TModel = TypeVar("TModel", bound=BaseModel)
 
 
 def result_cache_key(
-    project_id: UUID, view: str, dataset_ids: Iterable[UUID], gold_source: str
+    project_id: UUID, view: str, dataset_ids: Iterable[UUID], gold_source: str, min_grade: int
 ) -> str:
     """Cache key for one computed metrics response, stable across dataset-id ordering."""
     ids = ",".join(sorted(str(i) for i in dataset_ids))
-    return f"retrieval:metrics:{_VERSION}:{project_id}:{view}:{gold_source}:{ids}"
+    return f"retrieval:metrics:{_VERSION}:{project_id}:{view}:{gold_source}:g{min_grade}:{ids}"
 
 
 async def get_cached(key: str, model: type[TModel]) -> TModel | None:

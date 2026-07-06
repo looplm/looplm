@@ -1,5 +1,6 @@
-// Graded relevance scale (TREC-style): 0 irrelevant … 3 highly relevant. Any grade >= 1
-// counts as relevant for the set-based metrics; nDCG uses the grade as gain.
+// Graded relevance scale (TREC-style): 0 irrelevant … 3 highly relevant. By default any
+// grade >= 1 counts as relevant for the set-based metrics (the Retrieval panel's "Min grade"
+// control can binarize more strictly); nDCG uses the grade as gain.
 export const GRADES: { value: number; label: string; selected: string; hover: string }[] = [
   { value: 0, label: "Irrelevant", selected: "bg-red-500 border-red-500 text-white", hover: "hover:border-red-400" },
   { value: 1, label: "Marginally relevant", selected: "bg-amber-500 border-amber-500 text-white", hover: "hover:border-amber-400" },

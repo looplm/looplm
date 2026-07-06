@@ -18,6 +18,7 @@ export function OverallSection({
   retrieverNote,
   retriever,
   goldSource,
+  minGrade,
   perRetriever,
   bestAvailable,
 }: {
@@ -28,9 +29,10 @@ export function OverallSection({
   targets: RetrievalTargets | null;
   retrieverLabel?: string;
   retrieverNote?: string;
-  // The selected retriever value + gold source, threaded to the per-case diagnosis (labels path).
+  // The selected retriever value + gold settings, threaded to the per-case diagnosis (labels path).
   retriever?: string;
   goldSource?: "human" | "ai" | "both";
+  minGrade?: number;
   // A specific pipeline stage (not "best") is selected — used to tailor the unavailable message.
   perRetriever: boolean;
   // The live-probe overall is available, so "Best available" is a valid fallback.
@@ -74,6 +76,7 @@ export function OverallSection({
       retrieverNote={retrieverNote}
       retriever={retriever}
       goldSource={goldSource}
+      minGrade={minGrade}
     />
   );
 }

@@ -229,11 +229,14 @@ export function CaseDiagnosisPanel({
   k,
   retriever,
   goldSource,
+  minGrade,
 }: {
   testId: string;
   k: number;
   retriever: string;
   goldSource: "human" | "ai" | "both";
+  // Binary-metrics strictness: the miss list only contains chunks with gold grade >= minGrade.
+  minGrade?: number;
 }) {
   const [data, setData] = useState<CaseDiagnosisResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -243,7 +246,7 @@ export function CaseDiagnosisPanel({
     const ctrl = new AbortController();
     setLoading(true);
     setError(false);
-    getCaseDiagnosis({ testId, k, retriever, goldSource }, ctrl.signal)
+    getCaseDiagnosis({ testId, k, retriever, goldSource, minGrade }, ctrl.signal)
       .then((d) => setData(d))
       .catch(() => {
         if (!ctrl.signal.aborted) setError(true);
@@ -252,7 +255,7 @@ export function CaseDiagnosisPanel({
         if (!ctrl.signal.aborted) setLoading(false);
       });
     return () => ctrl.abort();
-  }, [testId, k, retriever, goldSource]);
+  }, [testId, k, retriever, goldSource, minGrade]);
 
   if (loading) {
     return <div className="px-4 py-3 text-xs text-gray-400 dark:text-slate-500">Diagnosing retrieval…</div>;

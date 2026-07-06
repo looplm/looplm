@@ -37,6 +37,7 @@ def _is_relevant(grade: int) -> bool:
 def resolve_gold(
     rows: Iterable[tuple[str, str, int, Hashable]],
     overrides: dict[Item, int] | None = None,
+    min_grade: int = RELEVANT_GRADE,
 ) -> tuple[dict[str, set[str]], dict[str, set[str]], dict[str, dict[str, int]]]:
     """Collapse per-annotator graded votes into gold sets + a gold grade per chunk, per test_id.
 
@@ -46,10 +47,16 @@ def resolve_gold(
     which wins over the votes.
 
     Returns ``(relevant_by_test, nonrelevant_by_test, grade_by_test)``:
-    * ``relevant_by_test`` — chunk ids whose gold grade is relevant (>= 1).
+    * ``relevant_by_test`` — chunk ids whose gold grade is relevant (>= ``min_grade``).
     * ``nonrelevant_by_test`` — chunk ids judged irrelevant (gold grade 0).
-    * ``grade_by_test`` — ``test_id -> {chunk_id: gold grade}`` for the relevant chunks, the
-      graded gains nDCG scores against.
+    * ``grade_by_test`` — ``test_id -> {chunk_id: gold grade}`` for every chunk with grade >= 1,
+      the graded gains nDCG scores against. Deliberately NOT filtered by ``min_grade``: nDCG
+      already weights by grade, so tightening the binary threshold must not move it.
+
+    ``min_grade`` is the strictness of the binary metrics (TREC-style lenient/strict
+    binarization). A chunk whose gold grade lands in ``[1, min_grade)`` is relevant-but-below
+    threshold: it goes in *neither* set, i.e. it counts as unjudged — bpref/precision must not
+    penalize the retriever for surfacing it — rather than as a negative.
 
     Without an override the gold grade is the rounded mean of the votes; relevant when the
     *binarized* majority is relevant, irrelevant when it's not, and **unjudged** (in neither
@@ -80,8 +87,9 @@ def resolve_gold(
         if grade is None:
             continue
         if _is_relevant(grade):
-            relevant_by_test.setdefault(test_id, set()).add(chunk_id)
             grade_by_test.setdefault(test_id, {})[chunk_id] = grade
+            if grade >= min_grade:
+                relevant_by_test.setdefault(test_id, set()).add(chunk_id)
         else:
             nonrelevant_by_test.setdefault(test_id, set()).add(chunk_id)
     return relevant_by_test, nonrelevant_by_test, grade_by_test

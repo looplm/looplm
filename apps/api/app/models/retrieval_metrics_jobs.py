@@ -49,6 +49,8 @@ class RetrievalMetricsJob(Base):
     # What is being computed — the same tuple that keys the Redis result cache.
     view = Column(String(16), nullable=False, server_default=text("'overall'"))  # overall | byStage
     gold_source = Column(String(16), nullable=False, server_default=text("'human'"))
+    # Binary-metrics strictness: only gold grade >= min_grade counts as relevant (1..3).
+    min_grade = Column(Integer, nullable=False, server_default=text("1"))
     dataset_ids = Column(JSONB, nullable=False, server_default=text("'[]'"))  # list[str]
 
     # pending | running | completed | failed

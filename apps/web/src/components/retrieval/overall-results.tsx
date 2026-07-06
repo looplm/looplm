@@ -20,6 +20,7 @@ export function OverallResults({
   retrieverNote,
   retriever,
   goldSource,
+  minGrade,
 }: {
   overall: RetrievalRunMetrics;
   targets: RetrievalTargets | null;
@@ -28,9 +29,10 @@ export function OverallResults({
   // The selected retriever's label + one-line description (labels path), shown in the method note.
   retrieverLabel?: string;
   retrieverNote?: string;
-  // The selected retriever value + gold source — passed to the per-case diagnosis (labels path).
+  // The selected retriever value + gold settings — passed to the per-case diagnosis (labels path).
   retriever?: string;
   goldSource?: "human" | "ai" | "both";
+  minGrade?: number;
 }) {
   const lk = String(activeK);
   const cardValue = (m: MetricDef): number | null | undefined => m.value(overall, lk);
@@ -147,7 +149,11 @@ export function OverallResults({
           ratio={metric.ratio ? (c) => metric.ratio!(c, lk, activeK) : null}
           ratioHeader={metric.ratioHeader}
           ratioInfo={metric.ratioInfo}
-          diagnose={source === "labels" && retriever ? { retriever, goldSource: goldSource ?? "human" } : null}
+          diagnose={
+            source === "labels" && retriever
+              ? { retriever, goldSource: goldSource ?? "human", minGrade: minGrade ?? 1 }
+              : null
+          }
         />
       </div>
     </>

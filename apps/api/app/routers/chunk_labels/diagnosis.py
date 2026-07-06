@@ -10,7 +10,7 @@ split points at whether the fix belongs in the indexer, the retriever, or the la
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,6 +82,7 @@ async def diagnose_case(
     k: int = 10,
     retriever: str = _DEFAULT_HEAD,
     gold_source: str = "human",
+    min_grade: int = Query(1, ge=1, le=3),
     refresh: bool = False,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
@@ -90,8 +91,10 @@ async def diagnose_case(
 
     ``retriever`` is one of the pool heads (keyword | vector | hybrid | semantic | agentic |
     agentic_rerank); anything else falls back to ``agentic_rerank``. ``gold_source`` selects whose
-    labels are ground truth (human | ai | both). Returns ``available=False`` when the project has no
-    index provider, the case has no gold relevant chunks, or the case isn't found.
+    labels are ground truth (human | ai | both); ``min_grade`` is the binary-metrics strictness,
+    so the miss list matches what the metrics counted as relevant. Returns ``available=False``
+    when the project has no index provider, the case has no gold relevant chunks, or the case
+    isn't found.
     """
     head = retriever if retriever in _POOL_HEADS else _DEFAULT_HEAD
     k = max(1, min(k, 50))
@@ -106,15 +109,19 @@ async def diagnose_case(
     ).scalar_one_or_none()
     if provider_row is None:
         return CaseDiagnosisResponse(
-            provider_connected=False, available=False, test_id=test_id, retriever=head, k=k
+            provider_connected=False, available=False, test_id=test_id, retriever=head, k=k,
+            min_grade=min_grade,
         )
 
-    relevant_by_test, _nonrel, grade_by_test = await resolve_project_gold(db, project, gold_source)
+    relevant_by_test, _nonrel, grade_by_test = await resolve_project_gold(
+        db, project, gold_source, min_grade
+    )
     relevant = relevant_by_test.get(test_id) or set()
     grades = grade_by_test.get(test_id, {})
     if not relevant:
         return CaseDiagnosisResponse(
-            provider_connected=True, available=False, test_id=test_id, retriever=head, k=k
+            provider_connected=True, available=False, test_id=test_id, retriever=head, k=k,
+            min_grade=min_grade,
         )
 
     row = (
@@ -128,7 +135,8 @@ async def diagnose_case(
     ).first()
     if row is None:
         return CaseDiagnosisResponse(
-            provider_connected=True, available=False, test_id=test_id, retriever=head, k=k
+            provider_connected=True, available=False, test_id=test_id, retriever=head, k=k,
+            min_grade=min_grade,
         )
     dataset_id, query = row
     agentic = await _dataset_case_agentic_queries(db, dataset_id, test_id)
@@ -145,7 +153,7 @@ async def diagnose_case(
     if not connected:
         return CaseDiagnosisResponse(
             provider_connected=False, available=False, test_id=test_id, query=query,
-            retriever=head, k=k,
+            retriever=head, k=k, min_grade=min_grade,
         )
 
     ranked_ids = [c.chunk_id for c in ranked_chunks_for_head(pool.chunks, head)]
@@ -260,6 +268,7 @@ async def diagnose_case(
         query=query,
         retriever=head,
         k=k,
+        min_grade=min_grade,
         relevant_count=len(relevant),
         retrieved_count=len(ranked_ids),
         retrieved_relevant_count=len(retrieved_relevant),

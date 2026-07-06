@@ -459,6 +459,8 @@ class CaseDiagnosisResponse(BaseModel):
     query: str | None = None
     retriever: str = "agentic_rerank"
     k: int = 10
+    # Binary-metrics strictness the miss list was resolved with (1..3).
+    min_grade: int = 1
     relevant_count: int = 0
     retrieved_count: int = 0
     retrieved_relevant_count: int = 0
@@ -551,6 +553,8 @@ class ByStageMetricsResponse(BaseModel):
     dataset_id: str | None = None
     dataset_name: str | None = None
     gold_source: str = "human"
+    # Binary-metrics strictness: only gold grade >= min_grade counted as relevant.
+    min_grade: int = 1
     ks: list[int] = Field(default_factory=list)
     total_cases: int = 0
     evaluated_cases: int = 0
@@ -568,6 +572,7 @@ class RetrievalRunCreate(BaseModel):
 
     dataset_ids: list[str] = Field(default_factory=list)
     gold_source: str = "human"
+    min_grade: int = Field(default=1, ge=1, le=3)
     name: str | None = None
 
 
@@ -587,6 +592,7 @@ class RetrievalRunSummary(BaseModel):
     id: str
     created_at: str
     gold_source: str = "human"
+    min_grade: int = 1
     dataset_ids: list[str] = Field(default_factory=list)
     dataset_names: list[str] = Field(default_factory=list)
     ks: list[int] = Field(default_factory=list)
@@ -631,6 +637,7 @@ class RetrievalComputeStart(BaseModel):
 
     dataset_ids: list[str] = Field(default_factory=list)
     gold_source: str = "human"
+    min_grade: int = Field(default=1, ge=1, le=3)
     view: str = "overall"  # overall | byStage
     # Recompute forces a fresh live probe + embed; a plain Compute may reuse a warm cache.
     refresh: bool = False
@@ -647,6 +654,7 @@ class RetrievalComputeJob(BaseModel):
     status: str  # pending | running | completed | failed
     view: str = "overall"
     gold_source: str = "human"
+    min_grade: int = 1
     dataset_ids: list[str] = Field(default_factory=list)
     progress_current: int | None = None
     progress_total: int | None = None

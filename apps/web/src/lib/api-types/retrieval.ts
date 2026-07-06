@@ -270,6 +270,8 @@ export interface ByStageMetricsResponse {
   dataset_id?: string | null;
   dataset_name?: string | null;
   gold_source: string;
+  // Binary-metrics strictness: only gold grade >= min_grade counted as relevant (1..3).
+  min_grade?: number;
   ks: number[];
   total_cases: number;
   evaluated_cases: number;
@@ -307,6 +309,8 @@ export interface CaseDiagnosisResponse {
   query?: string | null;
   retriever: string;
   k: number;
+  // Binary-metrics strictness the miss list was resolved with (1..3).
+  min_grade?: number;
   relevant_count: number;
   retrieved_count: number;
   retrieved_relevant_count: number;
@@ -381,6 +385,8 @@ export interface RetrievalRunSummary {
   id: string;
   created_at: string;
   gold_source: string;
+  // Binary-metrics strictness the run was computed with (1..3).
+  min_grade?: number;
   dataset_ids: string[];
   dataset_names: string[];
   ks: number[];
@@ -409,6 +415,7 @@ export interface RetrievalRunRecord extends RetrievalRunSummary {
 export interface RetrievalRunCreateBody {
   dataset_ids: string[];
   gold_source: "human" | "ai" | "both";
+  min_grade?: number;
   name?: string | null;
 }
 
@@ -423,6 +430,7 @@ export interface RetrievalRunMetadataUpdate {
 export interface RetrievalComputeStartBody {
   dataset_ids: string[];
   gold_source: "human" | "ai" | "both";
+  min_grade?: number;
   view: "overall" | "byStage";
   refresh?: boolean;
 }
@@ -434,6 +442,7 @@ export interface RetrievalComputeJob {
   status: RetrievalComputeStatus;
   view: "overall" | "byStage";
   gold_source: "human" | "ai" | "both";
+  min_grade?: number;
   dataset_ids: string[];
   progress_current?: number | null;
   progress_total?: number | null;

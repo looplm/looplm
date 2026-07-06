@@ -48,10 +48,15 @@ async def run_metrics_job(job_id: UUID, refresh: bool = False) -> None:
                 raise ValueError("Project not found for compute job")
             dataset_uuids = [UUID(x) for x in (job.dataset_ids or [])]
             datasets = await resolve_datasets(db, project, dataset_uuids or None)
+            min_grade = job.min_grade or 1
             if job.view == "byStage":
-                await compute_by_stage_metrics(db, project, datasets, job.gold_source, refresh)
+                await compute_by_stage_metrics(
+                    db, project, datasets, job.gold_source, refresh, min_grade
+                )
             else:
-                await compute_overall_labels_metrics(db, project, datasets, job.gold_source, refresh)
+                await compute_overall_labels_metrics(
+                    db, project, datasets, job.gold_source, refresh, min_grade
+                )
             job.status = "completed"
             job.error = None
             job.trace = None
