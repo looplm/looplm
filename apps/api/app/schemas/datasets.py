@@ -108,6 +108,42 @@ class ExpectedUrlsResponse(BaseModel):
     expected_page_urls: list[str]
 
 
+class ExpectedUrlsSyncRequest(BaseModel):
+    """Sync expected_page_urls from gold-relevant chunk labels.
+
+    ``test_id`` targets one case (variant suffix tolerated); omitted, every case in the
+    dataset with labeled-relevant URLs is synced. ``replace`` discards the current list and
+    rebuilds it from the labels; ``merge`` only appends URLs the case doesn't already have.
+    ``gold_source`` picks whose labels resolve to gold (human | ai | both).
+    """
+
+    test_id: Optional[str] = Field(default=None, max_length=300)
+    mode: str = Field(default="merge", pattern="^(merge|replace)$")
+    gold_source: str = Field(default="human", pattern="^(human|ai|both)$")
+
+
+class ExpectedUrlsSyncCase(BaseModel):
+    """One synced test case: its new URL list and how it changed."""
+
+    test_id: str
+    expected_page_urls: list[str]
+    added: int
+    removed: int
+
+
+class ExpectedUrlsSyncResponse(BaseModel):
+    """Outcome of a label sync: what changed, what was already in sync, what had no labels.
+
+    ``skipped`` lists cases with no gold-relevant labeled URL — they are never wiped, even in
+    replace mode.
+    """
+
+    mode: str
+    updated: list[ExpectedUrlsSyncCase]
+    unchanged: list[str]
+    skipped: list[str]
+
+
 class TestCaseItem(BaseModel):
     id: UUID
     dataset_id: UUID

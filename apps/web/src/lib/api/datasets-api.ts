@@ -12,6 +12,8 @@ import type {
   TestCaseUpdateBody,
   TestDatasetExport,
   DuplicatesResponse,
+  ExpectedUrlsSyncRequest,
+  ExpectedUrlsSyncResponse,
 } from "../api-types";
 import { request } from "./client";
 
@@ -76,6 +78,17 @@ export const addExpectedUrls = (datasetId: string, testId: string, urls: string[
     method: "POST",
     body: JSON.stringify({ test_id: testId, urls }),
   });
+
+/**
+ * Sync expected_page_urls from gold-relevant chunk labels. mode "replace" discards the
+ * current list and recomputes it from the labels; "merge" only appends missing URLs.
+ * Without test_id, every case in the dataset that has labeled-relevant URLs is synced.
+ */
+export const syncExpectedUrlsFromLabels = (datasetId: string, body: ExpectedUrlsSyncRequest) =>
+  request<ExpectedUrlsSyncResponse>(
+    `/api/datasets/${datasetId}/cases/expected-urls/sync-from-labels`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
 
 export const exportDataset = (id: string) =>
   request<TestDatasetExport>(`/api/datasets/${id}/export`);

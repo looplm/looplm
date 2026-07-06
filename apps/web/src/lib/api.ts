@@ -12,6 +12,8 @@ export type {
   TestCaseSuggestion,
   TestCaseCreateBody,
   TestDatasetExport,
+  ExpectedUrlsSyncRequest,
+  ExpectedUrlsSyncResponse,
   DuplicateMember,
   DuplicateGroup,
   DuplicatesResponse,

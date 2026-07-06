@@ -16,13 +16,17 @@ from app.models.project import Project
 from app.schemas.datasets import (
     ExpectedUrlsAdd,
     ExpectedUrlsResponse,
+    ExpectedUrlsSyncCase,
+    ExpectedUrlsSyncRequest,
+    ExpectedUrlsSyncResponse,
     TestCaseCreate,
     TestCaseItem,
     TestCaseUpdate,
 )
+from app.services.chunk_gold import gold_relevant_urls_by_test
 from app.services.failure_pattern import normalize_result_test_id
 from app.services.rag_pipeline import build_rag_pipeline, rag_pipeline_summary
-from app.services.retrieval_config import get_rag_span_names
+from app.services.retrieval_config import get_rag_span_names, normalize_source_url
 
 from .dataset_helpers import _tc_to_item
 
@@ -229,6 +233,89 @@ async def add_expected_urls(
     await db.flush()
     await db.refresh(tc)
     return _tc_to_item(tc)
+
+
+@router.post(
+    "/{dataset_id}/cases/expected-urls/sync-from-labels",
+    response_model=ExpectedUrlsSyncResponse,
+    dependencies=[require_write("evaluate", "datasets")],
+)
+async def sync_expected_urls_from_labels(
+    dataset_id: UUID,
+    body: ExpectedUrlsSyncRequest,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Rebuild ``expected_page_urls`` from the gold-relevant chunk labels.
+
+    ``replace`` discards a case's current URL list and recomputes it from the labels; ``merge``
+    appends label-derived URLs the case doesn't already have (compared after URL
+    normalization). With no ``test_id`` every case in the dataset is synced. A case whose
+    labels yield no relevant URL is never wiped: dataset-wide it is reported in ``skipped``,
+    and a single-case replace fails with 409 so a typo can't silently clear ground truth.
+    """
+    ds_result = await db.execute(
+        select(TestDataset).where(TestDataset.id == dataset_id, TestDataset.project_id == project.id)
+    )
+    if not ds_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found"}})
+
+    case_filter = [TestCase.dataset_id == dataset_id]
+    if body.test_id:
+        case_filter.append(TestCase.test_id == normalize_result_test_id(body.test_id))
+    cases = (await db.execute(select(TestCase).where(*case_filter))).scalars().all()
+    if body.test_id and not cases:
+        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Test case not found"}})
+
+    derived = await gold_relevant_urls_by_test(db, project, body.gold_source)
+
+    updated: list[ExpectedUrlsSyncCase] = []
+    unchanged: list[str] = []
+    skipped: list[str] = []
+    for tc in cases:
+        label_urls = derived.get(tc.test_id) or []
+        if not label_urls:
+            if body.test_id and body.mode == "replace":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": {
+                            "code": "NO_LABELED_URLS",
+                            "message": "No chunks with a source URL are labeled relevant for this test case",
+                        }
+                    },
+                )
+            skipped.append(tc.test_id)
+            continue
+
+        current = list(tc.expected_page_urls or [])
+        if body.mode == "replace":
+            new_urls = label_urls
+        else:
+            existing_norm = {normalize_source_url(u.strip()) for u in current if u.strip()}
+            new_urls = current + [
+                u for u in label_urls if normalize_source_url(u) not in existing_norm
+            ]
+
+        if new_urls == current:
+            unchanged.append(tc.test_id)
+            continue
+        current_norm = {normalize_source_url(u.strip()) for u in current if u.strip()}
+        new_norm = {normalize_source_url(u) for u in new_urls}
+        tc.expected_page_urls = new_urls
+        updated.append(
+            ExpectedUrlsSyncCase(
+                test_id=tc.test_id,
+                expected_page_urls=new_urls,
+                added=len(new_norm - current_norm),
+                removed=len(current_norm - new_norm),
+            )
+        )
+
+    await db.flush()
+    return ExpectedUrlsSyncResponse(
+        mode=body.mode, updated=updated, unchanged=unchanged, skipped=skipped
+    )
 
 
 @router.delete(

@@ -12,9 +12,10 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.chunk_labels import ChunkGoldLabel, ChunkRelevanceLabel
+from app.models.chunk_labels import RELEVANT_GRADE, ChunkGoldLabel, ChunkRelevanceLabel
 from app.models.project import Project
 from app.services.chunk_agreement import resolve_gold
+from app.services.retrieval_config import normalize_source_url
 
 
 async def resolve_project_gold(
@@ -66,3 +67,59 @@ async def resolve_project_gold(
         ),
         overrides,
     )
+
+
+async def gold_relevant_urls_by_test(
+    db: AsyncSession, project: Project, gold_source: str = "human"
+) -> dict[str, list[str]]:
+    """Expected source URLs per test case, derived from its gold-relevant chunk labels.
+
+    Resolves gold with :func:`resolve_project_gold`, then maps each gold-relevant chunk to the
+    URL snapshot on its label rows. URLs are deduped by ``normalize_source_url`` (keeping the
+    raw form, matching how expected_page_urls are stored) and ordered by gold grade descending,
+    then URL, so the most relevant documents lead. Chunks without a URL snapshot are skipped —
+    not every index document carries a source URL. Test cases with no usable URL are absent
+    from the result, so callers can tell "nothing labeled relevant" from "empty list".
+    """
+    relevant_by_test, _nonrelevant, grade_by_test = await resolve_project_gold(
+        db, project, gold_source
+    )
+    if not relevant_by_test:
+        return {}
+
+    rows = (
+        await db.execute(
+            select(
+                ChunkRelevanceLabel.test_id,
+                ChunkRelevanceLabel.chunk_id,
+                ChunkRelevanceLabel.url,
+            ).where(
+                ChunkRelevanceLabel.project_id == project.id,
+                ChunkRelevanceLabel.url.is_not(None),
+            )
+        )
+    ).all()
+    url_by_key: dict[tuple[str, str], str] = {}
+    for test_id, chunk_id, url in rows:
+        if isinstance(url, str) and url.strip():
+            url_by_key.setdefault((test_id, chunk_id), url.strip())
+
+    out: dict[str, list[str]] = {}
+    for test_id, chunk_ids in relevant_by_test.items():
+        grades = grade_by_test.get(test_id, {})
+        # normalized URL -> (best gold grade across its chunks, raw URL to store)
+        best: dict[str, tuple[int, str]] = {}
+        for chunk_id in chunk_ids:
+            raw = url_by_key.get((test_id, chunk_id))
+            if not raw:
+                continue
+            norm = normalize_source_url(raw)
+            if not norm:
+                continue
+            grade = grades.get(chunk_id, RELEVANT_GRADE)
+            current = best.get(norm)
+            if current is None or grade > current[0]:
+                best[norm] = (grade, raw)
+        if best:
+            out[test_id] = [url for _grade, url in sorted(best.values(), key=lambda t: (-t[0], t[1]))]
+    return out

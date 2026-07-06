@@ -708,6 +708,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/datasets/{dataset_id}/cases/expected-urls/sync-from-labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Expected Urls From Labels
+         * @description Rebuild ``expected_page_urls`` from the gold-relevant chunk labels.
+         *
+         *     ``replace`` discards a case's current URL list and recomputes it from the labels; ``merge``
+         *     appends label-derived URLs the case doesn't already have (compared after URL
+         *     normalization). With no ``test_id`` every case in the dataset is synced. A case whose
+         *     labels yield no relevant URL is never wiped: dataset-wide it is reported in ``skipped``,
+         *     and a single-case replace fails with 409 so a typo can't silently clear ground truth.
+         */
+        post: operations["sync_expected_urls_from_labels_api_datasets__dataset_id__cases_expected_urls_sync_from_labels_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/datasets/{dataset_id}/cases/from-suggestion": {
         parameters: {
             query?: never;
@@ -6334,6 +6360,60 @@ export interface components {
             expected_page_urls: string[];
             /** Test Id */
             test_id: string;
+        };
+        /**
+         * ExpectedUrlsSyncCase
+         * @description One synced test case: its new URL list and how it changed.
+         */
+        ExpectedUrlsSyncCase: {
+            /** Added */
+            added: number;
+            /** Expected Page Urls */
+            expected_page_urls: string[];
+            /** Removed */
+            removed: number;
+            /** Test Id */
+            test_id: string;
+        };
+        /**
+         * ExpectedUrlsSyncRequest
+         * @description Sync expected_page_urls from gold-relevant chunk labels.
+         *
+         *     ``test_id`` targets one case (variant suffix tolerated); omitted, every case in the
+         *     dataset with labeled-relevant URLs is synced. ``replace`` discards the current list and
+         *     rebuilds it from the labels; ``merge`` only appends URLs the case doesn't already have.
+         *     ``gold_source`` picks whose labels resolve to gold (human | ai | both).
+         */
+        ExpectedUrlsSyncRequest: {
+            /**
+             * Gold Source
+             * @default human
+             */
+            gold_source: string;
+            /**
+             * Mode
+             * @default merge
+             */
+            mode: string;
+            /** Test Id */
+            test_id?: string | null;
+        };
+        /**
+         * ExpectedUrlsSyncResponse
+         * @description Outcome of a label sync: what changed, what was already in sync, what had no labels.
+         *
+         *     ``skipped`` lists cases with no gold-relevant labeled URL — they are never wiped, even in
+         *     replace mode.
+         */
+        ExpectedUrlsSyncResponse: {
+            /** Mode */
+            mode: string;
+            /** Skipped */
+            skipped: string[];
+            /** Unchanged */
+            unchanged: string[];
+            /** Updated */
+            updated: components["schemas"]["ExpectedUrlsSyncCase"][];
         };
         /** ExperimentCreate */
         ExperimentCreate: {
@@ -12613,6 +12693,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestCaseItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_expected_urls_from_labels_api_datasets__dataset_id__cases_expected_urls_sync_from_labels_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedUrlsSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpectedUrlsSyncResponse"];
                 };
             };
             /** @description Validation Error */
