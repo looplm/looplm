@@ -42,6 +42,7 @@ export function SyncExpectedUrlsModal({
   onSynced: () => void;
 }) {
   const [mode, setMode] = useState<SyncMode>("replace");
+  const [includeAi, setIncludeAi] = useState(false);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<SyncSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,16 +58,17 @@ export function SyncExpectedUrlsModal({
   async function handleSync() {
     setRunning(true);
     setError(null);
+    const gold_source = includeAi ? "both" : "human";
     try {
       if (datasetId) {
-        const res = await syncExpectedUrlsFromLabels(datasetId, { mode, gold_source: "human" });
+        const res = await syncExpectedUrlsFromLabels(datasetId, { mode, gold_source });
         setResult({
           updated: res.updated.length,
           unchanged: res.unchanged.length,
           skipped: res.skipped.length,
         });
       } else {
-        const res = await syncAllExpectedUrlsFromLabels({ mode, gold_source: "human" });
+        const res = await syncAllExpectedUrlsFromLabels({ mode, gold_source });
         setResult({
           updated: res.total_updated,
           unchanged: res.total_unchanged,
@@ -127,6 +129,22 @@ export function SyncExpectedUrlsModal({
                     </span>
                   </label>
                 ))}
+                <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 dark:border-slate-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={includeAi}
+                    onChange={(e) => setIncludeAi(e.target.checked)}
+                    className="mt-1 rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium">Include AI judge labels</span>
+                    <span className="block text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+                      Count the AI judge as an additional annotator when resolving which chunks
+                      are relevant (majority vote; adjudicated gold verdicts always win).
+                      Without this, only human labels count.
+                    </span>
+                  </span>
+                </label>
               </div>
             )}
             {result && (
