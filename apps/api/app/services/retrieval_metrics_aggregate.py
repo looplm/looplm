@@ -235,9 +235,34 @@ async def compute_and_store_run_retrieval_summary(
             await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
         ).scalars().all()
         negatives = await negative_test_ids(db, project_id=project_id)
-        run.retrieval_summary = aggregate_run_retrieval_metrics(
+        summary = aggregate_run_retrieval_metrics(
             run, results, slice_by_test, exclude_test_ids=negatives
         ).model_dump(mode="json")
+
+        # Overlay retrieval-path health derived from the target's per-result
+        # diagnostics (result_metadata["retrieval_mode"]). A `keyword-fallback`
+        # result means the target degraded to keyword-only retrieval (embeddings
+        # throttled) — unrepresentative of prod. Surface the breakdown on the run
+        # summary and warn so degraded runs can be flagged/excluded.
+        mode_counts: dict[str, int] = {}
+        for r in results:
+            mode = (r.result_metadata or {}).get("retrieval_mode")
+            if isinstance(mode, str) and mode:
+                mode_counts[mode] = mode_counts.get(mode, 0) + 1
+        if mode_counts:
+            summary["retrieval_mode_counts"] = mode_counts
+            degraded = mode_counts.get("keyword-fallback", 0)
+            if degraded:
+                logger.warning(
+                    "Run %s: %d/%d results used keyword-only retrieval (target embeddings "
+                    "throttled — degraded, not representative of prod); exclude from quality "
+                    "comparison",
+                    run.id,
+                    degraded,
+                    len(results),
+                )
+
+        run.retrieval_summary = summary
     except Exception as exc:  # noqa: BLE001
         logger.warning("Retrieval snapshot failed for run %s: %s", run.id, exc)
 

@@ -54,6 +54,19 @@ def _build_result_metadata(raw_response: str, *, payload_key: str | None = None)
     chunks = extract_retrieved_chunks(parsed, payload_key=payload_key)
     if chunks:
         meta["retrieved_chunks"] = chunks
+    # Retrieval-path diagnostics from the target (rde-gpt exposes these on its eval
+    # endpoint). ``retrievalMode == "keyword-fallback"`` means the target's vector
+    # search failed for every query (e.g. its shared embeddings deployment throttled)
+    # and it silently degraded to keyword-only retrieval — no vector, no reranker,
+    # and its relevance filter becomes a no-op. Such a run is NOT representative of
+    # prod, so surfacing the mode lets reviewers exclude it from quality comparisons.
+    if isinstance(parsed, dict):
+        diagnostics = parsed.get("retrievalDiagnostics")
+        if isinstance(diagnostics, dict):
+            meta["retrieval_diagnostics"] = diagnostics
+            mode = diagnostics.get("retrievalMode")
+            if isinstance(mode, str) and mode:
+                meta["retrieval_mode"] = mode
     return meta
 
 
