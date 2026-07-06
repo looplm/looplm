@@ -364,6 +364,8 @@ export interface RetrievalRunMetrics {
   run_name?: string | null;
   total_cases: number;
   evaluated_cases: number;
+  // Cases tagged no-retrieval-expected, dropped before aggregation (not in total_cases).
+  negative_cases_excluded?: number;
   ks: number[];
   recall_at_k: Record<string, number>;
   precision_at_k: Record<string, number>;

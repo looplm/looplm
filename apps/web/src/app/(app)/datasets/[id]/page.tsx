@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { StatCard } from "@/components/eval-shared";
 import { TestCaseConditions } from "@/components/test-case-conditions";
+import { NO_RETRIEVAL_TAG, isNoRetrievalExpected } from "@/lib/test-case-tags";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { TestCaseModal, type TestCaseFormData } from "./test-case-modal";
 import { NeedsWorkModal } from "./needs-work-modal";
@@ -107,6 +108,8 @@ export default function DatasetDetailPage() {
         ...extraMetadata
       } = config;
 
+      // The reserved no-retrieval-expected tag is the only tag the UI edits; keep any others.
+      const otherTags = (editingCase?.tags ?? []).filter((t) => t !== NO_RETRIEVAL_TAG);
       const body: Partial<TestCaseCreateBody> & { status?: string; status_note?: string | null } = {
         test_id: form.test_id,
         prompt: form.prompt,
@@ -114,11 +117,13 @@ export default function DatasetDetailPage() {
         team_filter: (team_filter as string[]) || [],
         tag_filter: (tag_filter as string[]) || [],
         expected_sources: (expected_sources as string[]) || [],
-        expected_page_urls: (expected_page_urls as string[]) || [],
+        // A negative case must carry no retrieval ground truth.
+        expected_page_urls: form.no_retrieval ? [] : (expected_page_urls as string[]) || [],
         expected_source_types: (expected_source_types as string[]) || [],
         max_answer_length: (max_answer_length as number) ?? null,
         context_filters: (context_filters as Record<string, string>) || {},
         metadata: Object.keys(extraMetadata).length > 0 ? extraMetadata : {},
+        tags: form.no_retrieval ? [...otherTags, NO_RETRIEVAL_TAG] : otherTags,
       };
 
       if (editingCase) {
@@ -274,7 +279,17 @@ export default function DatasetDetailPage() {
                   </td>
                   <td className="px-4 py-3 max-w-xs truncate">{tc.prompt}</td>
                   <td className="px-4 py-3">
-                    <TestCaseConditions data={tc} />
+                    <div className="flex flex-wrap items-center gap-1">
+                      {isNoRetrievalExpected(tc.tags) && (
+                        <span
+                          title="Negative case: intentionally retrieves nothing; excluded from retrieval metrics"
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300"
+                        >
+                          no retrieval
+                        </span>
+                      )}
+                      <TestCaseConditions data={tc} />
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">

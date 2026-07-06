@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chunk_labels import DEFAULT_SLICE, TestCaseLabelingStatus
+from app.models.datasets import TestCase, TestDataset, is_no_retrieval_expected
 from app.models.evaluations import EvalResult, EvalRun
 from app.schemas.retrieval import (
     ByStageCaseMetrics,
@@ -29,6 +30,7 @@ from app.schemas.retrieval import (
     SliceMetrics,
     StageMetrics,
 )
+from app.services.failure_pattern import normalize_result_test_id
 from app.services.retrieval_metrics import (
     compute_bpref,
     compute_condensed_ndcg_at_k,
@@ -188,6 +190,29 @@ def build_by_stage_metrics(
     return stages, rows, evaluated
 
 
+async def negative_test_ids(
+    db: AsyncSession,
+    *,
+    project_id: UUID | None = None,
+    dataset_ids: list[UUID] | None = None,
+) -> set[str]:
+    """test_ids tagged no-retrieval-expected: negative cases whose queries must retrieve nothing.
+
+    They carry no meaningful retrieval ground truth, so every metrics path drops them before
+    aggregation (and reports the count). Tag membership is checked in Python, not SQL, so the
+    JSONB column stays portable to the SQLite test setup.
+    """
+    stmt = select(TestCase.test_id, TestCase.tags)
+    if dataset_ids is not None:
+        stmt = stmt.where(TestCase.dataset_id.in_(dataset_ids))
+    else:
+        stmt = stmt.join(TestDataset, TestCase.dataset_id == TestDataset.id).where(
+            TestDataset.project_id == project_id
+        )
+    rows = (await db.execute(stmt)).all()
+    return {tid for tid, tags in rows if is_no_retrieval_expected(tags)}
+
+
 async def compute_and_store_run_retrieval_summary(
     db: AsyncSession, run: EvalRun, project_id: UUID
 ) -> None:
@@ -209,8 +234,9 @@ async def compute_and_store_run_retrieval_summary(
         results = (
             await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
         ).scalars().all()
+        negatives = await negative_test_ids(db, project_id=project_id)
         run.retrieval_summary = aggregate_run_retrieval_metrics(
-            run, results, slice_by_test
+            run, results, slice_by_test, exclude_test_ids=negatives
         ).model_dump(mode="json")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Retrieval snapshot failed for run %s: %s", run.id, exc)
@@ -410,10 +436,21 @@ def aggregate_run_retrieval_metrics(
     results: Iterable[EvalResult],
     slice_by_test: dict[str, str] | None = None,
     ks: tuple[int, ...] = AGG_KS,
+    exclude_test_ids: set[str] | None = None,
 ) -> RetrievalRunMetrics:
-    """Run summary from the ``contains_urls`` grader's per-case URL captures."""
+    """Run summary from the ``contains_urls`` grader's per-case URL captures.
+
+    ``exclude_test_ids`` (normalized TestCase test_ids) drops negative cases before
+    aggregation, even if stale ground-truth URLs are still attached to their results.
+    """
     slice_by_test = slice_by_test or {}
-    result_list = list(results)
+    excluded = 0
+    result_list = []
+    for r in results:
+        if exclude_test_ids and normalize_result_test_id(r.test_id) in exclude_test_ids:
+            excluded += 1
+            continue
+        result_list.append(r)
     rows: list[dict[str, Any]] = []
     for r in result_list:
         details = _find_retrieval_details(r.graders)
@@ -429,7 +466,9 @@ def aggregate_run_retrieval_metrics(
                 "slice": slice_by_test.get(r.test_id),
             }
         )
-    return _aggregate_rows(str(run.id), run.name, len(result_list), rows, ks)
+    summary = _aggregate_rows(str(run.id), run.name, len(result_list), rows, ks)
+    summary.negative_cases_excluded = excluded
+    return summary
 
 
 def aggregate_retrieval_metrics_from_labels(

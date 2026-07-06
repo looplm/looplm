@@ -616,7 +616,8 @@ export interface paths {
          *
          *     One-click variant of the per-dataset sync: same merge/replace semantics, applied to all
          *     test cases of all datasets, with the outcome grouped per dataset. Cases without
-         *     labeled-relevant URLs are skipped, never wiped. Datasets without test cases are omitted.
+         *     labeled-relevant URLs are skipped, never wiped; cases tagged no-retrieval-expected are
+         *     reported in ``flagged`` and never touched. Datasets without test cases are omitted.
          */
         post: operations["sync_expected_urls_from_labels_all_datasets_api_datasets_expected_urls_sync_from_labels_post"];
         delete?: never;
@@ -750,6 +751,8 @@ export interface paths {
          *     normalization). With no ``test_id`` every case in the dataset is synced. A case whose
          *     labels yield no relevant URL is never wiped: dataset-wide it is reported in ``skipped``,
          *     and a single-case replace fails with 409 so a typo can't silently clear ground truth.
+         *     Cases tagged no-retrieval-expected are never synced: dataset-wide they are reported in
+         *     ``flagged``, single-case they fail with 409.
          */
         post: operations["sync_expected_urls_from_labels_api_datasets__dataset_id__cases_expected_urls_sync_from_labels_post"];
         delete?: never;
@@ -4721,6 +4724,8 @@ export interface components {
              * @default 0
              */
             judged: number;
+            /** Skipped Reason */
+            skipped_reason?: string | null;
             /** Test Id */
             test_id: string;
         };
@@ -4986,6 +4991,11 @@ export interface components {
              * @default 1
              */
             min_grade: number;
+            /**
+             * Negative Cases Excluded
+             * @default 0
+             */
+            negative_cases_excluded: number;
             /** Stages */
             stages?: components["schemas"]["StageMetrics"][];
             /**
@@ -6423,6 +6433,11 @@ export interface components {
             datasets: components["schemas"]["ExpectedUrlsSyncDatasetResult"][];
             /** Mode */
             mode: string;
+            /**
+             * Total Flagged
+             * @default 0
+             */
+            total_flagged: number;
             /** Total Skipped */
             total_skipped: number;
             /** Total Unchanged */
@@ -6456,6 +6471,8 @@ export interface components {
             dataset_id: string;
             /** Dataset Name */
             dataset_name: string;
+            /** Flagged */
+            flagged?: string[];
             /** Skipped */
             skipped: string[];
             /** Unchanged */
@@ -6491,9 +6508,12 @@ export interface components {
          * @description Outcome of a label sync: what changed, what was already in sync, what had no labels.
          *
          *     ``skipped`` lists cases with no gold-relevant labeled URL — they are never wiped, even in
-         *     replace mode.
+         *     replace mode. ``flagged`` lists cases tagged no-retrieval-expected — negative cases the
+         *     sync never touches, regardless of labels.
          */
         ExpectedUrlsSyncResponse: {
+            /** Flagged */
+            flagged?: string[];
             /** Mode */
             mode: string;
             /** Skipped */
@@ -9758,6 +9778,11 @@ export interface components {
             ndcg_at_k?: {
                 [key: string]: number;
             };
+            /**
+             * Negative Cases Excluded
+             * @default 0
+             */
+            negative_cases_excluded: number;
             /** Precision At K */
             precision_at_k?: {
                 [key: string]: number;

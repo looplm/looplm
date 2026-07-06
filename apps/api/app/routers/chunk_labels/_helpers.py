@@ -118,6 +118,17 @@ async def _dataset_case_query(db: AsyncSession, dataset_id: UUID, test_id: str) 
     ).scalar_one_or_none()
 
 
+async def _dataset_case_tags(db: AsyncSession, dataset_id: UUID, test_id: str) -> list:
+    """The tags list for one test case in a dataset, or [] if absent."""
+    return (
+        await db.execute(
+            select(TestCase.tags).where(
+                TestCase.dataset_id == dataset_id, TestCase.test_id == test_id
+            )
+        )
+    ).scalar_one_or_none() or []
+
+
 async def _dataset_case_expected_answer(
     db: AsyncSession, dataset_id: UUID, test_id: str
 ) -> str | None:

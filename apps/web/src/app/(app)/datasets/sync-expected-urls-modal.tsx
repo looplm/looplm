@@ -25,7 +25,8 @@ type SyncSummary = {
   updated: number;
   unchanged: number;
   skipped: number;
-  perDataset?: { name: string; updated: number; unchanged: number; skipped: number }[];
+  flagged: number;
+  perDataset?: { name: string; updated: number; unchanged: number; skipped: number; flagged: number }[];
 };
 
 /**
@@ -66,6 +67,7 @@ export function SyncExpectedUrlsModal({
           updated: res.updated.length,
           unchanged: res.unchanged.length,
           skipped: res.skipped.length,
+          flagged: res.flagged?.length ?? 0,
         });
       } else {
         const res = await syncAllExpectedUrlsFromLabels({ mode, gold_source });
@@ -73,11 +75,13 @@ export function SyncExpectedUrlsModal({
           updated: res.total_updated,
           unchanged: res.total_unchanged,
           skipped: res.total_skipped,
+          flagged: res.total_flagged ?? 0,
           perDataset: res.datasets.map((d) => ({
             name: d.dataset_name,
             updated: d.updated.length,
             unchanged: d.unchanged.length,
             skipped: d.skipped.length,
+            flagged: d.flagged?.length ?? 0,
           })),
         });
       }
@@ -163,12 +167,18 @@ export function SyncExpectedUrlsModal({
                     {result.skipped} skipped (no chunks labeled relevant), left unchanged
                   </p>
                 )}
+                {result.flagged > 0 && (
+                  <p className="text-gray-500 dark:text-slate-400">
+                    {result.flagged} skipped (no retrieval expected), never synced
+                  </p>
+                )}
                 {result.perDataset && result.perDataset.length > 0 && (
                   <div className="pt-2 mt-2 border-t border-gray-200 dark:border-slate-700 space-y-0.5 max-h-48 overflow-y-auto">
                     {result.perDataset.map((d) => (
                       <p key={d.name} className="text-xs text-gray-500 dark:text-slate-400">
                         <span className="font-medium text-gray-700 dark:text-slate-300">{d.name}</span>
                         : {d.updated} updated, {d.unchanged} in sync, {d.skipped} skipped
+                        {d.flagged > 0 ? `, ${d.flagged} no-retrieval` : ""}
                       </p>
                     ))}
                   </div>

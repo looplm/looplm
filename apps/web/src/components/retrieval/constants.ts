@@ -13,7 +13,7 @@ export const EXPLAIN = {
   recall:
     "Of all the chunks that should have been found, this is the share that showed up in the top results. Higher is better.",
   ndcg:
-    "Checks whether the most useful chunks are ranked near the top, not just present somewhere. 100% means the best ones sit at the very top.",
+    "Checks whether the most useful chunks are ranked near the top, not just present somewhere. 100% means the best ones sit at the very top. Always uses the full graded labels (1 to 3) as weights, so this card does not change with the Min grade selector.",
   mrr:
     "Looks at how high the first correct chunk appears. 1.00 means it was always the very first result, 0.50 means usually second, and so on.",
   hit:
@@ -35,7 +35,7 @@ export const EXPLAIN = {
   bpref:
     "A recall-style score that ignores chunks nobody has judged yet, so it stays fair when only part of the pool is labeled. Best used while judging is still incomplete.",
   cndcg:
-    "Like nDCG, but it only counts chunks that have actually been judged — so unlabeled chunks don't distort the ranking score during incomplete judging.",
+    "Like nDCG, but it only counts chunks that have actually been judged — so unlabeled chunks don't distort the ranking score during incomplete judging. Which chunks count as judged follows the Min grade selector, but the rank weights always use the full graded labels (1 to 3).",
   method:
     "Which retrieval method produced these numbers. The Overall view scores a single ranking; use By stage to compare each retrieval method (sparse, dense, RRF, reranked) side by side.",
 };

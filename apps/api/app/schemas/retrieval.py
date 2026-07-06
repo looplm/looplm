@@ -307,6 +307,8 @@ class AiJudgeResponse(BaseModel):
     # chunk_id -> AI-assigned graded relevance 0..3.
     grades: dict[str, int] = Field(default_factory=dict)
     judged: int = 0
+    # Set when the case was not judged at all (e.g. flagged no-retrieval-expected).
+    skipped_reason: str | None = None
 
 
 class AiJudgePromptBatch(BaseModel):
@@ -483,6 +485,8 @@ class RetrievalRunMetrics(BaseModel):
     run_name: str | None = None
     total_cases: int = 0
     evaluated_cases: int = 0
+    # Cases tagged no-retrieval-expected, dropped before aggregation (not in total_cases).
+    negative_cases_excluded: int = 0
     ks: list[int] = Field(default_factory=list)
     recall_at_k: dict[str, float] = Field(default_factory=dict)
     precision_at_k: dict[str, float] = Field(default_factory=dict)
@@ -558,6 +562,8 @@ class ByStageMetricsResponse(BaseModel):
     ks: list[int] = Field(default_factory=list)
     total_cases: int = 0
     evaluated_cases: int = 0
+    # Cases tagged no-retrieval-expected, dropped before aggregation (not in total_cases).
+    negative_cases_excluded: int = 0
     stages: list[StageMetrics] = Field(default_factory=list)
     cases: list[ByStageCaseMetrics] = Field(default_factory=list)
     # ISO-8601 UTC time the metrics were computed (set when cached).

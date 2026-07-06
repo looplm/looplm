@@ -28,6 +28,7 @@ function formFromSuggestion(sug: TestCaseSuggestion): TestCaseFormData {
     config_json: Object.keys(config).length > 0
       ? JSON.stringify(config, null, 2)
       : "",
+    no_retrieval: false,
   };
 }
 

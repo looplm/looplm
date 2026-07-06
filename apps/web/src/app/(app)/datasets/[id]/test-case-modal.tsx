@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import type { TestCaseItem } from "@/lib/api";
 import { ConfigEditor } from "@/components/config-editor";
+import { isNoRetrievalExpected } from "@/lib/test-case-tags";
 
 export interface TestCaseFormData {
   test_id: string;
   prompt: string;
   expected_answer: string;
   config_json: string;
+  no_retrieval: boolean;
   reactivate?: boolean;
 }
 
@@ -31,6 +33,7 @@ export function emptyForm(): TestCaseFormData {
     prompt: "",
     expected_answer: "",
     config_json: "",
+    no_retrieval: false,
   };
 }
 
@@ -51,6 +54,7 @@ export function formFromTestCase(tc: TestCaseItem): TestCaseFormData {
     config_json: Object.keys(config).length > 0
       ? JSON.stringify(config, null, 2)
       : "",
+    no_retrieval: isNoRetrievalExpected(tc.tags),
   };
 }
 
@@ -149,6 +153,26 @@ export function TestCaseModal({
                 className="w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm"
                 placeholder="(optional)"
               />
+            </div>
+
+            {/* Negative case flag */}
+            <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-3">
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.no_retrieval}
+                  onChange={(e) => setForm({ ...form, no_retrieval: e.target.checked })}
+                  className="mt-0.5 rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>
+                  <span className="block font-medium">No retrieval expected (negative case)</span>
+                  <span className="block text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+                    The query intentionally has no relevant documents, e.g. a UI command.
+                    Excluded from retrieval metrics; the expected-URL sync and the AI judge
+                    skip it. Expected page URLs are cleared on save.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <hr className="border-gray-100 dark:border-slate-800" />

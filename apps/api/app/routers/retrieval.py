@@ -39,7 +39,10 @@ from app.services.retrieval_labels_metrics import (
     resolve_datasets,
     resolve_slices,
 )
-from app.services.retrieval_metrics_aggregate import aggregate_run_retrieval_metrics
+from app.services.retrieval_metrics_aggregate import (
+    aggregate_run_retrieval_metrics,
+    negative_test_ids,
+)
 from app.services.retrieval_metrics_job import run_metrics_job
 from app.services.retrieval_pipeline_aggregate import build_retrieval_pipeline_aggregate
 from app.services.retrieval_targets import (
@@ -165,7 +168,8 @@ async def get_retrieval_metrics(
     results = (
         await db.execute(select(EvalResult).where(EvalResult.run_id == run.id))
     ).scalars().all()
-    return aggregate_run_retrieval_metrics(run, results, slice_by_test)
+    negatives = await negative_test_ids(db, project_id=project.id)
+    return aggregate_run_retrieval_metrics(run, results, slice_by_test, exclude_test_ids=negatives)
 
 
 @router.get("/retrieval-metrics/by-stage", response_model=ByStageMetricsResponse)

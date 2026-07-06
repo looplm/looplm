@@ -36,6 +36,7 @@ from app.services.retrieval_metrics_aggregate import (
     aggregate_retrieval_metrics_from_labels,
     build_by_stage_metrics,
     compute_rerank_threshold_sweep,
+    negative_test_ids,
 )
 from app.services.retrieval_metrics_cache import get_cached, result_cache_key, store
 from app.services.retrieval_probe import cached_probe_chunk_ids
@@ -151,6 +152,12 @@ async def compute_overall_labels_metrics(
     cases = await dataset_cases(db, dataset_uuids)
     ds_id, ds_name = datasets_label(datasets)
 
+    # Negative cases (tagged no-retrieval-expected) carry no meaningful gold; drop them before
+    # aggregation even when stray labels exist for them, and report the count.
+    negatives = await negative_test_ids(db, dataset_ids=dataset_uuids)
+    excluded_negative = sum(1 for tid, _ in cases if tid in negatives)
+    cases = [(tid, q) for tid, q in cases if tid not in negatives]
+
     relevant_by_test, nonrelevant_by_test, grade_by_test = await resolve_project_gold(
         db, project, gold_source, min_grade
     )
@@ -172,6 +179,7 @@ async def compute_overall_labels_metrics(
             run_id=ds_id,
             run_name=ds_name,
             total_cases=len(cases),
+            negative_cases_excluded=excluded_negative,
             ks=list(AGG_KS),
         )
 
@@ -213,6 +221,7 @@ async def compute_overall_labels_metrics(
         dataset_name=ds_name,
         dataset_by_test=await resolve_case_datasets(db, dataset_uuids),
     )
+    result.negative_cases_excluded = excluded_negative
     # Only cache a result that actually measured something; caching an "unavailable" (no gold / no
     # index) result would hide labeling or index-connection progress for the whole TTL.
     if result.available:
@@ -248,6 +257,11 @@ async def compute_by_stage_metrics(
 
     ds_id, ds_name = datasets_label(datasets)
     cases = await dataset_cases(db, dataset_uuids)
+
+    # Same negative-case exclusion as the overall metrics (see compute_overall_labels_metrics).
+    negatives = await negative_test_ids(db, dataset_ids=dataset_uuids)
+    excluded_negative = sum(1 for tid, _ in cases if tid in negatives)
+    cases = [(tid, q) for tid, q in cases if tid not in negatives]
 
     relevant_by_test, nonrelevant_by_test, grade_by_test = await resolve_project_gold(
         db, project, gold_source, min_grade
@@ -327,6 +341,7 @@ async def compute_by_stage_metrics(
         ks=list(AGG_KS),
         total_cases=len(cases),
         evaluated_cases=evaluated,
+        negative_cases_excluded=excluded_negative,
         stages=stages,
         cases=case_rows_out,
     )

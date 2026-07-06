@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import get_db
 from app.models.chunk_labels import AI_ANNOTATOR, ChunkRelevanceLabel
+from app.models.datasets import NO_RETRIEVAL_TAG, is_no_retrieval_expected
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import (
@@ -40,6 +41,7 @@ from ._helpers import (
     _dataset_case_agentic_queries,
     _dataset_case_expected_answer,
     _dataset_case_query,
+    _dataset_case_tags,
     _resolve_dataset,
     assemble_case_pool,
     ensure_case_agentic_queries,
@@ -71,14 +73,6 @@ async def ai_judge_case(
     model) but excluded from the gold that feeds the retrieval metrics. Re-running re-grades the
     same chunks (the AI annotator owns one label per chunk).
     """
-    try:
-        llm = AnalysisLlmService(user_settings=user.settings, project_settings=project.settings)
-    except AnalysisLlmConfigError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"error": {"code": "LLM_NOT_CONFIGURED", "message": str(exc)}},
-        ) from exc
-
     # Resolve the dataset case's query, then judge the same pooled chunks the labeler sees.
     dataset = await _resolve_dataset(db, project, _as_uuid(body.dataset_id))
     if dataset is None:
@@ -92,6 +86,19 @@ async def ai_judge_case(
             status_code=404,
             detail={"error": {"code": "NOT_FOUND", "message": "Test case not found in dataset"}},
         )
+    # Negative cases must never accumulate AI relevance labels: those labels would feed
+    # gold_source=ai/both and the expected-URL sync, attaching ground truth to a query that
+    # by design retrieves nothing.
+    if is_no_retrieval_expected(await _dataset_case_tags(db, dataset.id, body.test_id)):
+        return AiJudgeResponse(test_id=body.test_id, skipped_reason=NO_RETRIEVAL_TAG)
+
+    try:
+        llm = AnalysisLlmService(user_settings=user.settings, project_settings=project.settings)
+    except AnalysisLlmConfigError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "LLM_NOT_CONFIGURED", "message": str(exc)}},
+        ) from exc
 
     # Judge the *same* chunks the labeler sees, including any agentic-pooled candidates. Plan the
     # agentic queries here if they were never planned (e.g. a batch judge over cases never opened in

@@ -47,6 +47,13 @@ export function OverallResults({
       <div className="text-xs text-gray-400 dark:text-slate-500 mb-3">
         {overall.evaluated_cases} of {overall.total_cases} cases have{" "}
         {source === "labels" ? "relevance labels" : "ground-truth URLs"}
+        {(overall.negative_cases_excluded ?? 0) > 0 && (
+          <>
+            {" "}&middot; {overall.negative_cases_excluded} negative{" "}
+            {overall.negative_cases_excluded === 1 ? "case" : "cases"} (no retrieval expected)
+            excluded
+          </>
+        )}
       </div>
 
       {/* Which retrieval method these numbers reflect — the Overall view collapses to a single

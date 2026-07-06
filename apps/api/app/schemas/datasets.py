@@ -135,13 +135,15 @@ class ExpectedUrlsSyncResponse(BaseModel):
     """Outcome of a label sync: what changed, what was already in sync, what had no labels.
 
     ``skipped`` lists cases with no gold-relevant labeled URL — they are never wiped, even in
-    replace mode.
+    replace mode. ``flagged`` lists cases tagged no-retrieval-expected — negative cases the
+    sync never touches, regardless of labels.
     """
 
     mode: str
     updated: list[ExpectedUrlsSyncCase]
     unchanged: list[str]
     skipped: list[str]
+    flagged: list[str] = Field(default_factory=list)
 
 
 class ExpectedUrlsSyncAllRequest(BaseModel):
@@ -159,6 +161,7 @@ class ExpectedUrlsSyncDatasetResult(BaseModel):
     updated: list[ExpectedUrlsSyncCase]
     unchanged: list[str]
     skipped: list[str]
+    flagged: list[str] = Field(default_factory=list)
 
 
 class ExpectedUrlsSyncAllResponse(BaseModel):
@@ -169,6 +172,7 @@ class ExpectedUrlsSyncAllResponse(BaseModel):
     total_updated: int
     total_unchanged: int
     total_skipped: int
+    total_flagged: int = 0
 
 
 class TestCaseItem(BaseModel):

@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_project, require_write
 from app.db import get_db
+from app.models.datasets import is_no_retrieval_expected
 from app.models.models import Integration, TestCase, TestDataset, Trace
 from app.models.project import Project
 from app.schemas.datasets import (
@@ -279,7 +280,8 @@ async def sync_expected_urls_from_labels_all_datasets(
 
     One-click variant of the per-dataset sync: same merge/replace semantics, applied to all
     test cases of all datasets, with the outcome grouped per dataset. Cases without
-    labeled-relevant URLs are skipped, never wiped. Datasets without test cases are omitted.
+    labeled-relevant URLs are skipped, never wiped; cases tagged no-retrieval-expected are
+    reported in ``flagged`` and never touched. Datasets without test cases are omitted.
     """
     derived = await gold_relevant_urls_by_test(db, project, body.gold_source)
 
@@ -300,6 +302,9 @@ async def sync_expected_urls_from_labels_all_datasets(
                 dataset_id=ds.id, dataset_name=ds.name, updated=[], unchanged=[], skipped=[]
             ),
         )
+        if is_no_retrieval_expected(tc.tags):
+            result.flagged.append(tc.test_id)
+            continue
         label_urls = derived.get(tc.test_id) or []
         if not label_urls:
             result.skipped.append(tc.test_id)
@@ -318,6 +323,7 @@ async def sync_expected_urls_from_labels_all_datasets(
         total_updated=sum(len(d.updated) for d in datasets),
         total_unchanged=sum(len(d.unchanged) for d in datasets),
         total_skipped=sum(len(d.skipped) for d in datasets),
+        total_flagged=sum(len(d.flagged) for d in datasets),
     )
 
 
@@ -339,6 +345,8 @@ async def sync_expected_urls_from_labels(
     normalization). With no ``test_id`` every case in the dataset is synced. A case whose
     labels yield no relevant URL is never wiped: dataset-wide it is reported in ``skipped``,
     and a single-case replace fails with 409 so a typo can't silently clear ground truth.
+    Cases tagged no-retrieval-expected are never synced: dataset-wide they are reported in
+    ``flagged``, single-case they fail with 409.
     """
     ds_result = await db.execute(
         select(TestDataset).where(TestDataset.id == dataset_id, TestDataset.project_id == project.id)
@@ -358,7 +366,21 @@ async def sync_expected_urls_from_labels(
     updated: list[ExpectedUrlsSyncCase] = []
     unchanged: list[str] = []
     skipped: list[str] = []
+    flagged: list[str] = []
     for tc in cases:
+        if is_no_retrieval_expected(tc.tags):
+            if body.test_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": {
+                            "code": "NO_RETRIEVAL_EXPECTED",
+                            "message": "This test case is flagged as no-retrieval-expected; expected URLs are not synced for it",
+                        }
+                    },
+                )
+            flagged.append(tc.test_id)
+            continue
         label_urls = derived.get(tc.test_id) or []
         if not label_urls:
             if body.test_id and body.mode == "replace":
@@ -381,7 +403,7 @@ async def sync_expected_urls_from_labels(
 
     await db.flush()
     return ExpectedUrlsSyncResponse(
-        mode=body.mode, updated=updated, unchanged=unchanged, skipped=skipped
+        mode=body.mode, updated=updated, unchanged=unchanged, skipped=skipped, flagged=flagged
     )
 
 

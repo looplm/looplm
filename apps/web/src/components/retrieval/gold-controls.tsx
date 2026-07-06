@@ -48,7 +48,7 @@ export function GoldControls({
       </div>
       <div
         className="flex items-center gap-1.5 text-xs"
-        title="Strictness: recall/precision/hit rate/bpref only count chunks labeled at or above this grade. Relevant chunks below it are treated as unjudged, not as misses; nDCG stays graded."
+        title="Strictness: recall/precision/hit rate/MRR/bpref only count chunks labeled at or above this grade. Relevant chunks below it are treated as unjudged, not as misses. Exception: nDCG always weights by the full 1-3 grades, so its card does not move with this selector."
       >
         <span className="text-gray-400 dark:text-slate-500">Min grade</span>
         <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700">

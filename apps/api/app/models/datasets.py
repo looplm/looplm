@@ -21,6 +21,14 @@ from sqlalchemy.orm import relationship
 
 from app.models.base import Base
 
+# Reserved tag marking a negative test case: the query intentionally has no relevant
+# documents (e.g. a UI command), so retrieval ground truth must never be attached to it.
+NO_RETRIEVAL_TAG = "no-retrieval-expected"
+
+
+def is_no_retrieval_expected(tags: list | None) -> bool:
+    return bool(tags) and NO_RETRIEVAL_TAG in tags
+
 
 class JsonImportStatus(str, enum.Enum):
     success = "success"
