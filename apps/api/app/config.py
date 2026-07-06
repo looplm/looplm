@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     # Eval runner
     eval_target_endpoint: str = ""
     eval_default_concurrency: int = 2
+    # Hard ceiling on parallel test runners, enforced server-side (clamps every
+    # trigger/rerun path, including stored job configs that bypass schema validation).
+    # The target's RAG pipeline embeds each expanded query against a shared Azure
+    # OpenAI embeddings deployment; too many concurrent runners throttle it (429),
+    # so the target silently falls back to keyword-only retrieval (no vector/rerank)
+    # and eval grades a degraded path that is NOT representative of prod. Keep this
+    # low enough to stay under the throttle knee. Confirm via the target's
+    # `retrievalDiagnostics.retrievalMode` in the eval response: it must stay
+    # `hybrid`/`mixed`, never `keyword-fallback`. Raise only alongside more
+    # embeddings capacity (or a dedicated eval deployment).
+    eval_max_concurrency: int = 3
 
     # AI judge (chunk relevance grader) — chunks go out in FULL, never truncated. To stay under
     # the model's context window the judge splits the pool into token-budgeted batches (mirroring

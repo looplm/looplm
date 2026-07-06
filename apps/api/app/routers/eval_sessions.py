@@ -77,7 +77,13 @@ async def trigger_session(
             detail={"error": {"code": "NOT_FOUND", "message": f"Experiments not found: {', '.join(missing)}"}},
         )
 
-    concurrency = body.concurrency or settings.eval_default_concurrency
+    # Clamp to the server-side ceiling (per experiment) so a session run can't
+    # throttle the target's shared embeddings deployment into keyword-only
+    # fallback (see settings.eval_max_concurrency).
+    concurrency = min(
+        body.concurrency or settings.eval_default_concurrency,
+        settings.eval_max_concurrency,
+    )
     max_turns = body.max_turns or (project.settings or {}).get("eval_max_turns") or 1
 
     # Build session name from experiment names

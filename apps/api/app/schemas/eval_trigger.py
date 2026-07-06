@@ -13,7 +13,12 @@ FilterMode = Literal["as_configured", "no_filters", "both"]
 
 class TriggerEvalRequest(BaseModel):
     dataset_ids: list[UUID] | None = Field(None, description="Dataset IDs to evaluate. None = all datasets.")
-    concurrency: int | None = Field(None, ge=1, le=10, description="Parallel test runners")
+    concurrency: int | None = Field(
+        None,
+        ge=1,
+        le=10,
+        description="Parallel test runners. Clamped server-side to settings.eval_max_concurrency to avoid throttling the target's shared embeddings deployment into keyword-only retrieval.",
+    )
     filter_mode: FilterMode = Field(
         "as_configured",
         description=(
@@ -104,7 +109,12 @@ class TriggerEvalResponse(BaseModel):
 class TriggerSessionRequest(BaseModel):
     dataset_ids: list[UUID] | None = Field(None, description="Dataset IDs to evaluate. None = all datasets.")
     experiment_ids: list[UUID] = Field(..., min_length=1, description="Experiment IDs to run.")
-    concurrency: int | None = Field(None, ge=1, le=10, description="Parallel test runners per experiment")
+    concurrency: int | None = Field(
+        None,
+        ge=1,
+        le=10,
+        description="Parallel test runners per experiment. Clamped server-side to settings.eval_max_concurrency to avoid throttling the target's shared embeddings deployment into keyword-only retrieval.",
+    )
     max_turns: int | None = Field(
         None,
         ge=1,

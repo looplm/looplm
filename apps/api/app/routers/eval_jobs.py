@@ -102,7 +102,13 @@ async def trigger_eval(
         ds_names = [r[0] for r in ds_result.all()]
         dataset_label = ", ".join(ds_names) if ds_names else f"{len(body.dataset_ids)} dataset(s)"
 
-    concurrency = body.concurrency or settings.eval_default_concurrency
+    # Clamp to the server-side ceiling so a high-concurrency trigger can't throttle
+    # the target's shared embeddings deployment into keyword-only fallback (see
+    # settings.eval_max_concurrency).
+    concurrency = min(
+        body.concurrency or settings.eval_default_concurrency,
+        settings.eval_max_concurrency,
+    )
     max_turns = body.max_turns or (project.settings or {}).get("eval_max_turns") or 1
 
     job = EvalJob(
@@ -267,7 +273,13 @@ async def restart_eval_job(
         )
 
     old_config = old_job.config or {}
-    concurrency = old_config.get("concurrency", settings.eval_default_concurrency)
+    # Clamp: a stored config predating the cap (or from a higher setting) must not
+    # replay at a concurrency that throttles the target's shared embeddings
+    # deployment (see settings.eval_max_concurrency).
+    concurrency = min(
+        old_config.get("concurrency", settings.eval_default_concurrency),
+        settings.eval_max_concurrency,
+    )
     filter_mode = old_config.get("filter_mode", "as_configured")
     max_turns = old_config.get("max_turns", 1)
     use_batch = old_config.get("use_batch", False)
