@@ -60,7 +60,12 @@ export const STATUS: Record<Exclude<Status, "none">, { bar: string; text: string
 
 export function statusOf(value: number | null | undefined, target: number | null | undefined): Status {
   if (value == null || target == null || target <= 0) return "none";
-  const r = value / target;
+  // Compare at display precision. Both formats round to hundredths (pct to whole percent,
+  // dec to two decimals), so 0.695 renders as "70%" and must pass a 70% target, not fail it.
+  const shown = Math.round(value * 100);
+  const goal = Math.round(target * 100);
+  if (goal <= 0) return "none";
+  const r = shown / goal;
   return r >= 1 ? "good" : r >= 0.85 ? "warn" : "bad";
 }
 
