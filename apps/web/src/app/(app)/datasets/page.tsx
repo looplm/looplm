@@ -14,6 +14,7 @@ import { StatCard } from "@/components/eval-shared";
 import { ConfirmModal } from "@/components/confirm-modal";
 import Tooltip from "@/components/tooltip";
 import { usePermissions } from "@/components/permissions-context";
+import { SyncExpectedUrlsModal } from "./sync-expected-urls-modal";
 
 const READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
 
@@ -27,6 +28,7 @@ export default function DatasetsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ ids: string[] } | null>(null);
+  const [showSyncModal, setShowSyncModal] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,6 +143,15 @@ export default function DatasetsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Test Datasets</h1>
         <div className="flex gap-2 items-center">
+          <Tooltip content={canEdit ? "Derive expected page URLs from chunk relevance labels, across all datasets" : READ_ONLY_TITLE}>
+            <button
+              onClick={() => setShowSyncModal(true)}
+              disabled={!canEdit}
+              className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 text-sm hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Sync Expected URLs from Labels
+            </button>
+          </Tooltip>
           <Link
             href="/datasets/duplicates"
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 text-sm hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
@@ -341,6 +352,14 @@ export default function DatasetsPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Project-wide label sync modal */}
+      {showSyncModal && (
+        <SyncExpectedUrlsModal
+          onClose={() => setShowSyncModal(false)}
+          onSynced={load}
+        />
       )}
 
       {/* Delete confirmation modal */}

@@ -14,6 +14,8 @@ import type {
   DuplicatesResponse,
   ExpectedUrlsSyncRequest,
   ExpectedUrlsSyncResponse,
+  ExpectedUrlsSyncAllRequest,
+  ExpectedUrlsSyncAllResponse,
 } from "../api-types";
 import { request } from "./client";
 
@@ -89,6 +91,13 @@ export const syncExpectedUrlsFromLabels = (datasetId: string, body: ExpectedUrls
     `/api/datasets/${datasetId}/cases/expected-urls/sync-from-labels`,
     { method: "POST", body: JSON.stringify(body) },
   );
+
+/** Project-wide one-click variant: sync expected_page_urls from labels across all datasets. */
+export const syncAllExpectedUrlsFromLabels = (body: ExpectedUrlsSyncAllRequest) =>
+  request<ExpectedUrlsSyncAllResponse>("/api/datasets/expected-urls/sync-from-labels", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
 export const exportDataset = (id: string) =>
   request<TestDatasetExport>(`/api/datasets/${id}/export`);

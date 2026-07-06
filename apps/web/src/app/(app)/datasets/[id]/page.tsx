@@ -17,7 +17,7 @@ import { TestCaseConditions } from "@/components/test-case-conditions";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { TestCaseModal, type TestCaseFormData } from "./test-case-modal";
 import { NeedsWorkModal } from "./needs-work-modal";
-import { SyncExpectedUrlsModal } from "./sync-expected-urls-modal";
+import { SyncExpectedUrlsModal } from "../sync-expected-urls-modal";
 
 function FlagIcon() {
   return (

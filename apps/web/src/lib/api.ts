@@ -14,6 +14,8 @@ export type {
   TestDatasetExport,
   ExpectedUrlsSyncRequest,
   ExpectedUrlsSyncResponse,
+  ExpectedUrlsSyncAllRequest,
+  ExpectedUrlsSyncAllResponse,
   DuplicateMember,
   DuplicateGroup,
   DuplicatesResponse,

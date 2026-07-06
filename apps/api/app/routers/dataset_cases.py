@@ -16,7 +16,10 @@ from app.models.project import Project
 from app.schemas.datasets import (
     ExpectedUrlsAdd,
     ExpectedUrlsResponse,
+    ExpectedUrlsSyncAllRequest,
+    ExpectedUrlsSyncAllResponse,
     ExpectedUrlsSyncCase,
+    ExpectedUrlsSyncDatasetResult,
     ExpectedUrlsSyncRequest,
     ExpectedUrlsSyncResponse,
     TestCaseCreate,
@@ -235,6 +238,89 @@ async def add_expected_urls(
     return _tc_to_item(tc)
 
 
+def _apply_url_sync(tc: TestCase, label_urls: list[str], mode: str) -> ExpectedUrlsSyncCase | None:
+    """Overwrite (``replace``) or extend (``merge``) a case's expected_page_urls from labels.
+
+    Returns the change record, or ``None`` when the case was already in sync. Added/removed
+    counts compare normalized URL sets, so a slug variant of an existing URL doesn't count as
+    a change.
+    """
+    current = list(tc.expected_page_urls or [])
+    if mode == "replace":
+        new_urls = label_urls
+    else:
+        existing_norm = {normalize_source_url(u.strip()) for u in current if u.strip()}
+        new_urls = current + [u for u in label_urls if normalize_source_url(u) not in existing_norm]
+
+    if new_urls == current:
+        return None
+    current_norm = {normalize_source_url(u.strip()) for u in current if u.strip()}
+    new_norm = {normalize_source_url(u) for u in new_urls}
+    tc.expected_page_urls = new_urls
+    return ExpectedUrlsSyncCase(
+        test_id=tc.test_id,
+        expected_page_urls=new_urls,
+        added=len(new_norm - current_norm),
+        removed=len(current_norm - new_norm),
+    )
+
+
+@router.post(
+    "/expected-urls/sync-from-labels",
+    response_model=ExpectedUrlsSyncAllResponse,
+    dependencies=[require_write("evaluate", "datasets")],
+)
+async def sync_expected_urls_from_labels_all_datasets(
+    body: ExpectedUrlsSyncAllRequest,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Sync ``expected_page_urls`` from chunk labels across every dataset in the project.
+
+    One-click variant of the per-dataset sync: same merge/replace semantics, applied to all
+    test cases of all datasets, with the outcome grouped per dataset. Cases without
+    labeled-relevant URLs are skipped, never wiped. Datasets without test cases are omitted.
+    """
+    derived = await gold_relevant_urls_by_test(db, project, body.gold_source)
+
+    rows = (
+        await db.execute(
+            select(TestCase, TestDataset)
+            .join(TestDataset, TestCase.dataset_id == TestDataset.id)
+            .where(TestDataset.project_id == project.id)
+            .order_by(TestDataset.name, TestCase.test_id)
+        )
+    ).all()
+
+    results: dict[str, ExpectedUrlsSyncDatasetResult] = {}
+    for tc, ds in rows:
+        result = results.setdefault(
+            str(ds.id),
+            ExpectedUrlsSyncDatasetResult(
+                dataset_id=ds.id, dataset_name=ds.name, updated=[], unchanged=[], skipped=[]
+            ),
+        )
+        label_urls = derived.get(tc.test_id) or []
+        if not label_urls:
+            result.skipped.append(tc.test_id)
+            continue
+        change = _apply_url_sync(tc, label_urls, body.mode)
+        if change is None:
+            result.unchanged.append(tc.test_id)
+        else:
+            result.updated.append(change)
+
+    await db.flush()
+    datasets = list(results.values())
+    return ExpectedUrlsSyncAllResponse(
+        mode=body.mode,
+        datasets=datasets,
+        total_updated=sum(len(d.updated) for d in datasets),
+        total_unchanged=sum(len(d.unchanged) for d in datasets),
+        total_skipped=sum(len(d.skipped) for d in datasets),
+    )
+
+
 @router.post(
     "/{dataset_id}/cases/expected-urls/sync-from-labels",
     response_model=ExpectedUrlsSyncResponse,
@@ -287,30 +373,11 @@ async def sync_expected_urls_from_labels(
                 )
             skipped.append(tc.test_id)
             continue
-
-        current = list(tc.expected_page_urls or [])
-        if body.mode == "replace":
-            new_urls = label_urls
-        else:
-            existing_norm = {normalize_source_url(u.strip()) for u in current if u.strip()}
-            new_urls = current + [
-                u for u in label_urls if normalize_source_url(u) not in existing_norm
-            ]
-
-        if new_urls == current:
+        change = _apply_url_sync(tc, label_urls, body.mode)
+        if change is None:
             unchanged.append(tc.test_id)
-            continue
-        current_norm = {normalize_source_url(u.strip()) for u in current if u.strip()}
-        new_norm = {normalize_source_url(u) for u in new_urls}
-        tc.expected_page_urls = new_urls
-        updated.append(
-            ExpectedUrlsSyncCase(
-                test_id=tc.test_id,
-                expected_page_urls=new_urls,
-                added=len(new_norm - current_norm),
-                removed=len(current_norm - new_norm),
-            )
-        )
+        else:
+            updated.append(change)
 
     await db.flush()
     return ExpectedUrlsSyncResponse(

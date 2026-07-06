@@ -601,6 +601,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/datasets/expected-urls/sync-from-labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Expected Urls From Labels All Datasets
+         * @description Sync ``expected_page_urls`` from chunk labels across every dataset in the project.
+         *
+         *     One-click variant of the per-dataset sync: same merge/replace semantics, applied to all
+         *     test cases of all datasets, with the outcome grouped per dataset. Cases without
+         *     labeled-relevant URLs are skipped, never wiped. Datasets without test cases are omitted.
+         */
+        post: operations["sync_expected_urls_from_labels_all_datasets_api_datasets_expected_urls_sync_from_labels_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/datasets/import": {
         parameters: {
             query?: never;
@@ -6375,6 +6399,38 @@ export interface components {
             test_id: string;
         };
         /**
+         * ExpectedUrlsSyncAllRequest
+         * @description Project-wide variant of :class:`ExpectedUrlsSyncRequest`: sync every dataset at once.
+         */
+        ExpectedUrlsSyncAllRequest: {
+            /**
+             * Gold Source
+             * @default human
+             */
+            gold_source: string;
+            /**
+             * Mode
+             * @default merge
+             */
+            mode: string;
+        };
+        /**
+         * ExpectedUrlsSyncAllResponse
+         * @description Outcome of a project-wide sync, grouped per dataset, with case totals across the run.
+         */
+        ExpectedUrlsSyncAllResponse: {
+            /** Datasets */
+            datasets: components["schemas"]["ExpectedUrlsSyncDatasetResult"][];
+            /** Mode */
+            mode: string;
+            /** Total Skipped */
+            total_skipped: number;
+            /** Total Unchanged */
+            total_unchanged: number;
+            /** Total Updated */
+            total_updated: number;
+        };
+        /**
          * ExpectedUrlsSyncCase
          * @description One synced test case: its new URL list and how it changed.
          */
@@ -6387,6 +6443,25 @@ export interface components {
             removed: number;
             /** Test Id */
             test_id: string;
+        };
+        /**
+         * ExpectedUrlsSyncDatasetResult
+         * @description Per-dataset outcome within a project-wide sync (same fields as the single-dataset sync).
+         */
+        ExpectedUrlsSyncDatasetResult: {
+            /**
+             * Dataset Id
+             * Format: uuid
+             */
+            dataset_id: string;
+            /** Dataset Name */
+            dataset_name: string;
+            /** Skipped */
+            skipped: string[];
+            /** Unchanged */
+            unchanged: string[];
+            /** Updated */
+            updated: components["schemas"]["ExpectedUrlsSyncCase"][];
         };
         /**
          * ExpectedUrlsSyncRequest
@@ -12452,6 +12527,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestCaseItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_expected_urls_from_labels_all_datasets_api_datasets_expected_urls_sync_from_labels_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedUrlsSyncAllRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpectedUrlsSyncAllResponse"];
                 };
             };
             /** @description Validation Error */

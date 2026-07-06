@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { syncExpectedUrlsFromLabels, type ExpectedUrlsSyncResponse } from "@/lib/api";
+import { syncAllExpectedUrlsFromLabels, syncExpectedUrlsFromLabels } from "@/lib/api";
 
 type SyncMode = "replace" | "merge";
 
@@ -20,18 +20,30 @@ const MODES: { value: SyncMode; label: string; description: string }[] = [
   },
 ];
 
+/** Normalized outcome for the result view, shared by both sync scopes. */
+type SyncSummary = {
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  perDataset?: { name: string; updated: number; unchanged: number; skipped: number }[];
+};
+
+/**
+ * Sync expected page URLs from chunk relevance labels. With a datasetId the sync covers
+ * that dataset's cases; without one it runs project-wide across all datasets.
+ */
 export function SyncExpectedUrlsModal({
   datasetId,
   onClose,
   onSynced,
 }: {
-  datasetId: string;
+  datasetId?: string;
   onClose: () => void;
   onSynced: () => void;
 }) {
   const [mode, setMode] = useState<SyncMode>("replace");
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ExpectedUrlsSyncResponse | null>(null);
+  const [result, setResult] = useState<SyncSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -46,8 +58,27 @@ export function SyncExpectedUrlsModal({
     setRunning(true);
     setError(null);
     try {
-      const res = await syncExpectedUrlsFromLabels(datasetId, { mode, gold_source: "human" });
-      setResult(res);
+      if (datasetId) {
+        const res = await syncExpectedUrlsFromLabels(datasetId, { mode, gold_source: "human" });
+        setResult({
+          updated: res.updated.length,
+          unchanged: res.unchanged.length,
+          skipped: res.skipped.length,
+        });
+      } else {
+        const res = await syncAllExpectedUrlsFromLabels({ mode, gold_source: "human" });
+        setResult({
+          updated: res.total_updated,
+          unchanged: res.total_unchanged,
+          skipped: res.total_skipped,
+          perDataset: res.datasets.map((d) => ({
+            name: d.dataset_name,
+            updated: d.updated.length,
+            unchanged: d.unchanged.length,
+            skipped: d.skipped.length,
+          })),
+        });
+      }
       onSynced();
     } catch {
       setError("Sync failed. Please try again.");
@@ -68,6 +99,7 @@ export function SyncExpectedUrlsModal({
             <p className="text-sm text-gray-600 dark:text-slate-400">
               Derives each test case&apos;s expected page URLs from its chunk relevance labels:
               every chunk judged relevant contributes its source URL, ordered by relevance grade.
+              {!datasetId && " Applies to all datasets in the project."}
             </p>
             {!result && (
               <div className="space-y-2">
@@ -100,18 +132,28 @@ export function SyncExpectedUrlsModal({
             {result && (
               <div className="rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 p-3 text-sm space-y-1">
                 <p>
-                  <span className="font-medium">{result.updated.length}</span>{" "}
-                  {result.updated.length === 1 ? "case" : "cases"} updated
+                  <span className="font-medium">{result.updated}</span>{" "}
+                  {result.updated === 1 ? "case" : "cases"} updated
                 </p>
-                {result.unchanged.length > 0 && (
+                {result.unchanged > 0 && (
                   <p className="text-gray-500 dark:text-slate-400">
-                    {result.unchanged.length} already in sync
+                    {result.unchanged} already in sync
                   </p>
                 )}
-                {result.skipped.length > 0 && (
+                {result.skipped > 0 && (
                   <p className="text-gray-500 dark:text-slate-400">
-                    {result.skipped.length} skipped (no chunks labeled relevant), left unchanged
+                    {result.skipped} skipped (no chunks labeled relevant), left unchanged
                   </p>
+                )}
+                {result.perDataset && result.perDataset.length > 0 && (
+                  <div className="pt-2 mt-2 border-t border-gray-200 dark:border-slate-700 space-y-0.5 max-h-48 overflow-y-auto">
+                    {result.perDataset.map((d) => (
+                      <p key={d.name} className="text-xs text-gray-500 dark:text-slate-400">
+                        <span className="font-medium text-gray-700 dark:text-slate-300">{d.name}</span>
+                        : {d.updated} updated, {d.unchanged} in sync, {d.skipped} skipped
+                      </p>
+                    ))}
+                  </div>
                 )}
               </div>
             )}

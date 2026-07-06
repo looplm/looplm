@@ -350,6 +350,69 @@ async def test_sync_already_in_sync_reports_unchanged(
 
 
 @pytest.mark.asyncio
+async def test_sync_all_datasets_one_click(
+    client, auth_headers, db_session, test_project, test_user
+):
+    """The project-wide sync applies to every dataset and groups the outcome per dataset."""
+    ds_a, _ = await _create_dataset_with_case(
+        client, auth_headers, test_id="case-a", expected_page_urls=["https://old.example/a"]
+    )
+    resp = await client.post(
+        "/api/datasets", headers=auth_headers, json={"name": "Second Dataset"}
+    )
+    ds_b = resp.json()["id"]
+    resp = await client.post(
+        f"/api/datasets/{ds_b}/cases",
+        headers=auth_headers,
+        json={"test_id": "case-b", "prompt": "What is B?"},
+    )
+    assert resp.status_code == 201
+    resp = await client.post(
+        f"/api/datasets/{ds_b}/cases",
+        headers=auth_headers,
+        json={
+            "test_id": "case-unlabeled",
+            "prompt": "What is C?",
+            "expected_page_urls": ["https://manual.example/keep"],
+        },
+    )
+    assert resp.status_code == 201
+
+    await _add_label(
+        db_session, test_project, test_user,
+        test_id="case-a", chunk_id="c1", relevance=2, url="https://a.example/1",
+    )
+    await _add_label(
+        db_session, test_project, test_user,
+        test_id="case-b", chunk_id="c2", relevance=3, url="https://b.example/2",
+    )
+
+    resp = await client.post(
+        "/api/datasets/expected-urls/sync-from-labels",
+        headers=auth_headers,
+        json={"mode": "replace"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_updated"] == 2
+    assert data["total_skipped"] == 1
+    assert data["total_unchanged"] == 0
+
+    by_id = {d["dataset_id"]: d for d in data["datasets"]}
+    assert by_id[ds_a]["updated"][0]["expected_page_urls"] == ["https://a.example/1"]
+    assert [c["test_id"] for c in by_id[ds_b]["updated"]] == ["case-b"]
+    assert by_id[ds_b]["skipped"] == ["case-unlabeled"]
+
+    # The unlabeled case kept its manual URLs even in replace mode.
+    resp = await client.get(
+        f"/api/datasets/{ds_b}/cases/expected-urls",
+        headers=auth_headers,
+        params={"test_id": "case-unlabeled"},
+    )
+    assert resp.json()["expected_page_urls"] == ["https://manual.example/keep"]
+
+
+@pytest.mark.asyncio
 async def test_sync_unknown_test_id_404(client, auth_headers):
     dataset_id, _ = await _create_dataset_with_case(client, auth_headers)
     resp = await client.post(

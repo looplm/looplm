@@ -53,6 +53,8 @@ export type TestCaseCreateBody = S["TestCaseCreate"];
 export type TestCaseUpdateBody = S["TestCaseUpdate"];
 export type ExpectedUrlsSyncRequest = S["ExpectedUrlsSyncRequest"];
 export type ExpectedUrlsSyncResponse = S["ExpectedUrlsSyncResponse"];
+export type ExpectedUrlsSyncAllRequest = S["ExpectedUrlsSyncAllRequest"];
+export type ExpectedUrlsSyncAllResponse = S["ExpectedUrlsSyncAllResponse"];
 
 // --- Duplicate detection ---
 export type DuplicateMember = S["DuplicateMember"];

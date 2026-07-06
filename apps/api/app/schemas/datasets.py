@@ -144,6 +144,33 @@ class ExpectedUrlsSyncResponse(BaseModel):
     skipped: list[str]
 
 
+class ExpectedUrlsSyncAllRequest(BaseModel):
+    """Project-wide variant of :class:`ExpectedUrlsSyncRequest`: sync every dataset at once."""
+
+    mode: str = Field(default="merge", pattern="^(merge|replace)$")
+    gold_source: str = Field(default="human", pattern="^(human|ai|both)$")
+
+
+class ExpectedUrlsSyncDatasetResult(BaseModel):
+    """Per-dataset outcome within a project-wide sync (same fields as the single-dataset sync)."""
+
+    dataset_id: UUID
+    dataset_name: str
+    updated: list[ExpectedUrlsSyncCase]
+    unchanged: list[str]
+    skipped: list[str]
+
+
+class ExpectedUrlsSyncAllResponse(BaseModel):
+    """Outcome of a project-wide sync, grouped per dataset, with case totals across the run."""
+
+    mode: str
+    datasets: list[ExpectedUrlsSyncDatasetResult]
+    total_updated: int
+    total_unchanged: int
+    total_skipped: int
+
+
 class TestCaseItem(BaseModel):
     id: UUID
     dataset_id: UUID
