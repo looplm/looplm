@@ -124,10 +124,14 @@ export default function EvalJobDetailPage() {
 
   const computedStats = useMemo(() => {
     if (!run?.results) return null;
-    const total = run.results.length;
-    const passed = run.results.filter((r) => r.pass).length;
+    // Exclude degraded/errored rows from the pass rate (same as the backend and the
+    // run-detail view); they are dead-letter, surfaced separately below.
+    const representative = run.results.filter((r) => (r.execution_status ?? "ok") === "ok");
+    const total = representative.length;
+    const passed = representative.filter((r) => r.pass).length;
     const failed = total - passed;
-    return { total, passed, failed, passRate: total > 0 ? passed / total : 0 };
+    const dlq = run.results.length - representative.length;
+    return { total, passed, failed, passRate: total > 0 ? passed / total : 0, dlq };
   }, [run?.results]);
 
   const handleSelectResult = useCallback(
@@ -330,6 +334,27 @@ export default function EvalJobDetailPage() {
               accent={computedStats.passRate === 1 ? "green" : computedStats.passRate === 0 && computedStats.total > 0 ? "red" : "amber"}
             />
           </div>
+
+          {/* Dead-letter rows (degraded/errored) are excluded from the pass rate; retry lives on the results page */}
+          {computedStats.dlq > 0 && (
+            <div className="mb-6 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/15 px-4 py-3 flex items-center gap-3 text-sm text-amber-800 dark:text-amber-300">
+              <span>
+                <span className="font-semibold">
+                  {computedStats.dlq} case{computedStats.dlq === 1 ? "" : "s"} did not run representatively
+                </span>{" "}
+                (degraded retrieval or a hard error) and {isActive ? "are" : "were"} excluded from the pass
+                rate.
+              </span>
+              {!isActive && job.run_id && (
+                <Link
+                  href={`/evaluations/${job.run_id}`}
+                  className="ml-auto shrink-0 px-3 py-1.5 rounded-lg font-medium border border-amber-400 dark:border-amber-500/60 hover:bg-amber-100 dark:hover:bg-amber-600/10 transition-colors"
+                >
+                  Review &amp; retry &rarr;
+                </Link>
+              )}
+            </div>
+          )}
 
           {/* Results Table */}
           <div className="mb-6">
