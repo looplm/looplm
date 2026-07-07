@@ -19,12 +19,13 @@ from app.models.models import (
 )
 from app.schemas.evaluations import EvalResultImport, GraderResult
 from app.services.eval_executor_helpers import (
+    _SEVERITY,
     _build_result_metadata,
+    _call_target_api_resilient,
     _fmt_ms,
     _with_elapsed_ms,
 )
 from app.services.eval_runners import (
-    _call_target_api,
     _run_deterministic,
     render_llm_judge_prompt,
 )
@@ -174,6 +175,7 @@ async def _evaluate_single_test_case_batch(
     final_pass = False
     turns_to_pass: int | None = None
     all_pending_llm: list[tuple[str, list[dict[str, str]]]] = []
+    execution: dict = {"status": "ok", "attempts": 0}
 
     async def _progress(msg: str):
         if on_progress:
@@ -184,28 +186,57 @@ async def _evaluate_single_test_case_batch(
         turn_expected = turn.get("expected_answer") or expected_output
         turn_prefix = f" turn {turn_num}/{len(turns)}:" if is_multi_turn else ""
 
+        # Same resilient target call as the native path: process-wide concurrency cap,
+        # retry+backoff, and keyword-fallback degrade detection (see model_resilience).
         await _progress(f"{turn_prefix} calling API...")
-        try:
-            output_text, raw_response, elapsed_ms = await _call_target_api(
-                client, endpoint, request_template, response_path,
-                extra_headers, turn_prompt, test_case.context_filters,
-                team_filter=team_filter,
-                tag_filter=tag_filter,
-                filter_enabled=filter_enabled,
-                thread_id=thread_id,
-                metadata=test_case.test_case_metadata,
-                experiment_variables=experiment_variables,
-            )
-        except Exception as e:
-            await _progress(f"{turn_prefix} API error: {e}")
+        outcome = await _call_target_api_resilient(
+            client, endpoint, request_template, response_path,
+            extra_headers, turn_prompt, test_case.context_filters,
+            team_filter=team_filter,
+            tag_filter=tag_filter,
+            filter_enabled=filter_enabled,
+            thread_id=thread_id,
+            metadata=test_case.test_case_metadata,
+            experiment_variables=experiment_variables,
+            on_progress=lambda msg: _progress(f"{turn_prefix}{msg}"),
+            allow_retry=thread_id is None,
+        )
+        execution["attempts"] += outcome.attempts
+        if _SEVERITY[outcome.status] > _SEVERITY[execution["status"]]:
+            execution["status"] = outcome.status
+            if outcome.error:
+                execution["error"] = outcome.error
+
+        if outcome.status == "error":
+            await _progress(f"{turn_prefix} API error: {outcome.error}")
             conversation_history.append({
                 "turn": turn_num, "prompt": turn_prompt, "response": None,
-                "pass": False, "error": str(e), "graders": {},
+                "pass": False, "error": outcome.error, "graders": {},
             })
             final_output = None
             final_raw_response = None
             final_graders = {}
             break
+
+        if outcome.status == "degraded":
+            # Soft failure: keep the response for display + DLQ retry, but don't grade it.
+            await _progress(
+                f"{turn_prefix} degraded retrieval ({outcome.retrieval_mode}); "
+                "not graded, queued for retry"
+            )
+            conversation_history.append({
+                "turn": turn_num, "prompt": turn_prompt,
+                "response": (outcome.output_text or "")[:5000] or None,
+                "pass": False, "degraded": True, "graders": {},
+            })
+            final_output = outcome.output_text
+            final_raw_response = outcome.raw_response
+            final_graders = {}
+            break
+
+        output_text = outcome.output_text
+        raw_response = outcome.raw_response
+        elapsed_ms = outcome.elapsed_ms
 
         await _progress(f"{turn_prefix} response received ({_fmt_ms(elapsed_ms)}), running deterministic graders...")
 
@@ -240,6 +271,8 @@ async def _evaluate_single_test_case_batch(
             break
 
     metadata = _build_result_metadata(final_raw_response or "", payload_key=payload_key)
+    if execution["status"] != "ok":
+        metadata["execution"] = execution
     if is_multi_turn:
         metadata["conversation_history"] = conversation_history
     metadata["filter_mode"] = filter_mode

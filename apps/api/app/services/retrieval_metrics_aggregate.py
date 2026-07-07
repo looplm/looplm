@@ -31,6 +31,7 @@ from app.schemas.retrieval import (
     StageMetrics,
 )
 from app.services.failure_pattern import normalize_result_test_id
+from app.services.model_resilience import DEGRADED_RETRIEVAL_MODE
 from app.services.retrieval_metrics import (
     compute_bpref,
     compute_condensed_ndcg_at_k,
@@ -251,7 +252,7 @@ async def compute_and_store_run_retrieval_summary(
                 mode_counts[mode] = mode_counts.get(mode, 0) + 1
         if mode_counts:
             summary["retrieval_mode_counts"] = mode_counts
-            degraded = mode_counts.get("keyword-fallback", 0)
+            degraded = mode_counts.get(DEGRADED_RETRIEVAL_MODE, 0)
             if degraded:
                 logger.warning(
                     "Run %s: %d/%d results used keyword-only retrieval (target embeddings "

@@ -24,6 +24,7 @@ from app.models.models import (
 )
 from app.services.analysis_llm import LlmUsageInfo
 from app.services.batch_llm_service import BatchLlmService
+from app.services.eval_executor_helpers import execution_status_of
 from app.services.eval_runners import parse_llm_judge_response
 from app.services.llm_pricing import calculate_cost
 
@@ -159,16 +160,27 @@ async def process_batch_results(
     )
     all_results = list(all_results_q.scalars().all())
 
-    total = len(all_results)
-    passed = sum(1 for r in all_results if r.pass_)
+    # Exclude degraded/errored rows from the headline stats and grader summaries — they
+    # did not run against a representative target path (see execution_status_of). They
+    # persist as rows for the DLQ and are counted separately.
+    representative = [r for r in all_results if execution_status_of(r.result_metadata) == "ok"]
+    degraded_count = sum(1 for r in all_results if execution_status_of(r.result_metadata) == "degraded")
+    error_count = sum(1 for r in all_results if execution_status_of(r.result_metadata) == "error")
+    total = len(representative)
+    passed = sum(1 for r in representative if r.pass_)
     run.total = total
     run.passed = passed
     run.failed = total - passed
+    if degraded_count or error_count:
+        run.run_metadata = {
+            **(run.run_metadata or {}),
+            "execution_counts": {"ok": total, "degraded": degraded_count, "error": error_count},
+        }
 
     # Compute grader and score summaries from DB results
     grader_counts: dict[str, dict] = {}
     score_accum: dict[str, list[float]] = {}
-    for r in all_results:
+    for r in representative:
         for name, grader in (r.graders or {}).items():
             if name not in grader_counts:
                 grader_counts[name] = {"passed": 0, "failed": 0, "skipped": 0, "total": 0}

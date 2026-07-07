@@ -60,7 +60,8 @@ class DegradedRetrievalError(Exception):
 
 
 # Process-wide ceiling on concurrent target calls, shared across all eval jobs.
-GLOBAL_TARGET_SEM = asyncio.Semaphore(settings.eval_global_max_concurrency)
+# Clamped to >= 1 so a misconfigured 0/empty value can't deadlock every call.
+GLOBAL_TARGET_SEM = asyncio.Semaphore(max(1, settings.eval_global_max_concurrency))
 
 
 def is_retryable(exc: BaseException) -> bool:
@@ -84,6 +85,7 @@ async def retry_async(
     max_attempts: int | None = None,
     base: float | None = None,
     jitter: float | None = None,
+    max_delay: float | None = None,
     retryable: Callable[[BaseException], bool] = is_retryable,
     on_retry: Callable[[int, float, BaseException], Awaitable[None]] | None = None,
 ) -> T:
@@ -93,11 +95,14 @@ async def retry_async(
     defaults to ``settings.eval_target_max_retries + 1``. On a non-retryable
     exception, or once attempts are exhausted, the last exception propagates.
     ``on_retry(attempt, delay, exc)`` is awaited before each backoff sleep, so
-    callers can surface progress and count attempts.
+    callers can surface progress and count attempts. The exponential term is
+    capped at ``max_delay`` so a raised retry count can't balloon into minutes-long
+    sleeps.
     """
     max_attempts = max_attempts if max_attempts is not None else settings.eval_target_max_retries + 1
     base = base if base is not None else settings.eval_backoff_base_seconds
     jitter = jitter if jitter is not None else settings.eval_backoff_jitter_seconds
+    max_delay = max_delay if max_delay is not None else settings.eval_backoff_max_seconds
 
     attempt = 0
     while True:
@@ -107,7 +112,7 @@ async def retry_async(
         except Exception as exc:  # noqa: BLE001 — classified by ``retryable``
             if attempt >= max_attempts or not retryable(exc):
                 raise
-            delay = base * (2 ** (attempt - 1)) + random.uniform(0, jitter)
+            delay = min(base * (2 ** (attempt - 1)), max_delay) + random.uniform(0, jitter)
             if on_retry is not None:
                 await on_retry(attempt, delay, exc)
             logger.info(

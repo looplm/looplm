@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     eval_target_max_retries: int = 3
     eval_backoff_base_seconds: float = 1.0
     eval_backoff_jitter_seconds: float = 0.5
+    # Ceiling on the exponential term so a raised retry count can't produce
+    # minutes-long sleeps (delay = min(base * 2**(attempt-1), max) + jitter).
+    eval_backoff_max_seconds: float = 30.0
     # Explicit retry budget for LoopLM's own OpenAI/Azure SDK clients (judges,
     # query embeddings). The SDK retries 429/5xx/timeout internally with backoff;
     # set this instead of relying on the invisible default (2) so grading and

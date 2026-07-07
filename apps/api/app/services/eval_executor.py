@@ -32,7 +32,10 @@ from app.services.retrieval_metrics_aggregate import compute_and_store_run_retri
 from app.routers.eval_helpers import _compute_summaries
 from app.schemas.evaluations import EvalResultImport
 from app.services.analysis_llm import AnalysisLlmService
-from app.services.eval_executor_helpers import _evaluate_single_test_case
+from app.services.eval_executor_helpers import (
+    _evaluate_single_test_case,
+    execution_status_of,
+)
 from app.services.retrieval_config import (
     extract_retrieval_context_from_payload,
     get_retrieval_payload_key_from_settings,
@@ -334,9 +337,15 @@ async def run_eval(
                 # Serialize all DB operations — async sessions aren't concurrency-safe
                 async with db_lock:
                     completed += 1
-                    if r.pass_:
+                    exec_status = execution_status_of(r.metadata)
+                    if exec_status == "ok" and r.pass_:
                         passed_count += 1
-                    status = "PASS" if r.pass_ else "FAIL"
+                    if exec_status == "degraded":
+                        status = "DEGRADED"
+                    elif exec_status == "error":
+                        status = "ERROR"
+                    else:
+                        status = "PASS" if r.pass_ else "FAIL"
                     n_graders = len(r.graders)
                     n_failed = sum(1 for g in r.graders.values() if not g.skipped and not g.pass_)
                     n_skipped = sum(1 for g in r.graders.values() if g.skipped)
@@ -402,17 +411,32 @@ async def run_eval(
             tasks = [_run_with_semaphore(tc, fm) for tc, fm in run_plan]
             eval_results = await asyncio.gather(*tasks)
 
-        # Final summaries
-        total = len(eval_results)
-        passed = sum(1 for r in eval_results if r.pass_)
+        # Final summaries. Degraded/errored cases did not run against a representative
+        # target path (keyword-only fallback or a hard failure), so they are excluded
+        # from the headline pass rate — they persist as rows for the DLQ and are counted
+        # separately. Grading a degraded run would fold an infra artifact into quality.
+        representative = [r for r in eval_results if execution_status_of(r.metadata) == "ok"]
+        degraded_count = sum(1 for r in eval_results if execution_status_of(r.metadata) == "degraded")
+        error_count = sum(1 for r in eval_results if execution_status_of(r.metadata) == "error")
+        total = len(representative)
+        passed = sum(1 for r in representative if r.pass_)
         failed = total - passed
-        grader_summary, score_summary = _compute_summaries(eval_results)
+        grader_summary, score_summary = _compute_summaries(representative)
 
         run.total = total
         run.passed = passed
         run.failed = failed
         run.grader_summary = grader_summary
         run.score_summary = score_summary
+        if degraded_count or error_count:
+            run.run_metadata = {
+                **(run.run_metadata or {}),
+                "execution_counts": {
+                    "ok": total,
+                    "degraded": degraded_count,
+                    "error": error_count,
+                },
+            }
 
         # Multi-turn summary stats
         multi_turn_passes = [r.turns_to_pass for r in eval_results if r.turns_to_pass is not None]
