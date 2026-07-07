@@ -251,6 +251,44 @@ export default function EvalRunDetailPage() {
         )}
       </div>
 
+      {/* Dead-letter queue: results that didn't run representatively */}
+      {(() => {
+        const counts = (run.metadata as Record<string, unknown> | undefined)
+          ?.execution_counts as { degraded?: number; error?: number } | undefined;
+        const degraded = counts?.degraded ?? 0;
+        const errored = counts?.error ?? 0;
+        const dlq = degraded + errored;
+        if (dlq === 0) return null;
+        const parts = [
+          degraded ? `${degraded} degraded` : null,
+          errored ? `${errored} errored` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return (
+          <div className="mb-6 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/15 px-4 py-3 flex items-center gap-3">
+            <span className="text-sm text-amber-800 dark:text-amber-300">
+              <span className="font-semibold">
+                {dlq} result{dlq === 1 ? "" : "s"} did not run representatively
+              </span>{" "}
+              ({parts}), so they are excluded from the pass rate. Degraded means the target fell
+              back to keyword-only retrieval (embeddings throttled); errored means the call failed
+              after retries.
+            </span>
+            {run.source === "triggered" && canEdit && (
+              <button
+                onClick={() => handleRerun("dlq")}
+                disabled={rerunningScope !== null}
+                title="Rerun only the degraded/errored results as a new linked run"
+                className="ml-auto shrink-0 px-4 py-2 rounded-lg text-sm font-medium border border-amber-400 dark:border-amber-500/60 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-600/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {rerunningScope === "dlq" ? "Starting..." : `Retry ${dlq} not run`}
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Tab Navigation */}
       <div className="flex items-center gap-1 mb-6 border-b border-gray-200 dark:border-slate-700">
         {(["results", "suggestions"] as Tab[]).map((tab) => (

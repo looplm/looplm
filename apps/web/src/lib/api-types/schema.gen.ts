@@ -5986,6 +5986,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Execution Status
+             * @default ok
+             */
+            execution_status: string;
             /** Expected Output */
             expected_output?: string | null;
             /** Graders */
@@ -6030,6 +6035,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Execution Status
+             * @default ok
+             */
+            execution_status: string;
             /** Failure Pattern */
             failure_pattern?: string | null;
             /** Grader Pattern */
@@ -9392,9 +9402,9 @@ export interface components {
         RerunEvalRequest: {
             /**
              * Scope
-             * @description If 'failed' and test_ids is omitted, the server reruns all failed results of the run. Otherwise a label recorded in run metadata.
+             * @description If 'failed' and test_ids is omitted, the server reruns all failed results. If 'dlq', it reruns only the dead-letter rows (degraded/errored execution, not quality failures). Otherwise a label recorded in run metadata.
              */
-            scope?: ("failed" | "filtered" | "selected") | null;
+            scope?: ("failed" | "filtered" | "selected" | "dlq") | null;
             /**
              * Test Ids
              * @description Exact test_ids from the original run to rerun. '[filtered]'/'[unfiltered]' suffixes are stripped server-side.
@@ -11237,7 +11247,7 @@ export interface components {
         TriggerEvalRequest: {
             /**
              * Concurrency
-             * @description Parallel test runners
+             * @description Parallel test runners. Clamped server-side to settings.eval_max_concurrency to avoid throttling the target's shared embeddings deployment into keyword-only retrieval.
              */
             concurrency?: number | null;
             /**
@@ -11300,7 +11310,7 @@ export interface components {
         TriggerSessionRequest: {
             /**
              * Concurrency
-             * @description Parallel test runners per experiment
+             * @description Parallel test runners per experiment. Clamped server-side to settings.eval_max_concurrency to avoid throttling the target's shared embeddings deployment into keyword-only retrieval.
              */
             concurrency?: number | null;
             /**

@@ -83,7 +83,15 @@ export function TestResultModal({
           <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-800 shrink-0">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-semibold">{result.test_id}</h2>
-              {result.pass ? (
+              {result.execution_status === "degraded" ? (
+                <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                  DEGRADED
+                </span>
+              ) : result.execution_status === "error" ? (
+                <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
+                  ERROR
+                </span>
+              ) : result.pass ? (
                 <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
                   PASS
                 </span>
@@ -167,6 +175,28 @@ export function TestResultModal({
           {/* Body */}
           <div className="p-4 overflow-y-auto flex-1">
             <div className="flex flex-col gap-2 text-base">
+              {/* Execution health — degraded/errored rows were not graded */}
+              {result.execution_status !== "ok" && (() => {
+                const exec = (result.metadata?.execution as { error?: string } | undefined) ?? undefined;
+                const mode = result.metadata?.retrieval_mode as string | undefined;
+                return (
+                  <div className="rounded-lg border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/15 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+                    {result.execution_status === "degraded" ? (
+                      <>
+                        This case ran against <span className="font-medium">degraded retrieval</span>
+                        {mode ? ` (${mode})` : ""}: the target fell back to keyword-only search after
+                        its embeddings deployment throttled. It was not graded and is excluded from the
+                        pass rate. Retry it from the run page once capacity recovers.
+                      </>
+                    ) : (
+                      <>
+                        This case <span className="font-medium">failed to run</span> after retries and
+                        was not graded.{exec?.error ? ` Last error: ${exec.error}` : ""}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
               {/* Filter Pre-conditions */}
               {(Array.isArray(result.metadata?.team_filter) || Array.isArray(result.metadata?.tag_filter) || result.metadata?.context_filters) ? (
                 <Section title="Filter Pre-conditions" defaultOpen={false}>

@@ -167,7 +167,21 @@ export function EvalResultsTable({
                 <td className="px-4 py-3 text-sm">{result.test_id}</td>
                 <td className="px-4 py-3 text-center">
                   <div className="flex items-center justify-center gap-1.5">
-                    {result.pass ? (
+                    {result.execution_status === "degraded" ? (
+                      <span
+                        className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
+                        title="Ran against degraded (keyword-only) retrieval — not graded, excluded from the pass rate"
+                      >
+                        DEGRADED
+                      </span>
+                    ) : result.execution_status === "error" ? (
+                      <span
+                        className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400"
+                        title="Failed to run after retries — not graded, excluded from the pass rate"
+                      >
+                        ERROR
+                      </span>
+                    ) : result.pass ? (
                       <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
                         PASS
                       </span>
@@ -196,6 +210,13 @@ export function EvalResultsTable({
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-500 dark:text-slate-400">
                   {(() => {
+                    if (result.execution_status !== "ok") {
+                      return (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          Not graded ({result.execution_status})
+                        </span>
+                      );
+                    }
                     const active = sortedGraderEntries.filter(([n]) => !disabledGraders.has(n));
                     const failed = active.filter(([, g]) => !g.pass && !g.skipped);
                     const skipped = active.filter(([, g]) => g.skipped);
@@ -211,6 +232,7 @@ export function EvalResultsTable({
                 </td>
                 <td className="px-4 py-3">
                   {(() => {
+                    if (result.execution_status !== "ok") return null;
                     const active = sortedGraderEntries.filter(([n]) => !disabledGraders.has(n));
                     const failed = active.filter(([, g]) => !g.pass && !g.skipped);
                     const skipped = active.filter(([, g]) => g.skipped);

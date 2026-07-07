@@ -108,7 +108,7 @@ export const triggerEval = (
     }),
   });
 
-export type RerunScope = "failed" | "filtered" | "selected";
+export type RerunScope = "failed" | "filtered" | "selected" | "dlq";
 
 export const rerunEval = (runId: string, opts?: { testIds?: string[]; scope?: RerunScope }) =>
   request<TriggerEvalResponse>(`/api/evals/${runId}/rerun`, {
