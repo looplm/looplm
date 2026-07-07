@@ -5,6 +5,7 @@ import type { EvalResultItem, EvaluatorItem, ConversationTurn, RootCauseDetail, 
 import { sortGraderEntries, sortGraderDetails, formatScoreValue, formatScoreLabel, rootCauseStyle } from "./eval-utils";
 import { ExpectedOutputDiff, Section, ExpandableBox, CopyButton } from "./eval-components";
 import { GraderResultCard } from "./grader-result-card";
+import { ExecutionResultBadge } from "@/components/eval/result-badge";
 import { usePermissions } from "@/components/permissions-context";
 
 interface TestResultModalProps {
@@ -83,23 +84,7 @@ export function TestResultModal({
           <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-800 shrink-0">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-semibold">{result.test_id}</h2>
-              {result.execution_status === "degraded" ? (
-                <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                  DEGRADED
-                </span>
-              ) : result.execution_status === "error" ? (
-                <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
-                  ERROR
-                </span>
-              ) : result.pass ? (
-                <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                  PASS
-                </span>
-              ) : (
-                <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">
-                  FAIL
-                </span>
-              )}
+              <ExecutionResultBadge executionStatus={result.execution_status} pass={result.pass} />
               {result.turns_to_pass != null && result.turns_to_pass > 1 && (
                 <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
                   Turn {result.turns_to_pass}
@@ -186,7 +171,7 @@ export function TestResultModal({
                         This case ran against <span className="font-medium">degraded retrieval</span>
                         {mode ? ` (${mode})` : ""}: the target fell back to keyword-only search after
                         its embeddings deployment throttled. It was not graded and is excluded from the
-                        pass rate. Retry it from the run page once capacity recovers.
+                        pass rate.
                       </>
                     ) : (
                       <>

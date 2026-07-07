@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { EvalResultSummary, EvaluatorItem } from "@/lib/api";
 import { sortGraderEntries, graderDisplayName, rootCauseStyle } from "./eval-utils";
+import { ExecutionResultBadge, executionResultRank } from "@/components/eval/result-badge";
 
 type SortColumn = "test_id" | "result" | "summary" | "graders";
 type SortDirection = "asc" | "desc";
@@ -79,7 +80,10 @@ export function EvalResultsTable({
       case "test_id":
         return (a.test_id || "").localeCompare(b.test_id || "");
       case "result":
-        return (a.pass ? 1 : 0) - (b.pass ? 1 : 0);
+        return (
+          executionResultRank(a.execution_status, a.pass) -
+          executionResultRank(b.execution_status, b.pass)
+        );
       case "summary":
       case "graders":
         return getFailedCount(a) - getFailedCount(b);
@@ -167,29 +171,7 @@ export function EvalResultsTable({
                 <td className="px-4 py-3 text-sm">{result.test_id}</td>
                 <td className="px-4 py-3 text-center">
                   <div className="flex items-center justify-center gap-1.5">
-                    {result.execution_status === "degraded" ? (
-                      <span
-                        className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
-                        title="Ran against degraded (keyword-only) retrieval — not graded, excluded from the pass rate"
-                      >
-                        DEGRADED
-                      </span>
-                    ) : result.execution_status === "error" ? (
-                      <span
-                        className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400"
-                        title="Failed to run after retries — not graded, excluded from the pass rate"
-                      >
-                        ERROR
-                      </span>
-                    ) : result.pass ? (
-                      <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                        PASS
-                      </span>
-                    ) : (
-                      <span className="inline-block px-2 py-0.5 rounded text-sm font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">
-                        FAIL
-                      </span>
-                    )}
+                    <ExecutionResultBadge executionStatus={result.execution_status} pass={result.pass} />
                     {result.turns_to_pass != null && result.turns_to_pass > 1 && (
                       <span
                         className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"

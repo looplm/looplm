@@ -46,14 +46,19 @@ export function useEvalFilters(run: EvalRunDetail | null, computedResults: EvalR
 
   const filteredResults = useMemo(() => {
     if (filter === "all") return rootCauseFiltered;
+    // "failed" means a graded quality failure — degraded/errored (non-ok) rows are
+    // dead-letter, not failures, and are surfaced via their own badges under "all".
     return rootCauseFiltered.filter((r) =>
-      filter === "passed" ? r.pass : !r.pass
+      filter === "passed" ? r.pass : !r.pass && (r.execution_status ?? "ok") === "ok"
     );
   }, [rootCauseFiltered, filter]);
 
   const computedStats = useMemo(() => {
-    const total = rootCauseFiltered.length;
-    const passed = rootCauseFiltered.filter((r) => r.pass).length;
+    // Mirror the backend: degraded/errored rows did not run representatively, so they
+    // are excluded from the headline pass rate (they persist as DLQ rows).
+    const representative = rootCauseFiltered.filter((r) => (r.execution_status ?? "ok") === "ok");
+    const total = representative.length;
+    const passed = representative.filter((r) => r.pass).length;
     const failed = total - passed;
     return { total, passed, failed, passRate: total > 0 ? passed / total : 0 };
   }, [rootCauseFiltered]);
@@ -61,7 +66,10 @@ export function useEvalFilters(run: EvalRunDetail | null, computedResults: EvalR
   const subsetFilterActive = patternFilter.length > 0 || rootCauseFilter.length > 0 || !!testIdFilter;
 
   const visibleFailingTestIds = useMemo(
-    () => rootCauseFiltered.filter((r) => !r.pass).map((r) => r.test_id),
+    // Quality failures only — degraded/errored rows are retried via the DLQ, not here.
+    () => rootCauseFiltered
+      .filter((r) => !r.pass && (r.execution_status ?? "ok") === "ok")
+      .map((r) => r.test_id),
     [rootCauseFiltered],
   );
 
