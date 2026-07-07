@@ -148,7 +148,16 @@ def test_enrich_result_metadata_surfaces_usage_and_context():
     snake = _enrich_result_metadata({"raw_response": _json.dumps({"usage": {"prompt_tokens": 5, "completion_tokens": 2}})})
     assert snake["target_usage"]["total_tokens"] == 7
     bare = _enrich_result_metadata({"raw_response": _json.dumps({"answer": "a"})})
-    assert "target_usage" not in bare and "model_context" not in bare
+    assert "target_usage" not in bare and "model_context" not in bare and "model_prompt" not in bare
+
+    # The literal prompt (system + messages) is surfaced when the target returns it.
+    with_prompt = _enrich_result_metadata({"raw_response": _json.dumps({
+        "prompt": {"system": "You are KLARA", "messages": [{"role": "user", "content": "Q"}]},
+    })})
+    assert with_prompt["model_prompt"] == {
+        "system": "You are KLARA",
+        "messages": [{"role": "user", "content": "Q"}],
+    }
 
 
 @pytest.mark.asyncio

@@ -45,6 +45,10 @@ export function TestResultModal({
     | undefined;
   const modelContext =
     typeof result.metadata?.model_context === "string" ? (result.metadata.model_context as string) : null;
+  // The literal prompt, when the target returns it (rde-gpt): system + assembled turns.
+  const modelPrompt = result.metadata?.model_prompt as
+    | { system?: string; messages?: Array<{ role: string; content: string }> }
+    | undefined;
 
   // Dataset the result's test case belongs to — needed to promote retrieved URLs
   // into the test case's expected URLs. Per-result (new triggered runs), falling
@@ -332,8 +336,8 @@ export function TestResultModal({
                 </div>
               </Section>
 
-              {/* Prompt context + token usage for the generation call */}
-              {(targetUsage || modelContext) && (
+              {/* Prompt + token usage for the generation call */}
+              {(targetUsage || modelContext || modelPrompt) && (
                 <Section
                   title="Model prompt & tokens"
                   defaultOpen={false}
@@ -358,11 +362,36 @@ export function TestResultModal({
                       </span>
                     </div>
                   )}
-                  {modelContext ? (
+                  {modelPrompt ? (
+                    <div className="flex flex-col gap-3">
+                      <p className="text-xs text-gray-400 dark:text-slate-500">
+                        The literal prompt the model received (image parts elided). Retrieved
+                        context is embedded in the last user turn.
+                      </p>
+                      {modelPrompt.system && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-1">System</p>
+                          <ExpandableBox className="whitespace-pre-wrap text-sm font-mono">
+                            {modelPrompt.system}
+                          </ExpandableBox>
+                        </div>
+                      )}
+                      {(modelPrompt.messages ?? []).map((m, i) => (
+                        <div key={i}>
+                          <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-1 capitalize">
+                            {m.role || "message"}
+                          </p>
+                          <ExpandableBox className="whitespace-pre-wrap text-sm font-mono">
+                            {m.content}
+                          </ExpandableBox>
+                        </div>
+                      ))}
+                    </div>
+                  ) : modelContext ? (
                     <>
                       <p className="text-xs text-gray-400 dark:text-slate-500 mb-1">
-                        Full context block fed into the generation prompt (the bulk of the input tokens).
-                        The target does not return its system prompt, so the literal full prompt is not shown.
+                        Context block fed into the generation prompt (the bulk of the input tokens).
+                        This target does not return its system prompt, so only the context is shown.
                       </p>
                       <ExpandableBox className="whitespace-pre-wrap text-sm font-mono">
                         {modelContext}
@@ -370,7 +399,7 @@ export function TestResultModal({
                     </>
                   ) : (
                     <p className="text-sm text-gray-400 dark:text-slate-500">
-                      The target did not return the prompt context for this call.
+                      The target did not return the prompt for this call.
                     </p>
                   )}
                 </Section>

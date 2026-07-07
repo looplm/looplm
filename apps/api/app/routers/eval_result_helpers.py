@@ -63,6 +63,27 @@ def _enrich_result_metadata(
     if isinstance(fc, str) and fc.strip():
         enriched["model_context"] = fc
 
+    # The literal generation prompt, when the target returns it (rde-gpt eval endpoint):
+    # {system, messages:[{role, content}]}. Supersedes model_context for display since
+    # it is the exact prompt (system + assembled turns with context embedded).
+    prompt = parsed.get("prompt")
+    if isinstance(prompt, dict):
+        model_prompt: dict[str, Any] = {}
+        system = prompt.get("system")
+        if isinstance(system, str) and system.strip():
+            model_prompt["system"] = system
+        raw_messages = prompt.get("messages")
+        if isinstance(raw_messages, list):
+            messages = [
+                {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
+                for m in raw_messages
+                if isinstance(m, dict)
+            ]
+            if messages:
+                model_prompt["messages"] = messages
+        if model_prompt:
+            enriched["model_prompt"] = model_prompt
+
     return enriched
 
 
