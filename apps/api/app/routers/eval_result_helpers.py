@@ -8,13 +8,37 @@ from app.schemas.evaluations import GraderResultSummary
 from app.services.retrieval_config import extract_retrieval_context_from_payload
 
 
+def _extract_target_usage(parsed: dict[str, Any]) -> dict[str, int] | None:
+    """Pull the target generation call's token usage from its response payload.
+
+    Handles the OpenAI-shaped ``usage`` object in either camelCase (``promptTokens``)
+    or snake_case (``prompt_tokens``). Returns None when the target reports no usage.
+    """
+    usage = parsed.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    pt = usage.get("promptTokens", usage.get("prompt_tokens"))
+    ct = usage.get("completionTokens", usage.get("completion_tokens"))
+    if not isinstance(pt, (int, float)) and not isinstance(ct, (int, float)):
+        return None
+    pt = int(pt or 0)
+    ct = int(ct or 0)
+    return {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": pt + ct}
+
+
 def _enrich_result_metadata(
     meta: dict[str, Any] | None, *, payload_key: str | None = None
 ) -> dict[str, Any]:
-    """Enrich eval result metadata with retrieval_context extracted from raw_response."""
+    """Enrich eval result metadata (read-time) for the row modal.
+
+    Adds, when present in the target's raw response and not already stored:
+    - ``retrieval_context``: the (truncated) retrieval context snippet.
+    - ``target_usage``: the generation LLM's token usage (input/output/total).
+    - ``model_context``: the full ``formattedContext`` block fed into the generation
+      prompt — untruncated, unlike ``retrieval_context``. This is the context the
+      model saw; the target does not return the literal system prompt.
+    """
     meta = meta or {}
-    if "retrieval_context" in meta:
-        return meta
     raw = meta.get("raw_response")
     if not raw:
         return meta
@@ -22,12 +46,24 @@ def _enrich_result_metadata(
         parsed = json.loads(raw) if isinstance(raw, str) else raw
     except (json.JSONDecodeError, TypeError):
         return meta
-    ctx = extract_retrieval_context_from_payload(parsed, payload_key=payload_key)
-    if ctx:
-        enriched = dict(meta)
-        enriched["retrieval_context"] = ctx
-        return enriched
-    return meta
+    if not isinstance(parsed, dict):
+        return meta
+
+    enriched = dict(meta)
+    if "retrieval_context" not in enriched:
+        ctx = extract_retrieval_context_from_payload(parsed, payload_key=payload_key)
+        if ctx:
+            enriched["retrieval_context"] = ctx
+
+    usage = _extract_target_usage(parsed)
+    if usage:
+        enriched["target_usage"] = usage
+
+    fc = parsed.get("formattedContext")
+    if isinstance(fc, str) and fc.strip():
+        enriched["model_context"] = fc
+
+    return enriched
 
 
 def _summarize_graders(graders: dict[str, Any] | None) -> dict[str, GraderResultSummary]:

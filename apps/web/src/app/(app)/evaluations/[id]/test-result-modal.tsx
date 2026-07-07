@@ -38,6 +38,14 @@ export function TestResultModal({
   const { canWrite } = usePermissions();
   const conversationHistory: ConversationTurn[] = (result.metadata?.conversation_history as ConversationTurn[]) || [];
 
+  // Target generation-LLM token usage + the full context block fed into its prompt
+  // (see _enrich_result_metadata). The target does not return the literal system prompt.
+  const targetUsage = result.metadata?.target_usage as
+    | { prompt_tokens: number; completion_tokens: number; total_tokens: number }
+    | undefined;
+  const modelContext =
+    typeof result.metadata?.model_context === "string" ? (result.metadata.model_context as string) : null;
+
   // Dataset the result's test case belongs to — needed to promote retrieved URLs
   // into the test case's expected URLs. Per-result (new triggered runs), falling
   // back to the run-level dataset_ids.
@@ -323,6 +331,50 @@ export function TestResultModal({
                   )}
                 </div>
               </Section>
+
+              {/* Prompt context + token usage for the generation call */}
+              {(targetUsage || modelContext) && (
+                <Section
+                  title="Model prompt & tokens"
+                  defaultOpen={false}
+                  trailing={
+                    targetUsage ? (
+                      <span className="text-sm font-normal text-gray-500 dark:text-slate-400">
+                        {targetUsage.prompt_tokens.toLocaleString()} in / {targetUsage.completion_tokens.toLocaleString()} out tokens
+                      </span>
+                    ) : undefined
+                  }
+                >
+                  {targetUsage && (
+                    <div className="flex flex-wrap gap-2 mb-3 text-sm">
+                      <span className="px-2 py-1 rounded bg-gray-100 dark:bg-slate-800">
+                        Input: <span className="font-medium">{targetUsage.prompt_tokens.toLocaleString()}</span> tokens
+                      </span>
+                      <span className="px-2 py-1 rounded bg-gray-100 dark:bg-slate-800">
+                        Output: <span className="font-medium">{targetUsage.completion_tokens.toLocaleString()}</span> tokens
+                      </span>
+                      <span className="px-2 py-1 rounded bg-gray-100 dark:bg-slate-800">
+                        Total: <span className="font-medium">{targetUsage.total_tokens.toLocaleString()}</span> tokens
+                      </span>
+                    </div>
+                  )}
+                  {modelContext ? (
+                    <>
+                      <p className="text-xs text-gray-400 dark:text-slate-500 mb-1">
+                        Full context block fed into the generation prompt (the bulk of the input tokens).
+                        The target does not return its system prompt, so the literal full prompt is not shown.
+                      </p>
+                      <ExpandableBox className="whitespace-pre-wrap text-sm font-mono">
+                        {modelContext}
+                      </ExpandableBox>
+                    </>
+                  ) : (
+                    <p className="text-sm text-gray-400 dark:text-slate-500">
+                      The target did not return the prompt context for this call.
+                    </p>
+                  )}
+                </Section>
+              )}
 
               {/* Retrieval Context / Raw API Response */}
               {typeof result.metadata?.retrieval_context === "string" ? (

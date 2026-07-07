@@ -125,6 +125,32 @@ async def test_execution_status_surfaced_in_list_and_modal(client, auth_headers,
     assert modal_resp.json()["execution_status"] == "degraded"
 
 
+def test_enrich_result_metadata_surfaces_usage_and_context():
+    """The row-modal enrichment pulls target token usage and the full context block."""
+    import json as _json
+
+    from app.routers.eval_result_helpers import _enrich_result_metadata
+
+    raw = _json.dumps({
+        "answer": "a",
+        "formattedContext": "Gefundene Dokumente ...",
+        "usage": {"promptTokens": 21186, "completionTokens": 151},
+    })
+    out = _enrich_result_metadata({"raw_response": raw})
+    assert out["target_usage"] == {
+        "prompt_tokens": 21186,
+        "completion_tokens": 151,
+        "total_tokens": 21337,
+    }
+    assert out["model_context"] == "Gefundene Dokumente ..."
+
+    # snake_case usage is accepted; a payload without usage/context adds nothing.
+    snake = _enrich_result_metadata({"raw_response": _json.dumps({"usage": {"prompt_tokens": 5, "completion_tokens": 2}})})
+    assert snake["target_usage"]["total_tokens"] == 7
+    bare = _enrich_result_metadata({"raw_response": _json.dumps({"answer": "a"})})
+    assert "target_usage" not in bare and "model_context" not in bare
+
+
 @pytest.mark.asyncio
 async def test_get_eval_result_404_when_missing(client, auth_headers):
     import uuid
