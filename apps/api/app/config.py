@@ -42,6 +42,24 @@ class Settings(BaseSettings):
     # `hybrid`/`mixed`, never `keyword-fallback`. Raise only alongside more
     # embeddings capacity (or a dedicated eval deployment).
     eval_max_concurrency: int = 3
+    # Process-wide ceiling on concurrent target calls across ALL eval jobs/sessions.
+    # eval_max_concurrency caps a single run; this caps the sum, so several evals
+    # running in parallel can't stack their per-run concurrency into the target
+    # embeddings throttle. Enforced via a shared semaphore in model_resilience.
+    eval_global_max_concurrency: int = 3
+    # Outbound retry policy for transient target/model failures — real 429/5xx/timeout
+    # AND a detected `keyword-fallback` degrade (which arrives as HTTP 200, so it is only
+    # retryable because we raise on it). max_retries counts attempts AFTER the first try;
+    # delay is base * 2**(attempt-1) plus uniform jitter, so retries spread out rather
+    # than synchronising into a fresh burst against the same throttled deployment.
+    eval_target_max_retries: int = 3
+    eval_backoff_base_seconds: float = 1.0
+    eval_backoff_jitter_seconds: float = 0.5
+    # Explicit retry budget for LoopLM's own OpenAI/Azure SDK clients (judges,
+    # query embeddings). The SDK retries 429/5xx/timeout internally with backoff;
+    # set this instead of relying on the invisible default (2) so grading and
+    # embedding calls survive transient throttling deterministically.
+    model_max_retries: int = 3
 
     # AI judge (chunk relevance grader) — chunks go out in FULL, never truncated. To stay under
     # the model's context window the judge splits the pool into token-budgeted batches (mirroring

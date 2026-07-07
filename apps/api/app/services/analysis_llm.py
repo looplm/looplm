@@ -63,7 +63,9 @@ class AnalysisLlmService:
                     "OpenAI API key is required. Configure it in Settings → General or set OPENAI_API_KEY."
                 )
             self._model = settings.openai_model
-            self._client = AsyncOpenAI(api_key=api_key, timeout=120.0)
+            self._client = AsyncOpenAI(
+                api_key=api_key, timeout=120.0, max_retries=settings.model_max_retries
+            )
             return
 
         # azure_openai
@@ -90,6 +92,7 @@ class AnalysisLlmService:
             api_version=api_version,
             azure_endpoint=endpoint,
             timeout=120.0,
+            max_retries=settings.model_max_retries,
         )
 
     @property

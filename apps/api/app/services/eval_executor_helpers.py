@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from uuid import uuid4
 
 import httpx
@@ -13,6 +14,12 @@ import httpx
 from app.models.models import Evaluator, EvaluatorType, TestCase
 from app.schemas.evaluations import EvalResultImport, GraderResult
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
+from app.services.model_resilience import (
+    DEGRADED_RETRIEVAL_MODE,
+    GLOBAL_TARGET_SEM,
+    DegradedRetrievalError,
+    retry_async,
+)
 from app.services.retrieval_config import (
     extract_retrieval_context_from_payload,
     extract_retrieved_chunks,
@@ -157,6 +164,88 @@ def _fmt_ms(ms: int) -> str:
     return f"{ms / 1000:.1f}s" if ms >= 1000 else f"{ms}ms"
 
 
+@dataclass
+class _TargetOutcome:
+    """Result of a resilient target call, including its execution health.
+
+    ``status`` is ``ok`` (usable, representative response), ``degraded`` (retries
+    exhausted while the target stayed on keyword-only retrieval — response kept but
+    flagged so it lands in the DLQ instead of being graded as representative), or
+    ``error`` (hard failure after retries — no usable response).
+    """
+
+    output_text: str | None
+    raw_response: str | None
+    elapsed_ms: int
+    status: str
+    attempts: int
+    retrieval_mode: str | None = None
+    error: str | None = None
+
+
+# Execution-status severity, used to escalate a multi-turn case to its worst turn.
+_SEVERITY = {"ok": 0, "degraded": 1, "error": 2}
+
+
+def _retrieval_mode_of(raw_response: str) -> str | None:
+    """Extract ``retrievalDiagnostics.retrievalMode`` from a raw target response, if present."""
+    try:
+        parsed = json.loads(raw_response)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if isinstance(parsed, dict):
+        diagnostics = parsed.get("retrievalDiagnostics")
+        if isinstance(diagnostics, dict):
+            mode = diagnostics.get("retrievalMode")
+            if isinstance(mode, str) and mode:
+                return mode
+    return None
+
+
+async def _call_target_api_resilient(
+    *args,
+    on_progress: Callable[[str], Awaitable[None]] | None = None,
+    **kwargs,
+) -> _TargetOutcome:
+    """Call the target under retry+backoff and a process-wide concurrency ceiling.
+
+    Retries real transient failures (429/5xx/timeout) and a detected
+    ``keyword-fallback`` degrade (raised as :class:`DegradedRetrievalError` since it
+    arrives as HTTP 200). Never raises: exhausted retries collapse into a
+    ``degraded`` or ``error`` :class:`_TargetOutcome` so the caller records a soft
+    failure rather than losing the row.
+    """
+    attempts = 0
+
+    async def _on_retry(attempt: int, delay: float, exc: BaseException) -> None:
+        nonlocal attempts
+        attempts = attempt
+        if on_progress is not None:
+            label = "degraded retrieval" if isinstance(exc, DegradedRetrievalError) else "transient error"
+            await on_progress(f" {label}, retry {attempt} in {delay:.1f}s...")
+
+    async def _once():
+        async with GLOBAL_TARGET_SEM:
+            output_text, raw_response, elapsed_ms = await _call_target_api(*args, **kwargs)
+        mode = _retrieval_mode_of(raw_response)
+        if mode == DEGRADED_RETRIEVAL_MODE:
+            raise DegradedRetrievalError(mode, payload=(output_text, raw_response, elapsed_ms))
+        return output_text, raw_response, elapsed_ms, mode
+
+    try:
+        output_text, raw_response, elapsed_ms, mode = await retry_async(_once, on_retry=_on_retry)
+        return _TargetOutcome(
+            output_text, raw_response, elapsed_ms, "ok", attempts + 1, retrieval_mode=mode
+        )
+    except DegradedRetrievalError as exc:
+        output_text, raw_response, elapsed_ms = exc.payload or (None, None, 0)
+        return _TargetOutcome(
+            output_text, raw_response, elapsed_ms, "degraded", attempts + 1, retrieval_mode=exc.mode
+        )
+    except Exception as exc:  # noqa: BLE001 — collapse hard failures into a soft ``error`` outcome
+        return _TargetOutcome(None, None, 0, "error", attempts + 1, error=str(exc))
+
+
 async def _evaluate_single_test_case(
     client: httpx.AsyncClient,
     endpoint: str,
@@ -223,6 +312,9 @@ async def _evaluate_single_test_case(
     final_pass = False
     turns_to_pass: int | None = None
     all_llm_usages: list[LlmUsageInfo] = []
+    # Execution health of the target calls (see _TargetOutcome). Escalates across
+    # turns to the most severe status seen (error > degraded > ok).
+    execution: dict = {"status": "ok", "attempts": 0}
 
     async def _progress(msg: str) -> None:
         if on_progress:
@@ -233,34 +325,44 @@ async def _evaluate_single_test_case(
         turn_expected = turn.get("expected_answer") or expected_output
         turn_prefix = f" turn {turn_num}/{len(turns)}:" if is_multi_turn else ""
 
-        # Call target API
+        # Call target API (retry+backoff, process-wide concurrency cap, degrade detection)
         await _progress(f"{turn_prefix} calling API...")
-        try:
-            output_text, raw_response, elapsed_ms = await _call_target_api(
-                client, endpoint, request_template, response_path,
-                extra_headers, turn_prompt, test_case.context_filters,
-                team_filter=team_filter,
-                tag_filter=tag_filter,
-                filter_enabled=filter_enabled,
-                thread_id=thread_id,
-                metadata=test_case.test_case_metadata,
-                experiment_variables=experiment_variables,
-            )
-        except Exception as e:
-            await _progress(f"{turn_prefix} API error: {e}")
+        outcome = await _call_target_api_resilient(
+            client, endpoint, request_template, response_path,
+            extra_headers, turn_prompt, test_case.context_filters,
+            team_filter=team_filter,
+            tag_filter=tag_filter,
+            filter_enabled=filter_enabled,
+            thread_id=thread_id,
+            metadata=test_case.test_case_metadata,
+            experiment_variables=experiment_variables,
+            on_progress=lambda msg: _progress(f"{turn_prefix}{msg}"),
+        )
+        execution["attempts"] += outcome.attempts
+        if _SEVERITY[outcome.status] > _SEVERITY[execution["status"]]:
+            execution["status"] = outcome.status
+            if outcome.error:
+                execution["error"] = outcome.error
+
+        if outcome.status == "error":
+            await _progress(f"{turn_prefix} API error: {outcome.error}")
             # Record failed API call in history and stop
             conversation_history.append({
                 "turn": turn_num,
                 "prompt": turn_prompt,
                 "response": None,
                 "pass": False,
-                "error": str(e),
+                "error": outcome.error,
                 "graders": {},
             })
             final_output = None
             final_raw_response = None
             final_graders = {}
             break
+
+        output_text = outcome.output_text
+        raw_response = outcome.raw_response
+        elapsed_ms = outcome.elapsed_ms
 
         await _progress(f"{turn_prefix} response received ({_fmt_ms(elapsed_ms)}), running {len(evaluators)} graders...")
 
@@ -299,6 +401,10 @@ async def _evaluate_single_test_case(
     # Build result metadata
     metadata = _build_result_metadata(final_raw_response or "", payload_key=payload_key)
     metadata["dataset_id"] = str(test_case.dataset_id)
+    # Execution health so the DLQ can distinguish "failed to run / degraded" from a
+    # legitimate wrong-answer FAIL. ``ok`` results carry no flag (keeps rows lean).
+    if execution["status"] != "ok":
+        metadata["execution"] = execution
     if is_multi_turn:
         metadata["conversation_history"] = conversation_history
 

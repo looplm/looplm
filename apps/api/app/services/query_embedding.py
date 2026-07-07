@@ -68,7 +68,11 @@ def build_query_embedder(merged_settings: dict | None) -> QueryEmbedder | None:
             return None
         api_version = s.get("azure_openai_api_version") or settings.azure_openai_api_version
         client = AsyncAzureOpenAI(
-            api_key=api_key, api_version=api_version, azure_endpoint=endpoint, timeout=60.0
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=endpoint,
+            timeout=60.0,
+            max_retries=settings.model_max_retries,
         )
         return QueryEmbedder(client, deployment, dims)
 
@@ -77,7 +81,11 @@ def build_query_embedder(merged_settings: dict | None) -> QueryEmbedder | None:
     model = s.get("openai_embedding_model") or settings.openai_embedding_model
     if not (api_key and model):
         return None
-    return QueryEmbedder(AsyncOpenAI(api_key=api_key, timeout=60.0), model, dims)
+    return QueryEmbedder(
+        AsyncOpenAI(api_key=api_key, timeout=60.0, max_retries=settings.model_max_retries),
+        model,
+        dims,
+    )
 
 
 async def embed_query_with(embedder: QueryEmbedder | None, query: str) -> list[float] | None:
