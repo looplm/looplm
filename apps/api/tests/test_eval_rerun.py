@@ -129,6 +129,59 @@ async def test_rerun_filtered_scope_label_is_recorded(client, auth_headers, eval
 
 
 @pytest.mark.asyncio
+async def test_rerun_dlq_scope_selects_only_degraded_and_errored(
+    client, auth_headers, test_project, db_session, capture_background,
+):
+    """scope='dlq' reruns only execution-failed rows, not quality (pass=False) failures."""
+    test_project.settings = {"eval_target_endpoint": "https://target.example.com/chat"}
+    db_session.add(test_project)
+    dataset = TestDataset(id=uuid4(), project_id=test_project.id, name="DSX")
+    db_session.add(dataset)
+    await db_session.flush()
+    for tid in ["ok-pass", "quality-fail", "degraded-1", "error-1"]:
+        db_session.add(TestCase(id=uuid4(), dataset_id=dataset.id, test_id=tid, prompt=tid, status="active"))
+
+    run = EvalRun(
+        id=uuid4(), project_id=test_project.id, name="Eval: DSX", source="triggered",
+        tags=[], total=2, passed=1, failed=1, grader_summary={}, score_summary={}, run_metadata={},
+    )
+    db_session.add(run)
+    await db_session.flush()
+
+    for tid, passed, es in [
+        ("ok-pass", True, "ok"),
+        ("quality-fail", False, "ok"),   # a real quality failure — NOT in the DLQ
+        ("degraded-1", False, "degraded"),
+        ("error-1", False, "error"),
+    ]:
+        db_session.add(EvalResult(
+            id=uuid4(), run_id=run.id, test_id=tid, pass_=passed,
+            tags=[], graders={}, scores={}, result_metadata={}, execution_status=es,
+        ))
+    db_session.add(EvalJob(
+        id=uuid4(), project_id=test_project.id, test_suite="DSX",
+        dataset_ids=[str(dataset.id)], status=EvalJobStatus.completed, run_id=run.id,
+        config={"filter_mode": "as_configured", "concurrency": 2, "max_turns": 1, "use_batch": False},
+    ))
+    await db_session.commit()
+
+    resp = await client.post(f"/api/evals/{run.id}/rerun", headers=auth_headers, json={"scope": "dlq"})
+    assert resp.status_code == 202
+    assert capture_background["kwargs"]["include_test_ids"] == ["degraded-1", "error-1"]
+    assert capture_background["kwargs"]["rerun_scope"] == "dlq"
+
+
+@pytest.mark.asyncio
+async def test_rerun_dlq_scope_400_when_no_dead_letters(client, auth_headers, eval_setup):
+    """A run whose results all ran representatively ('ok') has an empty DLQ."""
+    resp = await client.post(
+        f"/api/evals/{eval_setup['run'].id}/rerun", headers=auth_headers, json={"scope": "dlq"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"]["code"] == "NO_MATCHING_TEST_CASES"
+
+
+@pytest.mark.asyncio
 async def test_rerun_unknown_ids_returns_400(client, auth_headers, eval_setup, capture_background):
     resp = await client.post(
         f"/api/evals/{eval_setup['run'].id}/rerun",

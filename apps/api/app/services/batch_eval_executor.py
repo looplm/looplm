@@ -33,6 +33,7 @@ from app.models.models import (
 from app.routers.eval_helpers import _compute_summaries
 from app.schemas.evaluations import EvalResultImport
 from app.services.batch_eval_helpers import _evaluate_single_test_case_batch
+from app.services.eval_executor_helpers import execution_status_of
 from app.services.retrieval_config import get_retrieval_payload_key_from_settings
 from app.services.retrieval_metrics_aggregate import compute_and_store_run_retrieval_summary
 from app.services.batch_llm_service import BatchLlmService
@@ -280,6 +281,7 @@ async def run_eval_batch(
                         scores=r.scores,
                         result_metadata=r.metadata or {},
                         turns_to_pass=r.turns_to_pass,
+                        execution_status=execution_status_of(r.metadata),
                     )
                     db.add(eval_result)
                     await db.flush()

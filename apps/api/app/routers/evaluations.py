@@ -190,6 +190,7 @@ async def get_eval_run(
         EvalResult.graders,
         EvalResult.turns_to_pass,
         EvalResult.result_metadata,
+        EvalResult.execution_status,
         EvalResult.created_at,
     ).where(EvalResult.run_id == run.id)
     if pass_filter is not None:
@@ -259,6 +260,7 @@ async def get_eval_run(
                 failure_pattern=_failure_pattern(r.result_metadata),
                 grader_pattern=_grader_pattern(r.result_metadata),
                 root_cause=_root_cause_category(r.result_metadata),
+                execution_status=r.execution_status or "ok",
                 created_at=r.created_at,
             )
             for r in rows

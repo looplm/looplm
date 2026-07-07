@@ -341,7 +341,13 @@ async def rerun_eval(
             dataset_ids = original_job.dataset_ids
         original_config = original_job.config or {}
 
-    concurrency = original_config.get("concurrency", settings.eval_default_concurrency)
+    # Clamp to the server-side ceiling so a rerun (including a DLQ retry during a
+    # throttle) can't replay at a concurrency that degrades the target's embeddings
+    # deployment (see settings.eval_max_concurrency).
+    concurrency = min(
+        original_config.get("concurrency", settings.eval_default_concurrency),
+        settings.eval_max_concurrency,
+    )
     filter_mode = original_config.get("filter_mode", "as_configured")
     max_turns = original_config.get("max_turns", 1)
     # dataset_ids come from JSONB as strings; UUID-typed columns need real UUIDs
@@ -350,10 +356,21 @@ async def rerun_eval(
     # Resolve the subset of test cases to rerun (None = full rerun)
     include_test_ids: list[str] | None = None
     rerun_scope: str | None = None
-    if body and (body.test_ids or body.scope == "failed"):
+    if body and (body.test_ids or body.scope in ("failed", "dlq")):
         if body.test_ids:
             requested = {normalize_result_test_id(tid) for tid in body.test_ids}
             rerun_scope = body.scope or "selected"
+        elif body.scope == "dlq":
+            # Dead-letter queue: only rows that failed to run representatively (degraded
+            # retrieval or a hard error), NOT quality failures. These are the retryable ones.
+            dlq_result = await db.execute(
+                select(EvalResult.test_id).where(
+                    EvalResult.run_id == run_id,
+                    EvalResult.execution_status != "ok",
+                )
+            )
+            requested = {normalize_result_test_id(r[0]) for r in dlq_result.all()}
+            rerun_scope = "dlq"
         else:
             failed_result = await db.execute(
                 select(EvalResult.test_id).where(
@@ -365,9 +382,14 @@ async def rerun_eval(
             rerun_scope = "failed"
 
         if not requested:
+            empty_msg = (
+                "No dead-letter results to retry: every result ran representatively."
+                if rerun_scope == "dlq"
+                else "No test cases to rerun: the run has no failed results."
+            )
             raise HTTPException(
                 status_code=400,
-                detail={"error": {"code": "NO_MATCHING_TEST_CASES", "message": "No test cases to rerun: the run has no failed results."}},
+                detail={"error": {"code": "NO_MATCHING_TEST_CASES", "message": empty_msg}},
             )
 
         # Validate overlap with currently runnable test cases before spawning the job

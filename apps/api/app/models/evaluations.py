@@ -151,6 +151,8 @@ class EvalResult(Base):
     __tablename__ = "eval_results"
     __table_args__ = (
         Index("idx_eval_results_run_id", "run_id"),
+        # Backs the DLQ query (flagged rows within a run); most rows are 'ok'.
+        Index("idx_eval_results_run_execution", "run_id", "execution_status"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -168,6 +170,10 @@ class EvalResult(Base):
     scores = Column(JSONB, nullable=False, server_default=text("'{}'"))
     turns_to_pass = Column(Integer, nullable=True)
     result_metadata = Column("metadata", JSONB, nullable=False, server_default=text("'{}'"))
+    # Execution health: 'ok' (representative, graded), 'degraded' (keyword-only
+    # fallback), or 'error' (failed to run). Non-'ok' rows are the DLQ; they are
+    # excluded from the run's headline pass rate. Mirrors metadata['execution']['status'].
+    execution_status = Column(String(16), nullable=False, server_default=text("'ok'"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
     run = relationship("EvalRun", back_populates="results")

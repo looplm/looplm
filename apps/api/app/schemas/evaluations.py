@@ -131,6 +131,8 @@ class EvalResultSummary(BaseModel):
     failure_pattern: Optional[str] = None
     grader_pattern: list[str] = Field(default_factory=list)
     root_cause: Optional[str] = None
+    # 'ok' | 'degraded' | 'error' — non-'ok' rows are the dead-letter queue.
+    execution_status: str = "ok"
     created_at: datetime
 
     model_config = {"from_attributes": True, "populate_by_name": True}
@@ -159,6 +161,7 @@ class EvalResultItem(BaseModel):
     scores: dict[str, float]
     metadata: dict[str, Any]
     turns_to_pass: Optional[int] = None
+    execution_status: str = "ok"
     created_at: datetime
 
     model_config = {"from_attributes": True, "populate_by_name": True}

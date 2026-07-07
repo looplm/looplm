@@ -44,7 +44,7 @@ class TriggerEvalRequest(BaseModel):
     )
 
 
-RerunScope = Literal["failed", "filtered", "selected"]
+RerunScope = Literal["failed", "filtered", "selected", "dlq"]
 
 
 class RerunEvalRequest(BaseModel):
@@ -59,8 +59,9 @@ class RerunEvalRequest(BaseModel):
     scope: RerunScope | None = Field(
         None,
         description=(
-            "If 'failed' and test_ids is omitted, the server reruns all failed "
-            "results of the run. Otherwise a label recorded in run metadata."
+            "If 'failed' and test_ids is omitted, the server reruns all failed results. "
+            "If 'dlq', it reruns only the dead-letter rows (degraded/errored execution, "
+            "not quality failures). Otherwise a label recorded in run metadata."
         ),
     )
 

@@ -372,6 +372,7 @@ async def run_eval(
                         scores=r.scores,
                         result_metadata=r.metadata or {},
                         turns_to_pass=r.turns_to_pass,
+                        execution_status=exec_status,
                     )
                     db.add(eval_result)
 
