@@ -249,13 +249,16 @@ async def run_eval(
         eval_results: list[EvalResultImport] = []
         completed = 0
         passed_count = 0
+        # Representative (execution_status == "ok") count, for live pass-rate stats that
+        # match the final recompute — degraded/errored rows are excluded, not counted as fails.
+        representative_completed = 0
 
         # Track which index each task occupies for progress logging
         task_index: dict[str, int] = {}
         next_index = 0
 
         async def _run_with_semaphore(tc: TestCase, fm: str) -> EvalResultImport:
-            nonlocal completed, passed_count, next_index
+            nonlocal completed, passed_count, next_index, representative_completed
 
             # Assign a stable index for this task's log prefix
             async with db_lock:
@@ -338,8 +341,10 @@ async def run_eval(
                 async with db_lock:
                     completed += 1
                     exec_status = execution_status_of(r.metadata)
-                    if exec_status == "ok" and r.pass_:
-                        passed_count += 1
+                    if exec_status == "ok":
+                        representative_completed += 1
+                        if r.pass_:
+                            passed_count += 1
                     if exec_status == "degraded":
                         status = "DEGRADED"
                     elif exec_status == "error":
@@ -393,8 +398,11 @@ async def run_eval(
                     # Update progress and run stats
                     job.progress_current = completed
                     job.log = "\n".join(log_lines)
+                    # Representative-only live stats (mirrors the final recompute); degraded/
+                    # errored rows are excluded from total/passed/failed, not counted as fails.
+                    run.total = representative_completed
                     run.passed = passed_count
-                    run.failed = completed - passed_count
+                    run.failed = representative_completed - passed_count
                     try:
                         await db.commit()
                     except Exception as commit_err:

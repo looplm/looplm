@@ -304,6 +304,7 @@ async def get_eval_result(
             row.result_metadata, payload_key=get_retrieval_payload_key(project)
         ),
         turns_to_pass=row.turns_to_pass,
+        execution_status=row.execution_status or "ok",
         created_at=row.created_at,
     )
 

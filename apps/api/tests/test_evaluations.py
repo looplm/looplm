@@ -96,6 +96,36 @@ async def test_get_eval_result_returns_full_payload(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_execution_status_surfaced_in_list_and_modal(client, auth_headers, db_session, test_project):
+    """A degraded row reports execution_status in both the run-detail list and the modal."""
+    from uuid import uuid4
+
+    from app.models.models import EvalResult, EvalRun
+
+    run = EvalRun(
+        id=uuid4(), project_id=test_project.id, name="Eval: DLQ", source="triggered",
+        tags=[], total=0, passed=0, failed=0, grader_summary={}, score_summary={}, run_metadata={},
+    )
+    db_session.add(run)
+    await db_session.flush()
+    result = EvalResult(
+        id=uuid4(), run_id=run.id, test_id="degraded-case", pass_=False,
+        tags=[], graders={}, scores={}, result_metadata={"execution": {"status": "degraded"}},
+        execution_status="degraded",
+    )
+    db_session.add(result)
+    await db_session.commit()
+
+    list_resp = await client.get(f"/api/evals/{run.id}", headers=auth_headers)
+    assert list_resp.status_code == 200
+    assert list_resp.json()["results"][0]["execution_status"] == "degraded"
+
+    modal_resp = await client.get(f"/api/evals/{run.id}/results/{result.id}", headers=auth_headers)
+    assert modal_resp.status_code == 200
+    assert modal_resp.json()["execution_status"] == "degraded"
+
+
+@pytest.mark.asyncio
 async def test_get_eval_result_404_when_missing(client, auth_headers):
     import uuid
 

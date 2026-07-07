@@ -311,16 +311,26 @@ async def run_eval_batch(
         # Phase 2: Submit batch job
         # ---------------------------------------------------------------
         if not all_batch_prompts:
-            # No LLM judges needed — complete immediately
+            # No LLM judges needed — complete immediately. Exclude degraded/errored rows
+            # from the headline stats (same as the native and batch-finalize paths); they
+            # persist as rows for the DLQ and are counted separately.
             _log("No LLM judge calls needed, completing immediately")
-            total = len(eval_results)
-            passed = sum(1 for r in eval_results if r.pass_)
-            grader_summary, score_summary = _compute_summaries(eval_results)
+            representative = [r for r in eval_results if execution_status_of(r.metadata) == "ok"]
+            degraded_count = sum(1 for r in eval_results if execution_status_of(r.metadata) == "degraded")
+            error_count = sum(1 for r in eval_results if execution_status_of(r.metadata) == "error")
+            total = len(representative)
+            passed = sum(1 for r in representative if r.pass_)
+            grader_summary, score_summary = _compute_summaries(representative)
             run.total = total
             run.passed = passed
             run.failed = total - passed
             run.grader_summary = grader_summary
             run.score_summary = score_summary
+            if degraded_count or error_count:
+                run.run_metadata = {
+                    **(run.run_metadata or {}),
+                    "execution_counts": {"ok": total, "degraded": degraded_count, "error": error_count},
+                }
             await compute_and_store_run_retrieval_summary(db, run, project_id)
             job.status = EvalJobStatus.completed
             job.completed_at = datetime.now(timezone.utc)
