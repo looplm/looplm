@@ -150,6 +150,42 @@ class FeedbackThemeAnalysis(Base):
     project = relationship("Project")
 
 
+class FailureModeAnalysis(Base):
+    """Stores results of LLM-based failure-mode clustering of negative-feedback traces.
+
+    Two-stage: each selected trace is diagnosed into a root-cause category
+    (retrieval/generation/long_context/query/knowledge_gap/refusal/other), then
+    the diagnoses are clustered into named failure modes stored in ``results``.
+    """
+
+    __tablename__ = "failure_mode_analyses"
+    __table_args__ = (
+        Index("idx_failure_mode_analyses_project_id", "project_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    status = Column(String(32), nullable=False, server_default=text("'pending'"))
+    error = Column(Text, nullable=True)
+    total_traces = Column(Integer, nullable=False, server_default=text("0"))
+    processed_traces = Column(Integer, nullable=False, server_default=text("0"))
+    # List of cluster dicts; also carries an overall ``category_counts`` under the
+    # sibling column below so the summary survives without re-deriving from clusters.
+    results = Column(JSONB, nullable=True)
+    category_counts = Column(JSONB, nullable=False, server_default=text("'{}'"))
+    filter_from_date = Column(DateTime(timezone=True), nullable=True)
+    filter_to_date = Column(DateTime(timezone=True), nullable=True)
+    filter_environment = Column(String(255), nullable=True)
+    filter_selected_feedback_ids = Column(JSONB, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    project = relationship("Project")
+
+
 class FeedbackSuggestionRun(Base):
     """Stores generated test case suggestions from feedback so they survive page reloads."""
 

@@ -7,6 +7,7 @@ import { TrendBarChart } from "./feedback-chart";
 import { SuggestionsTab } from "./suggestions-tab";
 import { TopQuestionsTab } from "./top-questions-tab";
 import { FeedbackThemesTab } from "./feedback-themes-tab";
+import { FailureModesTab } from "./feedback-failure-modes-tab";
 import { FeedbackSourcePicker } from "./feedback-source-picker";
 import { useFeedbackPage } from "./use-feedback-page";
 import { downloadTopQuestionsPdf } from "./top-questions-pdf";
@@ -53,6 +54,10 @@ export default function FeedbackPage() {
     feedbackThemesLoading,
     feedbackThemesRunning,
     feedbackThemesTriggering,
+    failureModesResult,
+    failureModesLoading,
+    failureModesRunning,
+    failureModesTriggering,
     evalRunning,
     configuredVerdicts,
     tabClass,
@@ -63,6 +68,7 @@ export default function FeedbackPage() {
     handleAcceptSuggestion,
     handleStopTopQuestions,
     handleStopFeedbackThemes,
+    handleStopFailureModes,
     handleGenerateSuggestions,
     handleStopSuggestionRun,
     toggleFeedbackId,
@@ -121,6 +127,12 @@ export default function FeedbackPage() {
       if (feedbackThemesResult?.status === "completed" && themes.length > 0) {
         return { running: false, label: `${themes.length} theme${themes.length === 1 ? "" : "s"} from ${feedbackThemesResult.total_comments} comments` };
       }
+    } else if (tab === "failure-modes") {
+      if (failureModesRunning) return { running: true, label: "Analysis in progress" };
+      const fm = failureModesResult?.clusters ?? [];
+      if (failureModesResult?.status === "completed" && fm.length > 0) {
+        return { running: false, label: `${fm.length} failure mode${fm.length === 1 ? "" : "s"} from ${failureModesResult.total_traces} traces` };
+      }
     }
     return null;
   })();
@@ -169,6 +181,17 @@ export default function FeedbackPage() {
               className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Stop ({feedbackThemesResult?.processed_comments ?? 0}/{feedbackThemesResult?.total_comments ?? 0})
+            </button>
+          )}
+          {/* Failure Modes — results view controls */}
+          {tab === "failure-modes" && inResults && failureModesRunning && (
+            <button
+              onClick={handleStopFailureModes}
+              disabled={!canEdit}
+              title={!canEdit ? FEEDBACK_READ_ONLY_TITLE : undefined}
+              className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Stop ({failureModesResult?.processed_traces ?? 0}/{failureModesResult?.total_traces ?? 0})
             </button>
           )}
           {/* User Feedback — evaluator config + run */}
@@ -231,6 +254,9 @@ export default function FeedbackPage() {
         <button onClick={() => selectTab("themes")} className={tabClass("themes")}>
           Themes
         </button>
+        <button onClick={() => selectTab("failure-modes")} className={tabClass("failure-modes")}>
+          Failure Modes
+        </button>
       </div>
 
       {/* === User Feedback tab === */}
@@ -290,7 +316,13 @@ export default function FeedbackPage() {
         <>
           <p className="text-sm text-gray-500 dark:text-slate-400 mb-4">
             Select the feedback to generate{" "}
-            {tab === "suggestions" ? "test case suggestions" : tab === "top-questions" ? "top questions" : "themes"} from.
+            {tab === "suggestions"
+              ? "test case suggestions"
+              : tab === "top-questions"
+                ? "top questions"
+                : tab === "failure-modes"
+                  ? "a failure-mode analysis"
+                  : "themes"} from.
             Leave everything unselected to use all feedback matching the current filters.
           </p>
           {lastRun && (
@@ -353,6 +385,15 @@ export default function FeedbackPage() {
               loading={feedbackThemesLoading}
               running={feedbackThemesRunning}
               triggering={feedbackThemesTriggering}
+              onAnalyze={() => setDerivedView("picker")}
+            />
+          )}
+          {tab === "failure-modes" && (
+            <FailureModesTab
+              result={failureModesResult}
+              loading={failureModesLoading}
+              running={failureModesRunning}
+              triggering={failureModesTriggering}
               onAnalyze={() => setDerivedView("picker")}
             />
           )}

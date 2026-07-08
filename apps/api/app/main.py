@@ -87,11 +87,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # can retry. (A live stop now flips status='cancelled' via the DB, which the
     # worker honors cooperatively — so we only ever orphan rows on hard restarts.)
     from datetime import datetime as _dt, timezone as _tz
-    from app.models.feedback_eval import FeedbackThemeAnalysis, TopQuestionsAnalysis
+    from app.models.feedback_eval import (
+        FailureModeAnalysis,
+        FeedbackThemeAnalysis,
+        TopQuestionsAnalysis,
+    )
     async with async_session() as session:
         for _model, _label in (
             (TopQuestionsAnalysis, "top-questions"),
             (FeedbackThemeAnalysis, "feedback-theme"),
+            (FailureModeAnalysis, "failure-mode"),
         ):
             result = await session.execute(
                 _sa_update(_model)

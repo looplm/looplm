@@ -6,12 +6,13 @@ import type { FeedbackScoreItem, FeedbackListResponse } from "@/lib/api";
 
 const FEEDBACK_READ_ONLY_TITLE = "Read-only access. Ask an admin to grant write permission.";
 
-export type GenerateOutput = "suggestions" | "top-questions" | "themes";
+export type GenerateOutput = "suggestions" | "top-questions" | "themes" | "failure-modes";
 
 export const OUTPUT_LABELS: Record<GenerateOutput, string> = {
   suggestions: "Suggestions",
   "top-questions": "Top Questions",
   themes: "Themes",
+  "failure-modes": "Failure Modes",
 };
 
 interface FeedbackSourcePickerProps {

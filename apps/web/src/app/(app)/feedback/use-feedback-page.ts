@@ -7,13 +7,13 @@ import { useFeedbackSuggestions } from "./use-feedback-suggestions";
 import { useFeedbackDerived } from "./use-feedback-derived";
 
 type DerivedView = "picker" | "results";
-type GenerateOutput = "suggestions" | "top-questions" | "themes";
+type GenerateOutput = "suggestions" | "top-questions" | "themes" | "failure-modes";
 
 export function useFeedbackPage() {
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("feedback-tab");
-      if (saved === "feedback" || saved === "suggestions" || saved === "top-questions" || saved === "themes") return saved as Tab;
+      if (saved === "feedback" || saved === "suggestions" || saved === "top-questions" || saved === "themes" || saved === "failure-modes") return saved as Tab;
     }
     return "feedback";
   });
@@ -67,6 +67,8 @@ export function useFeedbackPage() {
       suggestions.loadSuggestions(ids);
     } else if (output === "top-questions") {
       derived.handleAnalyzeTopQuestions(ids);
+    } else if (output === "failure-modes") {
+      derived.handleAnalyzeFailureModes(ids);
     } else {
       derived.handleAnalyzeFeedbackThemes(ids);
     }
@@ -84,7 +86,8 @@ export function useFeedbackPage() {
     if (tab === "suggestions") suggestions.loadLatestSuggestions();
     else if (tab === "top-questions") derived.loadTopQuestions();
     else if (tab === "themes") derived.loadFeedbackThemes();
-  }, [tab, derived.loadTopQuestions, derived.loadFeedbackThemes, suggestions.loadLatestSuggestions]);
+    else if (tab === "failure-modes") derived.loadFailureModes();
+  }, [tab, derived.loadTopQuestions, derived.loadFeedbackThemes, derived.loadFailureModes, suggestions.loadLatestSuggestions]);
 
   // Saved suggestion runs persist across filter changes — wiping them on every
   // filter tweak would defeat the persistence the user expects, and racing
@@ -138,6 +141,10 @@ export function useFeedbackPage() {
     feedbackThemesLoading: derived.feedbackThemesLoading,
     feedbackThemesTriggering: derived.feedbackThemesTriggering,
     feedbackThemesRunning: derived.feedbackThemesRunning,
+    failureModesResult: derived.failureModesResult,
+    failureModesLoading: derived.failureModesLoading,
+    failureModesTriggering: derived.failureModesTriggering,
+    failureModesRunning: derived.failureModesRunning,
     // Computed
     evalRunning: evaluation.evalRunning,
     configuredVerdicts: evaluation.configuredVerdicts,
@@ -152,6 +159,8 @@ export function useFeedbackPage() {
     handleStopTopQuestions: derived.handleStopTopQuestions,
     handleAnalyzeFeedbackThemes: derived.handleAnalyzeFeedbackThemes,
     handleStopFeedbackThemes: derived.handleStopFeedbackThemes,
+    handleAnalyzeFailureModes: derived.handleAnalyzeFailureModes,
+    handleStopFailureModes: derived.handleStopFailureModes,
     handleGenerateSuggestions: suggestions.loadSuggestions,
     handleStopSuggestionRun: suggestions.handleStopSuggestionRun,
     toggleFeedbackId: list.toggleFeedbackId,

@@ -230,6 +230,54 @@ class FeedbackThemesResponse(BaseModel):
     completed_at: Optional[datetime] = None
 
 
+# --- Failure Mode Clustering ---
+
+
+class FailureModeRequest(BaseModel):
+    from_date: Optional[datetime] = None
+    to_date: Optional[datetime] = None
+    environment: Optional[str] = None
+    limit: int = Field(100, ge=2, le=200)
+    # Hand-picked feedback rows. When given, the selection IS the filter:
+    # date/environment filters and the recency limit are skipped (mirrors the
+    # feedback-themes hand-pick path).
+    selected_feedback_ids: Optional[list[UUID]] = None
+
+
+class FailureModeCase(BaseModel):
+    trace_id: Optional[UUID] = None
+    question: Optional[str] = None
+    answer_preview: Optional[str] = None
+    comment: Optional[str] = None
+    feedback_value: Optional[float] = None
+    category: str = "other"
+    explanation: str = ""
+    confidence: Optional[float] = None
+
+
+class FailureModeCluster(BaseModel):
+    rank: int
+    label: str
+    category: str  # dominant root-cause category for this cluster
+    count: int
+    description: str = ""
+    recommendation: str = ""
+    category_counts: dict[str, int] = {}
+    cases: list[FailureModeCase] = []
+
+
+class FailureModesResponse(BaseModel):
+    id: UUID
+    status: str  # "pending" | "running" | "completed" | "failed" | "cancelled"
+    error: Optional[str] = None
+    total_traces: int = 0
+    processed_traces: int = 0
+    clusters: list[FailureModeCluster] = []
+    category_counts: dict[str, int] = {}
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
 # --- Suggestion Run ---
 
 

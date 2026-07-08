@@ -1625,6 +1625,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/feedback/failure-modes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Analyze Failure Modes
+         * @description Start background analysis that diagnoses and clusters failing traces.
+         */
+        post: operations["analyze_failure_modes_api_feedback_failure_modes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/failure-modes/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latest Failure Modes
+         * @description Get the most recent failure-mode analysis for the project.
+         */
+        get: operations["get_latest_failure_modes_api_feedback_failure_modes_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/failure-modes/{analysis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Failure Mode Analysis
+         * @description Get failure-mode analysis status and results.
+         */
+        get: operations["get_failure_mode_analysis_api_feedback_failure_modes__analysis_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/failure-modes/{analysis_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Failure Mode Analysis
+         * @description Cancel an in-progress failure-mode analysis.
+         */
+        post: operations["stop_failure_mode_analysis_api_feedback_failure_modes__analysis_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/feedback/generate-suggestions": {
         parameters: {
             query?: never;
@@ -4010,6 +4090,30 @@ export interface paths {
         head?: never;
         /** Update Expectation */
         patch: operations["update_expectation_api_source_registry_expectations__expectation_id__patch"];
+        trace?: never;
+    };
+    "/api/source-registry/expectations/{expectation_id}/chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Source Chunks
+         * @description Every indexed chunk of one wanted source, in reading order.
+         *
+         *     Resolves the source to its file in the index (URL-hash hit, else title
+         *     search) and lists its chunks with completeness signals (gaps/duplicates in
+         *     the chunk-order sequence) so a reviewer can page through and check coverage.
+         */
+        get: operations["source_chunks_api_source_registry_expectations__expectation_id__chunks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/source-registry/gap-runs": {
@@ -6635,6 +6739,118 @@ export interface components {
             tagFilter?: string[];
             /** Teamfilter */
             teamFilter?: string[];
+        };
+        /** FailureModeCase */
+        FailureModeCase: {
+            /** Answer Preview */
+            answer_preview?: string | null;
+            /**
+             * Category
+             * @default other
+             */
+            category: string;
+            /** Comment */
+            comment?: string | null;
+            /** Confidence */
+            confidence?: number | null;
+            /**
+             * Explanation
+             * @default
+             */
+            explanation: string;
+            /** Feedback Value */
+            feedback_value?: number | null;
+            /** Question */
+            question?: string | null;
+            /** Trace Id */
+            trace_id?: string | null;
+        };
+        /** FailureModeCluster */
+        FailureModeCluster: {
+            /**
+             * Cases
+             * @default []
+             */
+            cases: components["schemas"]["FailureModeCase"][];
+            /** Category */
+            category: string;
+            /**
+             * Category Counts
+             * @default {}
+             */
+            category_counts: {
+                [key: string]: number;
+            };
+            /** Count */
+            count: number;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Label */
+            label: string;
+            /** Rank */
+            rank: number;
+            /**
+             * Recommendation
+             * @default
+             */
+            recommendation: string;
+        };
+        /** FailureModeRequest */
+        FailureModeRequest: {
+            /** Environment */
+            environment?: string | null;
+            /** From Date */
+            from_date?: string | null;
+            /**
+             * Limit
+             * @default 100
+             */
+            limit: number;
+            /** Selected Feedback Ids */
+            selected_feedback_ids?: string[] | null;
+            /** To Date */
+            to_date?: string | null;
+        };
+        /** FailureModesResponse */
+        FailureModesResponse: {
+            /**
+             * Category Counts
+             * @default {}
+             */
+            category_counts: {
+                [key: string]: number;
+            };
+            /**
+             * Clusters
+             * @default []
+             */
+            clusters: components["schemas"]["FailureModeCluster"][];
+            /** Completed At */
+            completed_at?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Processed Traces
+             * @default 0
+             */
+            processed_traces: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Total Traces
+             * @default 0
+             */
+            total_traces: number;
         };
         /** FeedbackEvalItem */
         FeedbackEvalItem: {
@@ -10171,6 +10387,56 @@ export interface components {
             };
             /** Slice */
             slice: string;
+        };
+        /** SourceChunk */
+        SourceChunk: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Ordinal */
+            ordinal?: string | null;
+            /** Text */
+            text?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+        };
+        /** SourceChunksResponse */
+        SourceChunksResponse: {
+            /** Chunk Count */
+            chunk_count: number;
+            /** Chunks */
+            chunks?: components["schemas"]["SourceChunk"][];
+            /** Duplicate Ordinals */
+            duplicate_ordinals?: number[];
+            /**
+             * Expectation Id
+             * Format: uuid
+             */
+            expectation_id: string;
+            /**
+             * Gaps Truncated
+             * @default false
+             */
+            gaps_truncated: boolean;
+            /** Kind */
+            kind?: string | null;
+            /** Matched Title */
+            matched_title?: string | null;
+            /** Matched Url */
+            matched_url?: string | null;
+            /** Missing Ordinals */
+            missing_ordinals?: number[];
+            /** Name */
+            name: string;
+            /** Ordinal Available */
+            ordinal_available: boolean;
+            /** Resolution */
+            resolution: string;
+            /** Resolved */
+            resolved: boolean;
         };
         /** SourceExpectationCreate */
         SourceExpectationCreate: {
@@ -14686,6 +14952,138 @@ export interface operations {
             };
         };
     };
+    analyze_failure_modes_api_feedback_failure_modes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FailureModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latest_failure_modes_api_feedback_failure_modes_latest_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailureModesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_failure_mode_analysis_api_feedback_failure_modes__analysis_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                analysis_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailureModesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_failure_mode_analysis_api_feedback_failure_modes__analysis_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                analysis_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     generate_suggestions_api_feedback_generate_suggestions_post: {
         parameters: {
             query?: {
@@ -14868,6 +15266,8 @@ export interface operations {
                 include_user_ids?: string | null;
                 exclude_user_ids?: string | null;
                 integration_id?: string | null;
+                value?: number | null;
+                verdict?: string | null;
             };
             header?: {
                 "x-project-id"?: string | null;
@@ -19478,6 +19878,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourceExpectationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    source_chunks_api_source_registry_expectations__expectation_id__chunks_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                expectation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceChunksResponse"];
                 };
             };
             /** @description Validation Error */

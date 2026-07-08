@@ -231,6 +231,32 @@ export const stopFeedbackThemesAnalysis = (analysisId: string) =>
     { method: "POST" }
   );
 
+// --- Failure Mode Clustering ---
+
+export const analyzeFailureModes = (body: {
+  from_date?: string;
+  to_date?: string;
+  environment?: string;
+  limit?: number;
+  selected_feedback_ids?: string[];
+}) =>
+  request<{ analysis_id: string; status: string }>("/api/feedback/failure-modes", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const getFailureModesAnalysis = (analysisId: string) =>
+  request<import("../api-types/data").FailureModesResponse>(`/api/feedback/failure-modes/${analysisId}`);
+
+export const getLatestFailureModes = () =>
+  request<import("../api-types/data").FailureModesResponse>("/api/feedback/failure-modes/latest");
+
+export const stopFailureModesAnalysis = (analysisId: string) =>
+  request<{ message: string; status: string }>(
+    `/api/feedback/failure-modes/${analysisId}/stop`,
+    { method: "POST" }
+  );
+
 // --- Suggestions ---
 
 export const generateSuggestions = (params?: Record<string, string>) => {

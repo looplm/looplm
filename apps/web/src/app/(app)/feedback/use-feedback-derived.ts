@@ -11,8 +11,12 @@ import {
   getFeedbackThemesAnalysis,
   getLatestFeedbackThemes,
   stopFeedbackThemesAnalysis,
+  analyzeFailureModes,
+  getFailureModesAnalysis,
+  getLatestFailureModes,
+  stopFailureModesAnalysis,
 } from "@/lib/api/evals-api";
-import type { TopQuestionsResponse, FeedbackThemesResponse } from "@/lib/api";
+import type { TopQuestionsResponse, FeedbackThemesResponse, FailureModesResponse } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 
 // `setDerivedView` is owned by the compose hook; the loaders jump to the
@@ -194,6 +198,90 @@ export function useFeedbackDerived(setDerivedView: (v: "picker" | "results") => 
     }
   }, [setDerivedView]);
 
+  // Failure modes state
+  const [failureModesResult, setFailureModesResult] = useState<FailureModesResponse | null>(null);
+  const [failureModesId, setFailureModesId] = useState<string | null>(null);
+  const [failureModesTriggering, setFailureModesTriggering] = useState(false);
+  const [failureModesLoading, setFailureModesLoading] = useState(false);
+
+  const failureModesRunning = failureModesResult ? ["pending", "running"].includes(failureModesResult.status) : false;
+
+  async function handleAnalyzeFailureModes(ids?: string[]) {
+    setFailureModesTriggering(true);
+    try {
+      const body: Record<string, unknown> = { limit: 100 };
+      if (ids && ids.length > 0) {
+        // Hand-picked feedback: the selection IS the filter, so the
+        // date/environment params are intentionally omitted.
+        body.selected_feedback_ids = ids;
+      } else {
+        if (globalFilters.startDate) body.from_date = new Date(globalFilters.startDate).toISOString();
+        if (globalFilters.endDate) body.to_date = new Date(globalFilters.endDate).toISOString();
+        if (globalFilters.environment && globalFilters.environment !== "all") {
+          body.environment = globalFilters.environment;
+        }
+      }
+      const { analysis_id } = await analyzeFailureModes(body as any);
+      setFailureModesId(analysis_id);
+      const data = await getFailureModesAnalysis(analysis_id);
+      setFailureModesResult(data);
+    } catch (err: any) {
+      toast.error("Analysis failed", { description: err.message });
+    } finally {
+      setFailureModesTriggering(false);
+    }
+  }
+
+  async function handleStopFailureModes() {
+    if (!failureModesId || !failureModesRunning) return;
+    try {
+      await stopFailureModesAnalysis(failureModesId);
+      setFailureModesResult((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
+      toast.success("Analysis stopped");
+    } catch (err: any) {
+      toast.error("Failed to stop analysis", { description: err.message });
+    }
+  }
+
+  // Polling loop for failure-mode analysis progress
+  useEffect(() => {
+    if (!failureModesId || !failureModesResult || !["pending", "running"].includes(failureModesResult.status)) return;
+    const interval = setInterval(async () => {
+      try {
+        const updated = await getFailureModesAnalysis(failureModesId);
+        setFailureModesResult(updated);
+        if (updated.status === "completed") {
+          clearInterval(interval);
+          toast.success(`Identified ${updated.clusters.length} failure mode${updated.clusters.length === 1 ? "" : "s"} across ${updated.total_traces} traces`);
+        } else if (updated.status === "failed") {
+          clearInterval(interval);
+          toast.error("Analysis failed", { description: updated.error || "Unknown error" });
+        } else if (updated.status === "cancelled") {
+          clearInterval(interval);
+        }
+      } catch {
+        clearInterval(interval);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [failureModesId, failureModesResult?.status]);
+
+  const loadFailureModes = useCallback(async () => {
+    setFailureModesLoading(true);
+    try {
+      const data = await getLatestFailureModes();
+      setFailureModesResult(data);
+      if (["pending", "running"].includes(data.status)) {
+        setFailureModesId(data.id);
+        setDerivedView("results");
+      }
+    } catch {
+      setFailureModesResult(null);
+    } finally {
+      setFailureModesLoading(false);
+    }
+  }, [setDerivedView]);
+
   return {
     topQuestionsResult,
     topQuestionsLoading,
@@ -209,5 +297,12 @@ export function useFeedbackDerived(setDerivedView: (v: "picker" | "results") => 
     handleStopFeedbackThemes,
     loadTopQuestions,
     loadFeedbackThemes,
+    failureModesResult,
+    failureModesLoading,
+    failureModesTriggering,
+    failureModesRunning,
+    handleAnalyzeFailureModes,
+    handleStopFailureModes,
+    loadFailureModes,
   };
 }

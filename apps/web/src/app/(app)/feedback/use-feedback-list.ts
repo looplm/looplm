@@ -11,7 +11,7 @@ import {
 } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 
-export type Tab = "feedback" | "suggestions" | "top-questions" | "themes";
+export type Tab = "feedback" | "suggestions" | "top-questions" | "themes" | "failure-modes";
 
 // Backend caps a hand-picked selection at 200 ids (see generate_suggestions),
 // and the list endpoint allows per_page up to 200 — so one request covers the

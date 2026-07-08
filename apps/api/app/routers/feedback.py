@@ -33,11 +33,13 @@ from app.routers.feedback_analytics import router as analytics_router
 from app.routers.feedback_eval import router as eval_router
 from app.routers.top_questions import router as top_questions_router
 from app.routers.feedback_themes import router as feedback_themes_router
+from app.routers.feedback_failure_modes import router as feedback_failure_modes_router
 
 router.include_router(analytics_router)
 router.include_router(eval_router)
 router.include_router(top_questions_router)
 router.include_router(feedback_themes_router)
+router.include_router(feedback_failure_modes_router)
 
 
 class FeedbackImportItem(BaseModel):

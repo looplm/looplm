@@ -43,6 +43,11 @@ export type FeedbackThemeItem = S["FeedbackThemeItem"];
 export type FeedbackTheme = S["FeedbackTheme"];
 export type FeedbackThemesResponse = S["FeedbackThemesResponse"];
 
+// --- Failure Mode Clustering ---
+export type FailureModeCase = S["FailureModeCase"];
+export type FailureModeCluster = S["FailureModeCluster"];
+export type FailureModesResponse = S["FailureModesResponse"];
+
 // --- Test Datasets ---
 export type TestDatasetItem = S["TestDatasetItem"];
 export type TestDatasetListResponse = S["TestDatasetListResponse"];
