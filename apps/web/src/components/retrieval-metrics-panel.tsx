@@ -28,6 +28,7 @@ import {
 } from "@/components/retrieval/constants";
 import { Info } from "@/components/retrieval/metric-card";
 import { OverallSection } from "@/components/retrieval/overall-section";
+import { RecommendationsPanel } from "@/components/retrieval/recommendations-panel";
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
 import { GoldControls, type GoldSource, type MinGrade } from "@/components/retrieval/gold-controls";
@@ -327,7 +328,10 @@ export default function RetrievalMetricsPanel({
   // unset or not present in this data. Drives the Overall cards/curve/per-case and the by-stage table.
   const availableKs = displayMetrics?.ks ?? overall?.ks ?? byStage?.ks ?? [];
   const maxK = availableKs.length ? Math.max(...availableKs) : 10;
-  const activeK = selectedK != null && availableKs.includes(selectedK) ? selectedK : maxK;
+  // Default to @10 (the depth typically fed to the model): precision@50 is capped by pool size and
+  // reads as noise. Fall back to the deepest cutoff for odd runs that don't compute k=10.
+  const defaultK = availableKs.includes(10) ? 10 : maxK;
+  const activeK = selectedK != null && availableKs.includes(selectedK) ? selectedK : defaultK;
   const lk = String(activeK);
   const cardValue = (m: MetricDef): number | null | undefined =>
     displayMetrics ? m.value(displayMetrics, lk) : undefined;
@@ -456,6 +460,15 @@ export default function RetrievalMetricsPanel({
         </div>
       ) : (
         <>
+          {/* What to improve — rule-based findings over the computed metrics, most-severe first. */}
+          <RecommendationsPanel
+            overall={displayMetrics}
+            byStage={showByStage ? byStage : null}
+            targets={targets}
+            k={activeK}
+            source={displaySource}
+          />
+
           {/* Score-threshold cutoff explorer — Agentic + rerank only. */}
           {showByStage && rerankSweep && rerankSweep.length > 0 && (
             <RerankThreshold sweep={rerankSweep} precisionTarget={targets?.precision ?? null} />
@@ -479,7 +492,7 @@ export default function RetrievalMetricsPanel({
 
           {/* By stage — each retrieval method scored separately (labels path only). */}
           {showByStage && (
-            <div className="mt-10">
+            <div id="retrieval-by-stage" className="mt-10">
               <h3 className="text-base font-semibold mb-3">By stage</h3>
               {byStageError ? <ErrorNotice error={byStageError} className="mb-3" /> : null}
               <ByStageComparison

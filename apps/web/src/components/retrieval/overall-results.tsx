@@ -137,7 +137,7 @@ export function OverallResults({
           onChange={setMetricKey}
         />
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
+      <div id="retrieval-per-case" className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
         <RecallCurve
           recall={metric.agg(overall)}
           ks={overall.ks}
