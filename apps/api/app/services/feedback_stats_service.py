@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone as tz
 from uuid import UUID
 
-from sqlalchemy import case, cast, Date, func, select
+from sqlalchemy import and_, case, cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import FeedbackScore, Integration, Trace
@@ -19,6 +19,60 @@ from app.schemas.feedback import (
 from app.services.observe_filter import get_observe_trace_names
 
 
+def _apply_trace_filters(
+    query,
+    *,
+    needs_trace_join: bool,
+    environment: str | None,
+    inc_uids: list[str],
+    exc_uids: list[str],
+    observe_names,
+):
+    """Join to Trace and apply the shared environment/user/observe scoping."""
+    if not needs_trace_join:
+        return query
+    query = query.join(Trace, FeedbackScore.trace_id == Trace.id)
+    if environment:
+        query = query.where(Trace.trace_metadata["environment"].astext == environment)
+    if inc_uids:
+        query = query.where(Trace.user_id.in_(inc_uids))
+    if exc_uids:
+        query = query.where(~Trace.user_id.in_(exc_uids))
+    if observe_names:
+        query = query.where(Trace.name.in_(observe_names))
+    return query
+
+
+def _apply_verdict_filter(query, verdict: str):
+    """Scope a FeedbackScore query to the latest eval result's verdict.
+
+    Mirrors the join used by the feedback list endpoint so the KPI/chart
+    numbers stay consistent with the table when a verdict filter is active.
+    """
+    from app.models.feedback_eval import FeedbackEvalResult
+
+    latest_eval = (
+        select(
+            FeedbackEvalResult.feedback_id,
+            func.max(FeedbackEvalResult.created_at).label("latest_at"),
+        )
+        .group_by(FeedbackEvalResult.feedback_id)
+        .subquery()
+    )
+    query = query.outerjoin(
+        latest_eval, latest_eval.c.feedback_id == FeedbackScore.id
+    ).outerjoin(
+        FeedbackEvalResult,
+        and_(
+            FeedbackEvalResult.feedback_id == FeedbackScore.id,
+            FeedbackEvalResult.created_at == latest_eval.c.latest_at,
+        ),
+    )
+    if verdict == "none":
+        return query.where(FeedbackEvalResult.id.is_(None))
+    return query.where(FeedbackEvalResult.verdict == verdict)
+
+
 async def compute_feedback_stats(
     db: AsyncSession,
     project: Project,
@@ -30,6 +84,8 @@ async def compute_feedback_stats(
     include_user_ids: str | None = None,
     exclude_user_ids: str | None = None,
     integration_id: UUID | None = None,
+    value: float | None = None,
+    verdict: str | None = None,
 ) -> FeedbackStatsResponse:
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
 
@@ -44,37 +100,40 @@ async def compute_feedback_stats(
         cutoff = datetime.now(tz.utc) - timedelta(days=days)
     cutoff_end = end_date or datetime.now(tz.utc)
 
-    # Feedback counts (user-feedback only, filtered by date range + environment)
+    # Feedback counts (user-feedback only, filtered by date range + environment).
+    # The value/verdict filters mirror the table so the KPI cards and trend
+    # chart reflect the same subset the user is looking at below.
     fb_filter = [*base_filter, FeedbackScore.score_name == "user-feedback",
                  FeedbackScore.scored_at >= cutoff, FeedbackScore.scored_at <= cutoff_end]
+    if value is not None:
+        fb_filter.append(FeedbackScore.value == value)
 
     _inc_uids = [v.strip() for v in (include_user_ids or "").split(",") if v.strip()]
     _exc_uids = [v.strip() for v in (exclude_user_ids or "").split(",") if v.strip()]
     observe_names = get_observe_trace_names(project)
     _needs_trace_join = bool(environment or _inc_uids or _exc_uids or observe_names)
-    fb_count_query = select(func.count(FeedbackScore.id)).where(*fb_filter)
-    fb_positive_query = select(func.count(FeedbackScore.id)).where(*fb_filter, FeedbackScore.value == 1)
-    if _needs_trace_join:
-        fb_count_query = fb_count_query.join(Trace, FeedbackScore.trace_id == Trace.id)
-        fb_positive_query = fb_positive_query.join(Trace, FeedbackScore.trace_id == Trace.id)
-        if environment:
-            fb_count_query = fb_count_query.where(Trace.trace_metadata["environment"].astext == environment)
-            fb_positive_query = fb_positive_query.where(Trace.trace_metadata["environment"].astext == environment)
-        if _inc_uids:
-            fb_count_query = fb_count_query.where(Trace.user_id.in_(_inc_uids))
-            fb_positive_query = fb_positive_query.where(Trace.user_id.in_(_inc_uids))
-        if _exc_uids:
-            fb_count_query = fb_count_query.where(~Trace.user_id.in_(_exc_uids))
-            fb_positive_query = fb_positive_query.where(~Trace.user_id.in_(_exc_uids))
-        if observe_names:
-            fb_count_query = fb_count_query.where(Trace.name.in_(observe_names))
-            fb_positive_query = fb_positive_query.where(Trace.name.in_(observe_names))
+    _trace_kwargs = dict(
+        needs_trace_join=_needs_trace_join,
+        environment=environment,
+        inc_uids=_inc_uids,
+        exc_uids=_exc_uids,
+        observe_names=observe_names,
+    )
 
-    total_fb = (await db.execute(fb_count_query)).scalar() or 0
-    positive = (await db.execute(fb_positive_query)).scalar() or 0
+    def _fb_query(*extra_where):
+        q = select(func.count(FeedbackScore.id)).where(*fb_filter, *extra_where)
+        q = _apply_trace_filters(q, **_trace_kwargs)
+        if verdict:
+            q = _apply_verdict_filter(q, verdict)
+        return q
+
+    total_fb = (await db.execute(_fb_query())).scalar() or 0
+    positive = (await db.execute(_fb_query(FeedbackScore.value == 1))).scalar() or 0
     negative = total_fb - positive
 
-    # Count traces with no feedback (filtered by date range + environment)
+    # Count traces with no feedback (filtered by date range + environment).
+    # This is a traces-without-feedback metric, so value/verdict — which only
+    # apply to feedback rows — deliberately do not scope it.
     trace_filter = [Trace.integration_id.in_(project_integration_ids),
                     Trace.start_time >= cutoff, Trace.start_time <= cutoff_end]
     if integration_id:
@@ -90,20 +149,12 @@ async def compute_feedback_stats(
 
     total_traces = (await db.execute(select(func.count(Trace.id)).where(*trace_filter))).scalar() or 0
 
-    fb_with_trace_filter = [*base_filter, FeedbackScore.score_name == "user-feedback",
-                            FeedbackScore.scored_at >= cutoff, FeedbackScore.scored_at <= cutoff_end,
-                            FeedbackScore.trace_id.isnot(None)]
-    fb_with_trace_query = select(func.count(func.distinct(FeedbackScore.trace_id))).where(*fb_with_trace_filter)
-    if _needs_trace_join:
-        fb_with_trace_query = fb_with_trace_query.join(Trace, FeedbackScore.trace_id == Trace.id)
-        if environment:
-            fb_with_trace_query = fb_with_trace_query.where(Trace.trace_metadata["environment"].astext == environment)
-        if _inc_uids:
-            fb_with_trace_query = fb_with_trace_query.where(Trace.user_id.in_(_inc_uids))
-        if _exc_uids:
-            fb_with_trace_query = fb_with_trace_query.where(~Trace.user_id.in_(_exc_uids))
-        if observe_names:
-            fb_with_trace_query = fb_with_trace_query.where(Trace.name.in_(observe_names))
+    fb_with_trace_query = select(func.count(func.distinct(FeedbackScore.trace_id))).where(
+        *base_filter, FeedbackScore.score_name == "user-feedback",
+        FeedbackScore.scored_at >= cutoff, FeedbackScore.scored_at <= cutoff_end,
+        FeedbackScore.trace_id.isnot(None),
+    )
+    fb_with_trace_query = _apply_trace_filters(fb_with_trace_query, **_trace_kwargs)
     traces_with_fb = (await db.execute(fb_with_trace_query)).scalar() or 0
     no_feedback = total_traces - traces_with_fb
 
@@ -116,16 +167,9 @@ async def compute_feedback_stats(
         )
         .where(*fb_filter)
     )
-    if _needs_trace_join:
-        trend_query = trend_query.join(Trace, FeedbackScore.trace_id == Trace.id)
-        if environment:
-            trend_query = trend_query.where(Trace.trace_metadata["environment"].astext == environment)
-        if _inc_uids:
-            trend_query = trend_query.where(Trace.user_id.in_(_inc_uids))
-        if _exc_uids:
-            trend_query = trend_query.where(~Trace.user_id.in_(_exc_uids))
-        if observe_names:
-            trend_query = trend_query.where(Trace.name.in_(observe_names))
+    trend_query = _apply_trace_filters(trend_query, **_trace_kwargs)
+    if verdict:
+        trend_query = _apply_verdict_filter(trend_query, verdict)
     trend_query = trend_query.group_by(cast(FeedbackScore.scored_at, Date)).order_by(cast(FeedbackScore.scored_at, Date))
     trend_result = await db.execute(trend_query)
     trends = [
@@ -151,16 +195,7 @@ async def compute_feedback_stats(
         .group_by(FeedbackScore.score_name)
         .order_by(FeedbackScore.score_name)
     )
-    if _needs_trace_join:
-        grader_query = grader_query.join(Trace, FeedbackScore.trace_id == Trace.id)
-        if environment:
-            grader_query = grader_query.where(Trace.trace_metadata["environment"].astext == environment)
-        if _inc_uids:
-            grader_query = grader_query.where(Trace.user_id.in_(_inc_uids))
-        if _exc_uids:
-            grader_query = grader_query.where(~Trace.user_id.in_(_exc_uids))
-        if observe_names:
-            grader_query = grader_query.where(Trace.name.in_(observe_names))
+    grader_query = _apply_trace_filters(grader_query, **_trace_kwargs)
     grader_result = await db.execute(grader_query)
     grader_stats = [
         GraderStats(
@@ -184,16 +219,7 @@ async def compute_feedback_stats(
         )
         .where(*base_filter, FeedbackScore.score_name != "user-feedback", FeedbackScore.scored_at >= cutoff)
     )
-    if _needs_trace_join:
-        grader_trend_query = grader_trend_query.join(Trace, FeedbackScore.trace_id == Trace.id)
-        if environment:
-            grader_trend_query = grader_trend_query.where(Trace.trace_metadata["environment"].astext == environment)
-        if _inc_uids:
-            grader_trend_query = grader_trend_query.where(Trace.user_id.in_(_inc_uids))
-        if _exc_uids:
-            grader_trend_query = grader_trend_query.where(~Trace.user_id.in_(_exc_uids))
-        if observe_names:
-            grader_trend_query = grader_trend_query.where(Trace.name.in_(observe_names))
+    grader_trend_query = _apply_trace_filters(grader_trend_query, **_trace_kwargs)
     grader_trend_query = grader_trend_query.group_by(
         FeedbackScore.score_name, cast(FeedbackScore.scored_at, Date)
     ).order_by(FeedbackScore.score_name, cast(FeedbackScore.scored_at, Date))

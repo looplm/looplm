@@ -58,6 +58,11 @@ export function useFeedbackList(tab: Tab, evalCompleted: number) {
       }
 
       const statsParams: Record<string, string> = {};
+      // Mirror the table's value/verdict filters so the KPI cards and trend
+      // chart above the table reflect the same subset.
+      if (filterValue === "positive") statsParams.value = "1";
+      else if (filterValue === "negative") statsParams.value = "0";
+      if (filterVerdict !== "all") statsParams.verdict = filterVerdict;
       if (globalFilters.startDate) statsParams.start_date = new Date(globalFilters.startDate).toISOString();
       if (globalFilters.endDate) statsParams.end_date = new Date(globalFilters.endDate).toISOString();
       if (!globalFilters.startDate) statsParams.days = "30";

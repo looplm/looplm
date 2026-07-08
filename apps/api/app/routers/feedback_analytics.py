@@ -39,6 +39,8 @@ async def feedback_stats(
     include_user_ids: str | None = None,
     exclude_user_ids: str | None = None,
     integration_id: UUID | None = None,
+    value: float | None = None,
+    verdict: str | None = None,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
@@ -52,6 +54,8 @@ async def feedback_stats(
         include_user_ids=include_user_ids,
         exclude_user_ids=exclude_user_ids,
         integration_id=integration_id,
+        value=value,
+        verdict=verdict,
     )
 
 
