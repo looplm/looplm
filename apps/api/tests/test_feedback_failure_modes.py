@@ -106,6 +106,57 @@ async def test_failure_modes_selection_only_uses_picked_rows(
 
 
 @pytest.mark.asyncio
+async def test_failure_modes_includes_eval_verdict(
+    client, db_session, test_integration, headers, monkeypatch
+):
+    """The latest LLM feedback-quality verdict + reasoning is fed to the diagnosis."""
+    from app.models.feedback_eval import FeedbackEvalResult
+
+    pairs = await _make_feedback(db_session, test_integration, 3)
+    fb0, tr0 = pairs[0]
+    db_session.add(
+        FeedbackEvalResult(
+            id=uuid4(),
+            feedback_id=fb0,
+            score_name="user-feedback",
+            value=0.0,
+            verdict="suspicious",
+            reasoning="Complaint unrelated to the answer",
+            confidence=0.8,
+        )
+    )
+    await db_session.commit()
+
+    captured = {}
+    import app.routers.feedback_failure_modes as fm_router
+
+    def fake_worker(analysis_id, cases, user_settings, db_factory):
+        captured["cases"] = cases
+
+        async def _noop():
+            return None
+
+        return _noop()
+
+    monkeypatch.setattr(fm_router, "run_failure_mode_analysis", fake_worker)
+
+    resp = await client.post(
+        "/api/feedback/failure-modes",
+        json={"selected_feedback_ids": [str(fb) for fb, _ in pairs]},
+        headers=headers,
+    )
+    assert resp.status_code == 202, resp.text
+
+    by_trace = {c["trace_id"]: c for c in captured["cases"]}
+    target = by_trace[str(tr0)]
+    assert "FEEDBACK QUALITY VERDICT: suspicious" in target["serialized"]
+    assert "Complaint unrelated to the answer" in target["serialized"]
+    # A row without an eval verdict carries no verdict line.
+    other = by_trace[str(pairs[1][1])]
+    assert "FEEDBACK QUALITY VERDICT" not in other["serialized"]
+
+
+@pytest.mark.asyncio
 async def test_failure_modes_too_many_selected_returns_400(client, headers):
     too_many = [str(uuid4()) for _ in range(201)]
     resp = await client.post(

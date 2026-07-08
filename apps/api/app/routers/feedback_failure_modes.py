@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -53,7 +53,7 @@ async def analyze_failure_modes(
     _user: User = Depends(get_current_user),
 ):
     """Start background analysis that diagnoses and clusters failing traces."""
-    from app.models.feedback_eval import FailureModeAnalysis
+    from app.models.feedback_eval import FailureModeAnalysis, FeedbackEvalResult
     from app.services.analysis_llm import (
         AnalysisLlmConfigError,
         AnalysisLlmService,
@@ -72,9 +72,30 @@ async def analyze_failure_modes(
 
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
 
+    # Latest LLM feedback-quality eval per feedback row — its verdict/reasoning is
+    # fed to the diagnosis as a prior (a "suspicious" verdict flags that the
+    # negative rating may not reflect a genuine model failure). Same subquery the
+    # feedback table uses. Left-joined, so unevaluated rows simply carry no verdict.
+    latest_eval = (
+        select(
+            FeedbackEvalResult.feedback_id,
+            func.max(FeedbackEvalResult.created_at).label("latest_at"),
+        )
+        .group_by(FeedbackEvalResult.feedback_id)
+        .subquery()
+    )
+
     query = (
-        select(FeedbackScore, Trace)
+        select(FeedbackScore, Trace, FeedbackEvalResult)
         .join(Trace, FeedbackScore.trace_id == Trace.id)
+        .outerjoin(latest_eval, latest_eval.c.feedback_id == FeedbackScore.id)
+        .outerjoin(
+            FeedbackEvalResult,
+            and_(
+                FeedbackEvalResult.feedback_id == FeedbackScore.id,
+                FeedbackEvalResult.created_at == latest_eval.c.latest_at,
+            ),
+        )
         .options(selectinload(Trace.spans))
         .where(
             FeedbackScore.integration_id.in_(project_integration_ids),
@@ -104,13 +125,18 @@ async def analyze_failure_modes(
     span_names = get_rag_span_names(project)
     cases: list[dict] = []
     seen_traces: set[UUID] = set()
-    for feedback, trace in rows:
+    for feedback, trace, eval_result in rows:
         # One trace can carry several feedback rows — diagnose each trace once.
         if trace.id in seen_traces:
             continue
         seen_traces.add(trace.id)
         serialized = serialize_trace_for_diagnosis(
-            trace, span_names, comment=feedback.comment, feedback_value=feedback.value
+            trace,
+            span_names,
+            comment=feedback.comment,
+            feedback_value=feedback.value,
+            verdict=eval_result.verdict if eval_result else None,
+            reasoning=eval_result.reasoning if eval_result else None,
         )
         cases.append({
             "trace_id": str(trace.id),

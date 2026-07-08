@@ -75,6 +75,11 @@ _DIAGNOSE_SYSTEM_PROMPT = (
     "used but the answer is still wrong, prefer \"generation\"; if the sources needed "
     "were never retrieved, prefer \"retrieval\"; if they were retrieved but buried, "
     'prefer "long_context".\n\n'
+    "If a FEEDBACK QUALITY VERDICT is present, use it as a prior: a \"suspicious\" "
+    "verdict means the negative rating may not reflect a genuine model failure "
+    "(e.g. user confusion or an off-topic complaint) — lean toward \"query\" or "
+    "\"other\" unless the trace clearly shows a real failure; a \"helpful\" verdict "
+    "confirms the complaint is a genuine failure worth attributing to a stage.\n\n"
     "Return ONLY a JSON object, no markdown:\n"
     '{"category": "<key>", "explanation": "<one or two sentences citing concrete '
     'evidence from the case>", "confidence": <number 0.0-1.0>}'
@@ -122,7 +127,13 @@ def _stringify(value) -> str:
 
 
 def serialize_trace_for_diagnosis(
-    trace, span_names: dict[str, str], *, comment: str | None, feedback_value
+    trace,
+    span_names: dict[str, str],
+    *,
+    comment: str | None,
+    feedback_value,
+    verdict: str | None = None,
+    reasoning: str | None = None,
 ) -> dict:
     """Build the compact diagnosis payload for one trace.
 
@@ -188,6 +199,11 @@ def serialize_trace_for_diagnosis(
         diag.append("FAILED STEPS:\n" + "\n".join(error_spans[:8]))
     if comment and comment.strip():
         diag.append(f"USER NEGATIVE FEEDBACK COMMENT:\n{comment.strip()[:_COMMENT_MAX]}")
+    if verdict and verdict.strip():
+        line = f"FEEDBACK QUALITY VERDICT: {verdict.strip()}"
+        if reasoning and reasoning.strip():
+            line += f" — {reasoning.strip()[:400]}"
+        diag.append(line)
 
     return {
         "question": question[:_QUESTION_MAX] or None,
