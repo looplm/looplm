@@ -13,10 +13,16 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.index_providers.registry import build_index_provider
+from app.services.agent_retrieval import (
+    AGENT_STAGE,
+    get_agent_retrieval_config,
+    probe_agent_chunk_ids,
+)
 from app.models.chunk_labels import TestCaseLabelingStatus
 from app.models.datasets import TestCase, TestDataset
 from app.models.index_providers import IndexProvider
@@ -316,6 +322,33 @@ async def compute_by_stage_metrics(
 
     await asyncio.gather(*(_pool_case(tid, q) for tid, q in todo))
 
+    # Extra stage: the project's REAL retrieval agent (an external endpoint returning a ranked
+    # chunk list), scored on the same gold beside the index-probe stages. Only when configured,
+    # and only appended when at least one case returned a ranking (so the stage never shows empty).
+    stage_labels = STAGE_LABELS
+    agent_config = get_agent_retrieval_config(project.settings)
+    if agent_config is not None:
+        k = max(AGG_KS)
+        agent_sem = asyncio.Semaphore(PROBE_CONCURRENCY)
+
+        async def _agent_case(
+            client: httpx.AsyncClient, test_id: str, query: str
+        ) -> tuple[str, list[str]]:
+            async with agent_sem:
+                ids = await probe_agent_chunk_ids(
+                    client, agent_config, project.id, test_id, str(query or ""), k, refresh=refresh
+                )
+                return test_id, ids
+
+        async with httpx.AsyncClient() as client:
+            agent_probed = await asyncio.gather(
+                *(_agent_case(client, tid, q) for tid, q in todo)
+            )
+        agent_map = {tid: ids for tid, ids in agent_probed if ids}
+        if agent_map:
+            retrieved_by_stage[AGENT_STAGE] = agent_map
+            stage_labels = STAGE_LABELS + ((AGENT_STAGE, agent_config.label),)
+
     stages, case_rows_out, evaluated = build_by_stage_metrics(
         cases,
         retrieved_by_stage,
@@ -324,6 +357,7 @@ async def compute_by_stage_metrics(
         grade_by_test,
         slice_by_test,
         dataset_by_test=await resolve_case_datasets(db, dataset_uuids),
+        stage_labels=stage_labels,
     )
     # Attach the score-threshold sweep to the agentic-rerank stage so the UI can offer a variable-k
     # (rerankerScore) cutoff without another compute.

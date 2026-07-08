@@ -353,7 +353,10 @@ def extract_retrieved_chunks(
     """
     if not isinstance(parsed, dict):
         return []
-    keys: list[str] = ["searchSources"]
+    # ``rankedChunks`` is the chunk-level ranking a retrieval-only endpoint returns
+    # (e.g. rde-gpt's /api/chat/retrieval) — preferred over ``searchSources`` (which is
+    # page-deduplicated) so per-chunk relevance labels line up with the index keys.
+    keys: list[str] = ["rankedChunks", "searchSources"]
     if payload_key:
         keys.append(payload_key)
     keys.extend(k for k in _FALLBACK_PAYLOAD_KEYS if k not in keys)

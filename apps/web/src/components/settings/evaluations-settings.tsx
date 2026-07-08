@@ -21,6 +21,14 @@ export default function EvaluationsSettings({
   const [maxTurns, setMaxTurns] = useState(1);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+
+  // Custom-agent retrieval: an external endpoint that returns a ranked chunk list without
+  // generating an answer, scored as its own stage on the Retrieval page.
+  const [agentEndpoint, setAgentEndpoint] = useState("");
+  const [agentToken, setAgentToken] = useState("");
+  const [agentLabel, setAgentLabel] = useState("");
+  const [agentSaving, setAgentSaving] = useState(false);
+  const [agentMessage, setAgentMessage] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; response?: string; error?: string } | null>(null);
 
@@ -49,6 +57,10 @@ export default function EvaluationsSettings({
           : "{}"
       );
       setMaxTurns((s.eval_max_turns as number) || 1);
+      // Custom-agent retrieval (token comes back masked; left as-is is a no-op on save)
+      setAgentEndpoint((s.agent_retrieval_endpoint as string) || "");
+      setAgentToken((s.agent_retrieval_token as string) || "");
+      setAgentLabel((s.agent_retrieval_label as string) || "");
       // Code Agent
       setRepoPath((s.code_agent_repo_path as string) || "");
       const patterns = s.code_agent_file_patterns as string[] | undefined;
@@ -58,6 +70,7 @@ export default function EvaluationsSettings({
     setMessage("");
     setTestResult(null);
     setCodeAgentMessage("");
+    setAgentMessage("");
   }, [currentProjectId]);
 
   async function handleSave() {
@@ -142,6 +155,29 @@ export default function EvaluationsSettings({
       setTestResult({ success: false, error: e.message || "Connection test failed" });
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function handleSaveAgentRetrieval() {
+    if (!currentProjectId) return;
+    setAgentSaving(true);
+    setAgentMessage("");
+    try {
+      await updateProject(currentProjectId, {
+        settings: {
+          agent_retrieval_endpoint: agentEndpoint.trim() || null,
+          // A masked token (contains "...") left untouched is skipped server-side, so the
+          // stored secret is preserved; a cleared field (null) removes it.
+          agent_retrieval_token: agentToken.trim() || null,
+          agent_retrieval_label: agentLabel.trim() || null,
+        },
+      });
+      await reloadProjects();
+      setAgentMessage("Custom agent retrieval settings saved");
+    } catch (e: any) {
+      setAgentMessage(e.message || "Failed to save");
+    } finally {
+      setAgentSaving(false);
     }
   }
 
@@ -302,6 +338,81 @@ export default function EvaluationsSettings({
                 </div>
               )}
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* Custom-agent retrieval */}
+      <div className="p-6 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
+        <h2 className="text-lg font-semibold mb-1">Custom agent retrieval</h2>
+        <p className="text-sm text-gray-400 dark:text-slate-500 mb-4">
+          A retrieval-only endpoint on your agent that returns a ranked chunk list without
+          generating an answer (e.g. rde-gpt&apos;s <code className="bg-gray-200 dark:bg-slate-700 px-1 rounded">/api/chat/retrieval</code>).
+          When set, your agent&apos;s real ranking is scored as its own stage on the Retrieval page,
+          alongside sparse/dense/RRF/reranked/agentic.
+        </p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-500 dark:text-slate-400 mb-1">
+              Retrieval Endpoint
+            </label>
+            <input
+              type="text"
+              value={agentEndpoint}
+              onChange={(e) => setAgentEndpoint(e.target.value)}
+              placeholder="https://your-agent/api/chat/retrieval"
+              className="w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg text-sm font-mono"
+            />
+            <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+              URL that, given a query, returns <code className="bg-gray-200 dark:bg-slate-700 px-1 rounded">rankedChunks</code> (or
+              <code className="bg-gray-200 dark:bg-slate-700 px-1 rounded">searchSources</code>) at chunk granularity. Leave blank to disable the stage.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-500 dark:text-slate-400 mb-1">
+              Token
+            </label>
+            <input
+              type="password"
+              value={agentToken}
+              onChange={(e) => setAgentToken(e.target.value)}
+              placeholder="X-Eval-Token value"
+              className="w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg text-sm font-mono"
+            />
+            <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+              Sent as the <code className="bg-gray-200 dark:bg-slate-700 px-1 rounded">X-Eval-Token</code> header. Stored masked; leave unchanged to keep the current value.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-500 dark:text-slate-400 mb-1">
+              Display Label (optional)
+            </label>
+            <input
+              type="text"
+              value={agentLabel}
+              onChange={(e) => setAgentLabel(e.target.value)}
+              placeholder="Custom agent"
+              className="w-full px-3 py-2 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg text-sm"
+            />
+            <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+              Name shown for this stage on the Retrieval page (defaults to &quot;Custom agent&quot;).
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSaveAgentRetrieval}
+              disabled={agentSaving}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {agentSaving ? "Saving..." : "Save"}
+            </button>
+          </div>
+
+          {agentMessage && (
+            <p className="text-sm text-gray-500 dark:text-slate-400">{agentMessage}</p>
           )}
         </div>
       </div>
