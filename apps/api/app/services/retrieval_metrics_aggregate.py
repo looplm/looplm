@@ -133,6 +133,7 @@ def build_by_stage_metrics(
     slice_by_test: dict[str, str],
     ks: tuple[int, ...] = AGG_KS,
     dataset_by_test: dict[str, str] | None = None,
+    stage_labels: tuple[tuple[str, str], ...] = STAGE_LABELS,
 ) -> tuple[list[StageMetrics], list[ByStageCaseMetrics], int]:
     """Per-stage metrics + a per-case grid, by scoring each stage's ranking against the gold.
 
@@ -140,14 +141,15 @@ def build_by_stage_metrics(
     Each stage reuses :func:`aggregate_retrieval_metrics_from_labels`, so the metric math and the
     "drop cases without gold" rule stay identical to the single-ranking view. Returns
     ``(stages, per_case_rows, evaluated_cases)``; the per-case grid carries each stage's recall and
-    nDCG at the largest k for the drilldown.
+    nDCG at the largest k for the drilldown. ``stage_labels`` defaults to the index-probe pipeline
+    stages; callers append extra ``(head, label)`` pairs (e.g. the external custom-agent stage).
     """
     lk = str(max(ks))
     stages: list[StageMetrics] = []
     # test_id -> {"input", "recall": {stage: v}, "ndcg": {stage: v}}
     per_case: dict[str, dict[str, Any]] = {}
     evaluated = 0
-    for head, label in STAGE_LABELS:
+    for head, label in stage_labels:
         m = aggregate_retrieval_metrics_from_labels(
             cases,
             retrieved_by_stage.get(head, {}),

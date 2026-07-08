@@ -136,7 +136,11 @@ export default function DataSourcesPage() {
             <WantedSourcesPanel providerId={providerId} canEdit={canEdit} />
           )}
           {tab === "review" && providerId && (
-            <SourceReviewTab providerId={providerId} canEdit={canEdit} />
+            <SourceReviewTab
+              providerId={providerId}
+              providerName={providers.find((p) => p.id === providerId)?.name}
+              canEdit={canEdit}
+            />
           )}
           {tab === "quality" && providerId && (
             <ChunkQualityTab providerId={providerId} canEdit={canEdit} />

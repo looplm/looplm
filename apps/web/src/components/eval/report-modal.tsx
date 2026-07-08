@@ -5,14 +5,21 @@ interface ReportModalProps {
   onCopy: () => void;
   onDownload: () => void;
   onClose: () => void;
+  title?: string;
 }
 
-export function ReportModal({ reportMarkdown, onCopy, onDownload, onClose }: ReportModalProps) {
+export function ReportModal({
+  reportMarkdown,
+  onCopy,
+  onDownload,
+  onClose,
+  title = "Evaluation Report",
+}: ReportModalProps) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col mx-4">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-slate-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Evaluation Report</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>
           <div className="flex items-center gap-2">
             <button
               onClick={onCopy}

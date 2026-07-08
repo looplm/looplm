@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createRetrievalRun,
   getDatasets,
@@ -21,11 +21,9 @@ import {
   DEFAULT_RETRIEVER,
   EXPLAIN,
   METRICS,
-  RETRIEVERS,
   RETRIEVER_NOTES,
-  statusOf,
-  type MetricDef,
 } from "@/components/retrieval/constants";
+import { useRetrievalDisplay } from "@/components/retrieval/use-retrieval-display";
 import { Info } from "@/components/retrieval/metric-card";
 import { OverallSection } from "@/components/retrieval/overall-section";
 import { RecommendationsPanel } from "@/components/retrieval/recommendations-panel";
@@ -300,49 +298,33 @@ export default function RetrievalMetricsPanel({
     setApplied((prev) => (prev ? { ...prev, refresh: true, nonce: prev.nonce + 1 } : prev));
   };
 
-  // What's on screen: a fresh compute (applied) or a saved run being viewed (savedRun). null → the
-  // initial empty prompt. Viewed runs are always the labels path.
-  const displaySource: Source | null = applied?.source ?? (savedRun ? "labels" : null);
-  const displayGold: GoldSource =
-    applied?.goldSource ?? (savedRun?.gold_source as GoldSource) ?? "human";
-  const displayMinGrade: MinGrade =
-    applied?.minGrade ?? (savedRun?.min_grade as MinGrade) ?? 1;
-  const showByStage = displaySource === "labels";
-  const computedAt = overall?.computed_at ?? byStage?.computed_at;
-
-  // The Overall block reflects the selected retriever. "best" (and the URLs path) use the live-probe
-  // overall; a pipeline stage uses that stage's full metrics from the by-stage response.
-  const useBest = displaySource !== "labels" || selectedRetriever === "best";
-  const displayMetrics: RetrievalRunMetrics | null = useBest
-    ? overall
-    : byStage?.stages.find((s) => s.stage === selectedRetriever)?.metrics ?? null;
-  const displayLoading = useBest ? loading : byStageLoading;
-  const retrieverLabel = RETRIEVERS.find((r) => r.value === selectedRetriever)?.label;
-  // The rerankerScore threshold sweep, present only when the Agentic + rerank stage is selected.
-  const rerankSweep =
-    selectedRetriever === "agentic_rerank"
-      ? byStage?.stages.find((s) => s.stage === "agentic_rerank")?.threshold_sweep
-      : undefined;
-
-  // Cutoffs available for the displayed retriever; the selected k falls back to the deepest when
-  // unset or not present in this data. Drives the Overall cards/curve/per-case and the by-stage table.
-  const availableKs = displayMetrics?.ks ?? overall?.ks ?? byStage?.ks ?? [];
-  const maxK = availableKs.length ? Math.max(...availableKs) : 10;
-  // Default to @10 (the depth typically fed to the model): precision@50 is capped by pool size and
-  // reads as noise. Fall back to the deepest cutoff for odd runs that don't compute k=10.
-  const defaultK = availableKs.includes(10) ? 10 : maxK;
-  const activeK = selectedK != null && availableKs.includes(selectedK) ? selectedK : defaultK;
-  const lk = String(activeK);
-  const cardValue = (m: MetricDef): number | null | undefined =>
-    displayMetrics ? m.value(displayMetrics, lk) : undefined;
-  const metCount = useMemo(
-    () =>
-      displayMetrics && targets
-        ? METRICS.filter((m) => statusOf(cardValue(m), targets[m.key]) === "good").length
-        : 0,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [displayMetrics, targets, lk],
-  );
+  // Everything the panel renders, derived from the current state (see useRetrievalDisplay).
+  const {
+    displaySource,
+    displayGold,
+    displayMinGrade,
+    showByStage,
+    computedAt,
+    displayMetrics,
+    displayLoading,
+    useBest,
+    retrieverOptions,
+    retrieverLabel,
+    rerankSweep,
+    availableKs,
+    activeK,
+    metCount,
+  } = useRetrievalDisplay({
+    applied,
+    savedRun,
+    overall,
+    byStage,
+    selectedRetriever,
+    loading,
+    byStageLoading,
+    selectedK,
+    targets,
+  });
 
   const toggleClass = (active: boolean) =>
     `px-2.5 py-1.5 ${
@@ -435,7 +417,7 @@ export default function RetrievalMetricsPanel({
           <div className="flex items-center gap-3 flex-wrap">
             {showByStage && (
               <RetrieverSelector
-                options={RETRIEVERS}
+                options={retrieverOptions}
                 value={selectedRetriever}
                 onChange={setSelectedRetriever}
               />
