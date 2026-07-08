@@ -71,6 +71,9 @@ async def run_feedback_evaluation(
             return
 
         evaluation = await db.get(FeedbackEvaluation, evaluation_id)
+        if evaluation is None:
+            logger.error("Feedback evaluation %s not found; aborting worker", evaluation_id)
+            return
         evaluation.status = "running"
         evaluation.started_at = datetime.now(timezone.utc)
         await db.commit()

@@ -260,6 +260,11 @@ async def evaluate_feedback(
     db.add(evaluation)
     await db.flush()
     await db.refresh(evaluation)
+    # Commit before launching the task: the worker reads this record from a
+    # separate session, so it must be visible. Without this the request's
+    # deferred get_db commit can race the worker's first read, which returns
+    # None and silently kills the task — leaving the run stuck on "pending".
+    await db.commit()
 
     # Launch background task
     task = asyncio.create_task(

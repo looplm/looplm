@@ -65,6 +65,31 @@ export interface GapRunSummary {
   completed_at: string | null;
 }
 
+export interface SourceChunk {
+  id: string;
+  index: number;
+  ordinal: string | null;
+  title: string | null;
+  url: string | null;
+  text: string | null;
+}
+
+export interface SourceChunksResponse {
+  expectation_id: string;
+  name: string;
+  resolution: "url" | "title" | "none";
+  resolved: boolean;
+  kind: string | null;
+  matched_title: string | null;
+  matched_url: string | null;
+  chunk_count: number;
+  ordinal_available: boolean;
+  missing_ordinals: number[];
+  duplicate_ordinals: number[];
+  gaps_truncated: boolean;
+  chunks: SourceChunk[];
+}
+
 export interface GapRunDetail {
   id: string;
   provider_id: string;

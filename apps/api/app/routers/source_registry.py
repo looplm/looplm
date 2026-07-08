@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import async_session, get_db
+from app.index_providers.registry import build_index_provider
 from app.index_providers.source_gaps import build_markdown_report
 from app.models.index_providers import IndexProvider
 from app.models.project import Project
@@ -35,11 +36,14 @@ from app.schemas.source_registry import (
     GapRunResponse,
     GapRunSummary,
     GapRunSummaryListResponse,
+    SourceChunk,
+    SourceChunksResponse,
     SourceExpectationCreate,
     SourceExpectationListResponse,
     SourceExpectationResponse,
     SourceExpectationUpdate,
 )
+from app.services.source_chunks import SourceChunkInput, get_source_chunks
 from app.services.source_csv import parse_source_csv
 
 logger = logging.getLogger(__name__)
@@ -57,6 +61,12 @@ _gap_tasks: dict[UUID, asyncio.Task] = {}
 def _not_found(what: str) -> HTTPException:
     return HTTPException(
         status_code=404, detail={"error": {"code": "NOT_FOUND", "message": f"{what} not found"}}
+    )
+
+
+def _provider_error(e: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=502, detail={"error": {"code": "PROVIDER_ERROR", "message": str(e)}}
     )
 
 
@@ -187,6 +197,79 @@ async def delete_expectation(
         raise _not_found("Source expectation")
     await db.delete(expectation)
     return None
+
+
+# ── Source chunk review ──────────────────────────────────────────────────────
+
+
+@router.get("/expectations/{expectation_id}/chunks", response_model=SourceChunksResponse)
+async def source_chunks(
+    expectation_id: UUID,
+    limit: int = 500,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Every indexed chunk of one wanted source, in reading order.
+
+    Resolves the source to its file in the index (URL-hash hit, else title
+    search) and lists its chunks with completeness signals (gaps/duplicates in
+    the chunk-order sequence) so a reviewer can page through and check coverage.
+    """
+    expectation = (
+        await db.execute(
+            select(SourceExpectation).where(
+                SourceExpectation.id == expectation_id,
+                SourceExpectation.project_id == project.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if expectation is None:
+        raise _not_found("Source expectation")
+    provider_row = await _provider_or_404(db, expectation.provider_id, project)
+
+    client = build_index_provider(provider_row)
+    try:
+        result = await get_source_chunks(
+            client,
+            SourceChunkInput(
+                id=str(expectation.id),
+                name=expectation.name,
+                html_url=expectation.html_url,
+                pdf_url=expectation.pdf_url,
+                adapter_tag=expectation.adapter_tag,
+            ),
+            limit=max(1, min(limit, 2000)),
+        )
+    except Exception as e:
+        raise _provider_error(e)
+    finally:
+        await client.aclose()
+
+    return SourceChunksResponse(
+        expectation_id=expectation.id,
+        name=expectation.name,
+        resolution=result.resolution,
+        resolved=result.resolved,
+        kind=result.kind,
+        matched_title=result.matched_title,
+        matched_url=result.matched_url,
+        chunk_count=result.chunk_count,
+        ordinal_available=result.ordinal_available,
+        missing_ordinals=result.missing_ordinals,
+        duplicate_ordinals=result.duplicate_ordinals,
+        gaps_truncated=result.gaps_truncated,
+        chunks=[
+            SourceChunk(
+                id=d.id,
+                index=i,
+                ordinal=None if d.ordinal is None else str(d.ordinal),
+                title=d.title,
+                url=d.url,
+                text=d.snippet,
+            )
+            for i, d in enumerate(result.chunks)
+        ],
+    )
 
 
 # ── CSV import ───────────────────────────────────────────────────────────────

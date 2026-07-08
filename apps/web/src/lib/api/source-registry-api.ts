@@ -6,6 +6,7 @@ import type {
   CsvImportResult,
   GapRunDetail,
   GapRunSummary,
+  SourceChunksResponse,
   SourceExpectation,
 } from "../api-types/source-registry";
 import { getSelectedProjectId, getToken, request } from "./client";
@@ -13,6 +14,12 @@ import { getSelectedProjectId, getToken, request } from "./client";
 export const listSourceExpectations = (providerId: string) =>
   request<{ data: SourceExpectation[] }>(
     `/api/source-registry/expectations?provider_id=${encodeURIComponent(providerId)}`,
+  );
+
+export const getSourceChunks = (expectationId: string, limit?: number) =>
+  request<SourceChunksResponse>(
+    `/api/source-registry/expectations/${expectationId}/chunks` +
+      (limit ? `?limit=${limit}` : ""),
   );
 
 export const updateSourceExpectation = (

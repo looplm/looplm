@@ -8,6 +8,7 @@ import { ChunkQualityTab } from "@/components/data-sources/chunk-quality-tab";
 import { FieldSchemaTab } from "@/components/data-sources/field-schema-tab";
 import { FileSearchTab } from "@/components/data-sources/file-search-tab";
 import { IndexBreakdownTab } from "@/components/data-sources/index-breakdown-tab";
+import { SourceReviewTab } from "@/components/data-sources/source-review-tab";
 import { WantedSourcesPanel } from "@/components/data-sources/wanted-sources-panel";
 import { ProviderManager } from "@/components/coverage/provider-manager";
 import { usePermissions } from "@/components/permissions-context";
@@ -15,13 +16,14 @@ import { usePermissions } from "@/components/permissions-context";
 const inputCls =
   "px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-sm";
 
-type Tab = "breakdown" | "fields" | "files" | "wanted" | "quality";
+type Tab = "breakdown" | "fields" | "files" | "wanted" | "review" | "quality";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "breakdown", label: "Index breakdown" },
   { id: "fields", label: "Fields" },
   { id: "files", label: "Files" },
   { id: "wanted", label: "Wanted sources" },
+  { id: "review", label: "Source review" },
   { id: "quality", label: "Chunk quality" },
 ];
 
@@ -132,6 +134,9 @@ export default function DataSourcesPage() {
           {tab === "files" && providerId && <FileSearchTab providerId={providerId} />}
           {tab === "wanted" && providerId && (
             <WantedSourcesPanel providerId={providerId} canEdit={canEdit} />
+          )}
+          {tab === "review" && providerId && (
+            <SourceReviewTab providerId={providerId} canEdit={canEdit} />
           )}
           {tab === "quality" && providerId && (
             <ChunkQualityTab providerId={providerId} canEdit={canEdit} />

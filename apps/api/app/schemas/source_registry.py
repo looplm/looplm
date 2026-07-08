@@ -123,3 +123,35 @@ class GapRunResponse(BaseModel):
 class GapRunCreateResponse(BaseModel):
     run_id: UUID
     status: str
+
+
+# ── Source chunk review ──────────────────────────────────────────────────────
+
+
+class SourceChunk(BaseModel):
+    id: str
+    index: int
+    ordinal: Optional[str] = None
+    title: Optional[str] = None
+    url: Optional[str] = None
+    text: Optional[str] = None
+
+
+class SourceChunksResponse(BaseModel):
+    expectation_id: UUID
+    name: str
+    # How the source was located in the index: "url" hash hit, "title" search, or
+    # "none" when nothing matched.
+    resolution: str
+    resolved: bool
+    kind: Optional[str] = None
+    matched_title: Optional[str] = None
+    matched_url: Optional[str] = None
+    chunk_count: int
+    ordinal_available: bool
+    # Holes and repeats in the chunk-ordinal (e.g. chunk_index) sequence — the
+    # completeness signals surfaced while paging through the chunks.
+    missing_ordinals: list[int] = Field(default_factory=list)
+    duplicate_ordinals: list[int] = Field(default_factory=list)
+    gaps_truncated: bool = False
+    chunks: list[SourceChunk] = Field(default_factory=list)
