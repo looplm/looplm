@@ -129,19 +129,19 @@ export function ByStageComparison({
 
       {/* Per-case drilldown */}
       <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900">
-        <button
-          onClick={() => setShowCases((v) => !v)}
-          className="w-full flex items-center justify-between gap-2 px-4 py-2.5 text-[13px] font-medium text-gray-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-800/40"
-        >
-          <span>
+        <div className="w-full flex items-center justify-between gap-2 px-4 py-2.5">
+          <button
+            onClick={() => setShowCases((v) => !v)}
+            className="flex items-center text-[13px] font-medium text-gray-600 dark:text-slate-300 hover:text-gray-800 dark:hover:text-slate-100"
+          >
             <span className="mr-1.5">{showCases ? "▾" : "▸"}</span>
             Per-case breakdown ({data.cases.length})
             {showCases && (
               <span className="ml-1.5 text-gray-400 dark:text-slate-500 font-normal">at @{maxK}</span>
             )}
-          </span>
+          </button>
           {showCases && (
-            <span className="flex items-center gap-1 text-xs" onClick={(e) => e.stopPropagation()}>
+            <span className="flex items-center gap-1 text-xs">
               {(["recall", "ndcg"] as const).map((m) => (
                 <button
                   key={m}
@@ -157,7 +157,7 @@ export function ByStageComparison({
               ))}
             </span>
           )}
-        </button>
+        </div>
         {showCases && (
           <div className="overflow-x-auto border-t border-gray-100 dark:border-slate-800">
             <table className="w-full text-sm">
