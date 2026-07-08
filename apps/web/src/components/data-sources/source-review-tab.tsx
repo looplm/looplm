@@ -9,11 +9,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
+import { ReportModal } from "@/components/eval/report-modal";
 import { importSourceCsv, listSourceExpectations } from "@/lib/api";
 import type { SourceExpectation } from "@/lib/api-types/source-registry";
 
 import { GROUP_DIMENSIONS, readCsvFile } from "./source-registry-shared";
+import { buildSourceReviewReport } from "./source-review-report";
 import { SourceReviewRow } from "./source-review-row";
 import { useSourceScan } from "./use-source-scan";
 
@@ -31,9 +34,11 @@ type Group = { key: string; label: string; items: SourceExpectation[] };
 
 export function SourceReviewTab({
   providerId,
+  providerName,
   canEdit,
 }: {
   providerId: string;
+  providerName?: string;
   canEdit: boolean;
 }) {
   const [expectations, setExpectations] = useState<SourceExpectation[]>([]);
@@ -43,6 +48,7 @@ export function SourceReviewTab({
   const [groupBy, setGroupBy] = useState<string>("none"); // "none" = per source (Quelle)
   const [showFlagged, setShowFlagged] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [reportOpen, setReportOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { scan, results, summary, running, run, cancel } = useSourceScan(providerId, setError);
@@ -156,6 +162,33 @@ export function SourceReviewTab({
   const flaggedCount = (summary.not_indexed ?? 0) + (summary.incomplete ?? 0) + errored;
   const hasResults = results.size > 0;
 
+  const reportMarkdown = useMemo(
+    () =>
+      buildSourceReviewReport({ expectations, results, summary, sparseIds, providerName, groupBy }),
+    [expectations, results, summary, sparseIds, providerName, groupBy],
+  );
+
+  const handleCopyReport = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(reportMarkdown);
+      toast.success("Report copied to clipboard");
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  }, [reportMarkdown]);
+
+  const handleDownloadReport = useCallback(() => {
+    const slug = (providerName || "index").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const date = new Date().toISOString().slice(0, 10);
+    const blob = new Blob([reportMarkdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `index-gaps-${slug}-${date}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [reportMarkdown, providerName]);
+
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
@@ -222,6 +255,11 @@ export function SourceReviewTab({
                 Import CSV
               </button>
             </>
+          )}
+          {hasResults && (
+            <button onClick={() => setReportOpen(true)} className={SECONDARY}>
+              Generate report
+            </button>
           )}
         </div>
       </div>
@@ -335,6 +373,16 @@ export function SourceReviewTab({
             );
           })}
         </div>
+      )}
+
+      {reportOpen && (
+        <ReportModal
+          title="What's missing in the index"
+          reportMarkdown={reportMarkdown}
+          onCopy={handleCopyReport}
+          onDownload={handleDownloadReport}
+          onClose={() => setReportOpen(false)}
+        />
       )}
     </div>
   );
