@@ -94,13 +94,19 @@ async def _resolve_handle(
         matches = []
     best, best_score = None, 0.0
     for m in matches:
-        score = title_overlap(source.name, m.label)
+        # Score against every human-readable handle the match carries: the display
+        # label (a filename for attachments), the real document title, and the URL.
+        # Mirrors the gap-analysis matcher, which scores title AND url. Without
+        # page_title, every attachment whose filename is a numeric id (the entire
+        # external/MAKO corpus) scores 0 against its real name and is falsely
+        # reported "not in index".
+        score = max(title_overlap(source.name, c) for c in (m.label, m.page_title, m.url) if c)
         if score > best_score:
             best, best_score = m, score
     if best is not None and best_score >= WEAK_TITLE_OVERLAP:
         return _Handle(
             key=best.key, value=best.value, kind=best.kind, matched_url=best.url,
-            matched_title=best.label, resolution="title",
+            matched_title=best.page_title or best.label, resolution="title",
         )
     return None
 

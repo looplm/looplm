@@ -103,6 +103,11 @@ class FileMatch:
     to filter chunks on (an ``attachment_filename`` for attachments, a parent id
     such as ``page_id`` for pages). ``label`` is what to show the user, ``kind``
     distinguishes the two, and ``chunk_count`` is how many chunks the file has.
+    ``page_title`` is the file's human-readable document title when the index
+    carries one separately from ``label`` — for attachments ``label`` is the
+    filename (often a meaningless numeric id like ``11920.pdf``), so callers that
+    match a file by its *name* must also consider ``page_title`` or they will miss
+    every ID-named attachment.
     """
 
     key: str
@@ -111,6 +116,7 @@ class FileMatch:
     kind: str  # "attachment" | "page"
     chunk_count: int
     url: str | None = None
+    page_title: str | None = None
 
 
 # Retrieval strategies a provider can pool candidates from. ``keyword`` is BM25/full-text,

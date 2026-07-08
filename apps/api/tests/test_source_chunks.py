@@ -84,6 +84,42 @@ async def test_resolves_by_title_search_when_no_url_hit():
     assert result.missing_ordinals == []
 
 
+class _IdNamedAttachmentProvider(_FakeProvider):
+    """An attachment whose filename is a meaningless numeric id (the external/MAKO
+    shape): ``label`` is ``11920.pdf`` and the real name lives in ``page_title``."""
+
+    async def search_files(self, query, limit):
+        return [
+            FileMatch(
+                key="attachment_filename",
+                value="11920.pdf",
+                label="11920.pdf",
+                kind="attachment",
+                chunk_count=3,
+                url="https://platform/download/11920.pdf",
+                page_title="COMDIS AHB 1.0h",
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_resolves_id_named_attachment_via_page_title():
+    """Regression: a numeric-filename attachment must resolve by its page_title.
+
+    Scoring only against the filename label yields 0 overlap with the source name,
+    which falsely reported the entire external/MAKO corpus as 'not in index'.
+    """
+    provider = _IdNamedAttachmentProvider(chunk_ordinals=[0, 1, 2])
+    source = SourceChunkInput(id="mako1", name="COMDIS AHB 1.0h", html_url="https://platform/docs")
+    result = await get_source_chunks(provider, source)
+
+    assert result.resolved is True
+    assert result.resolution == "title"
+    assert result.kind == "attachment"
+    assert result.matched_title == "COMDIS AHB 1.0h"
+    assert result.chunk_count == 3
+
+
 @pytest.mark.asyncio
 async def test_unresolved_source_returns_empty():
     provider = _FakeProvider(chunk_ordinals=[0, 1])

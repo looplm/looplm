@@ -121,6 +121,10 @@ async def search_files(
     # title) and labelled by the title.
     seen: dict[tuple, FileMatch] = {}
     async for doc in results:
+        # The document's real title, carried separately from ``label`` so a caller
+        # matching by name can score against it even when ``label`` is a numeric
+        # attachment filename.
+        ptitle = (f["page_title"] and doc.get(f["page_title"])) or None
         fname = f["filename"] and doc.get(f["filename"])
         if fname:
             key, value, label, kind = f["filename"], str(fname), str(fname), "attachment"
@@ -145,7 +149,8 @@ async def search_files(
         dedupe = (kind, key, value)
         if dedupe not in seen:
             seen[dedupe] = FileMatch(
-                key=key, value=value, label=label, kind=kind, chunk_count=0, url=url
+                key=key, value=value, label=label, kind=kind, chunk_count=0, url=url,
+                page_title=str(ptitle) if ptitle else None,
             )
         if len(seen) >= _MAX_FILE_CANDIDATES:
             break
