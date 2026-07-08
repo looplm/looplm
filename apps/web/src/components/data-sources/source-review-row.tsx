@@ -7,7 +7,7 @@
  * sequence) so a reviewer can page through and check coverage.
  */
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { getSourceChunks } from "@/lib/api";
 import type {
@@ -27,6 +27,54 @@ function Chevron({ open }: { open: boolean }) {
     >
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
     </svg>
+  );
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // clipboard unavailable (e.g. insecure context) — ignore
+  }
+}
+
+/**
+ * A span of text with a copy button that reveals on hover. Clicking the button
+ * copies just this text (not the whole row) and does not toggle the row.
+ */
+function Copyable({ text, className }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className={`group/copy inline-flex max-w-full items-center gap-1 ${className ?? ""}`}>
+      <span className="truncate">{text}</span>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          void copyText(text);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1200);
+        }}
+        title={copied ? "Copied" : "Copy"}
+        aria-label={`Copy ${text}`}
+        className="flex-shrink-0 text-gray-400 opacity-0 transition-opacity hover:text-indigo-500 focus:opacity-100 group-hover/copy:opacity-100 dark:text-slate-500"
+      >
+        {copied ? (
+          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+          </svg>
+        ) : (
+          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2v-2m-6-12h6a2 2 0 012 2v6m-4-8V3"
+            />
+          </svg>
+        )}
+      </button>
+    </span>
   );
 }
 
@@ -74,8 +122,8 @@ function ScanBadges({ result, sparse }: { result: SourceScanResultItem; sparse?:
   );
 }
 
-function metaLine(e: SourceExpectation): string {
-  return [e.typ, e.sparte, e.thema, e.publisher].filter(Boolean).join(" · ");
+function metaSegments(e: SourceExpectation): string[] {
+  return [e.typ, e.sparte, e.thema, e.publisher].filter((v): v is string => Boolean(v));
 }
 
 /** Range-compress a sorted list of ints: [3,4,5,9] → "3–5, 9". */
@@ -202,7 +250,7 @@ export function SourceReviewRow({
     }
   };
 
-  const meta = metaLine(expectation);
+  const segments = metaSegments(expectation);
   // Prefer the bulk-scan verdict (available without expanding); fall back to the
   // on-expand fetch's resolution badge once the row has been opened.
   const fallbackBadge = !scanResult && data ? RESOLUTION_BADGE[data.resolution] : null;
@@ -214,15 +262,34 @@ export function SourceReviewRow({
 
   return (
     <div>
-      <button
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
         onClick={toggle}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-slate-800/50"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            void toggle();
+          }
+        }}
+        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-slate-800/50"
       >
         <Chevron open={open} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-gray-700 dark:text-slate-200">{expectation.name}</span>
-          {meta && (
-            <span className="block truncate text-[11px] text-gray-400 dark:text-slate-500">{meta}</span>
+          <Copyable
+            text={expectation.name}
+            className="block text-gray-700 dark:text-slate-200"
+          />
+          {segments.length > 0 && (
+            <span className="flex flex-wrap items-center gap-x-1 text-[11px] text-gray-400 dark:text-slate-500">
+              {segments.map((s, i) => (
+                <Fragment key={i}>
+                  {i > 0 && <span aria-hidden>·</span>}
+                  <Copyable text={s} />
+                </Fragment>
+              ))}
+            </span>
           )}
         </span>
         {scanResult && <ScanBadges result={scanResult} sparse={sparse} />}
@@ -232,7 +299,7 @@ export function SourceReviewRow({
             {chunkCount.toLocaleString()} chunk{chunkCount === 1 ? "" : "s"}
           </span>
         )}
-      </button>
+      </div>
       {open && (
         <div className="border-t border-gray-100 px-4 py-2 dark:border-slate-800">
           {loading && <p className="py-1 text-xs text-gray-400">Loading chunks…</p>}
