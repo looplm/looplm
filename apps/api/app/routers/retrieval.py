@@ -179,6 +179,7 @@ async def get_retrieval_metrics_by_stage(
     gold_source: str = "human",
     min_grade: int = Query(1, ge=1, le=3),
     refresh: bool = False,
+    include_agent: bool = False,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
@@ -188,10 +189,13 @@ async def get_retrieval_metrics_by_stage(
     assemble the candidate pool (which records each chunk's rank per head), reconstruct each
     stage's ranked list, and score it against the chunk-label gold (``gold_source`` = human | ai |
     both, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
+    ``include_agent`` adds the configured custom-agent endpoint as an extra stage.
     """
     ids = dataset_ids or ([dataset_id] if dataset_id else None)
     datasets = await resolve_datasets(db, project, ids)
-    return await compute_by_stage_metrics(db, project, datasets, gold_source, refresh, min_grade)
+    return await compute_by_stage_metrics(
+        db, project, datasets, gold_source, refresh, min_grade, include_agent
+    )
 
 
 @router.post("/retrieval-metrics/compute", response_model=RetrievalComputeJob)
@@ -222,7 +226,9 @@ async def start_retrieval_metrics_compute(
     await db.commit()
     await db.refresh(job)
 
-    task = asyncio.create_task(run_metrics_job(job.id, refresh=body.refresh))
+    task = asyncio.create_task(
+        run_metrics_job(job.id, refresh=body.refresh, include_agent=body.include_agent)
+    )
     _metrics_jobs[job.id] = task
     task.add_done_callback(lambda _t, jid=job.id: _metrics_jobs.pop(jid, None))
     return _job_view(job)

@@ -242,12 +242,15 @@ async def compute_by_stage_metrics(
     gold_source: str,
     refresh: bool,
     min_grade: int = 1,
+    include_agent: bool = False,
 ) -> ByStageMetricsResponse:
     """Deterministic per-stage retrieval metrics (sparse/dense/RRF/reranked/agentic) vs gold.
 
     For each case we assemble the candidate pool (which records each chunk's rank per head),
     reconstruct each stage's ranked list, and score it against the chunk-label gold. Cached in
-    Redis keyed by dataset set + gold source + min grade.
+    Redis keyed by dataset set + gold source + min grade. ``include_agent`` additionally probes the
+    project's configured custom-agent endpoint as an extra stage (opt-in — it's slow and hits the
+    agent per case), keyed separately so toggling it doesn't collide with the index-only result.
     """
     if not datasets:
         return ByStageMetricsResponse(
@@ -255,7 +258,9 @@ async def compute_by_stage_metrics(
         )
 
     dataset_uuids = [d.id for d in datasets]
-    cache_key = result_cache_key(project.id, "by-stage", dataset_uuids, gold_source, min_grade)
+    cache_key = result_cache_key(
+        project.id, "by-stage", dataset_uuids, gold_source, min_grade, include_agent
+    )
     if not refresh:
         cached = await get_cached(cache_key, ByStageMetricsResponse)
         if cached is not None:
@@ -326,7 +331,7 @@ async def compute_by_stage_metrics(
     # chunk list), scored on the same gold beside the index-probe stages. Only when configured,
     # and only appended when at least one case returned a ranking (so the stage never shows empty).
     stage_labels = STAGE_LABELS
-    agent_config = get_agent_retrieval_config(project.settings)
+    agent_config = get_agent_retrieval_config(project.settings) if include_agent else None
     if agent_config is not None:
         k = max(AGG_KS)
         agent_sem = asyncio.Semaphore(PROBE_CONCURRENCY)
@@ -385,8 +390,12 @@ async def compute_by_stage_metrics(
 
 
 async def get_cached_by_stage(
-    project: Project, dataset_ids: list[UUID], gold_source: str, min_grade: int = 1
+    project: Project,
+    dataset_ids: list[UUID],
+    gold_source: str,
+    min_grade: int = 1,
+    include_agent: bool = False,
 ) -> ByStageMetricsResponse | None:
     """Return a previously cached by-stage result for these settings, or None (no recompute)."""
-    key = result_cache_key(project.id, "by-stage", dataset_ids, gold_source, min_grade)
+    key = result_cache_key(project.id, "by-stage", dataset_ids, gold_source, min_grade, include_agent)
     return await get_cached(key, ByStageMetricsResponse)

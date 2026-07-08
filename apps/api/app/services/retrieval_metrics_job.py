@@ -27,10 +27,11 @@ from app.services.retrieval_labels_metrics import (
 logger = logging.getLogger(__name__)
 
 
-async def run_metrics_job(job_id: UUID, refresh: bool = False) -> None:
+async def run_metrics_job(job_id: UUID, refresh: bool = False, include_agent: bool = False) -> None:
     """Run one metrics compute to completion, updating its status row throughout.
 
     ``refresh`` bypasses the result + probe caches (Recompute); otherwise a warm cache is reused.
+    ``include_agent`` (byStage only) also probes the configured custom-agent endpoint as a stage.
     """
     async with async_session() as db:
         job = await db.get(RetrievalMetricsJob, job_id)
@@ -51,7 +52,7 @@ async def run_metrics_job(job_id: UUID, refresh: bool = False) -> None:
             min_grade = job.min_grade or 1
             if job.view == "byStage":
                 await compute_by_stage_metrics(
-                    db, project, datasets, job.gold_source, refresh, min_grade
+                    db, project, datasets, job.gold_source, refresh, min_grade, include_agent
                 )
             else:
                 await compute_overall_labels_metrics(

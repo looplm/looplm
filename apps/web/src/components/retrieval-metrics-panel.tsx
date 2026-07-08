@@ -21,18 +21,15 @@ import {
   DEFAULT_RETRIEVER,
   EXPLAIN,
   METRICS,
-  RETRIEVER_NOTES,
 } from "@/components/retrieval/constants";
 import { useRetrievalDisplay } from "@/components/retrieval/use-retrieval-display";
+import { useGlobalFilters } from "@/components/global-filters-context";
 import { Info } from "@/components/retrieval/metric-card";
-import { OverallSection } from "@/components/retrieval/overall-section";
-import { RecommendationsPanel } from "@/components/retrieval/recommendations-panel";
-import { ByStageComparison } from "@/components/retrieval/by-stage-table";
+import { RetrievalResultsBody } from "@/components/retrieval/results-body";
 import { DatasetMultiSelect } from "@/components/retrieval/dataset-multiselect";
 import { GoldControls, type GoldSource, type MinGrade } from "@/components/retrieval/gold-controls";
 import { KSelector } from "@/components/retrieval/k-selector";
 import { RetrieverSelector } from "@/components/retrieval/retriever-selector";
-import { RerankThreshold } from "@/components/retrieval/rerank-threshold";
 import { SourceDescription } from "@/components/retrieval/source-description";
 import { ErrorNotice } from "@/components/error-notice";
 import { ComputedAt } from "@/components/retrieval/computed-at";
@@ -47,6 +44,9 @@ type Draft = {
   minGrade: MinGrade;
   datasetIds: string[];
   runId: string | null;
+  // Score the custom-agent endpoint as an extra by-stage stage (opt-in; slow — one agent call
+  // per case). Only offered when the project has an agent endpoint configured.
+  includeAgent: boolean;
 };
 // A snapshot of Draft that has been sent to compute, plus a nonce to retrigger the fetch on
 // Recompute (same settings, forced refresh) and a refresh flag.
@@ -57,6 +57,7 @@ const sameSettings = (a: Draft, b: Draft): boolean =>
   a.goldSource === b.goldSource &&
   a.minGrade === b.minGrade &&
   a.runId === b.runId &&
+  a.includeAgent === b.includeAgent &&
   a.datasetIds.length === b.datasetIds.length &&
   a.datasetIds.every((id) => b.datasetIds.includes(id));
 
@@ -76,6 +77,12 @@ export default function RetrievalMetricsPanel({
   onDisplayedRunChange?: (run: RetrievalRunRecord | null) => void;
 } = {}) {
 
+  const { currentProject } = useGlobalFilters();
+  // The custom-agent stage is only offered when the project has an agent endpoint configured.
+  const agentConfigured = !!(currentProject?.settings as Record<string, unknown> | undefined)?.[
+    "agent_retrieval_endpoint"
+  ];
+
   const [runs, setRuns] = useState<EvalRunListItem[]>([]);
   const [datasets, setDatasets] = useState<{ id: string; name: string }[]>([]);
   const [targets, setTargets] = useState<RetrievalTargets | null>(null);
@@ -86,6 +93,7 @@ export default function RetrievalMetricsPanel({
     minGrade: 1,
     datasetIds: [],
     runId: null,
+    includeAgent: false,
   });
   const setDraftField = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -180,13 +188,13 @@ export default function RetrievalMetricsPanel({
 
     const runByStage = async () => {
       const job = await startRetrievalCompute(
-        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, min_grade: applied.minGrade, view: "byStage", refresh: applied.refresh },
+        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, min_grade: applied.minGrade, view: "byStage", refresh: applied.refresh, include_agent: applied.includeAgent },
         signal,
       );
       await pollRetrievalCompute(job.id, signal);
       if (signal.aborted) return;
       const d = await getRetrievalByStageMetrics(
-        { datasetIds: applied.datasetIds, goldSource: applied.goldSource, minGrade: applied.minGrade, refresh: false },
+        { datasetIds: applied.datasetIds, goldSource: applied.goldSource, minGrade: applied.minGrade, refresh: false, includeAgent: applied.includeAgent },
         signal,
       );
       if (!signal.aborted) setByStage(d);
@@ -344,7 +352,7 @@ export default function RetrievalMetricsPanel({
           <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700 text-xs">
             {(["urls", "labels"] as const).map((s) => (
               <button key={s} onClick={() => setDraftField("source", s)} className={toggleClass(draft.source === s)}>
-                {s === "urls" ? "Expected URLs" : "Human labels"}
+                {s === "urls" ? "Documents" : "Chunks"}
               </button>
             ))}
           </div>
@@ -355,6 +363,20 @@ export default function RetrievalMetricsPanel({
               onGoldSource={(g) => setDraftField("goldSource", g)}
               onMinGrade={(g) => setDraftField("minGrade", g)}
             />
+          )}
+          {draft.source === "labels" && agentConfigured && (
+            <label
+              className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-slate-300 cursor-pointer select-none"
+              title="Score your configured custom-agent endpoint as an extra stage. Slower — it calls the agent once per case."
+            >
+              <input
+                type="checkbox"
+                checked={draft.includeAgent}
+                onChange={(e) => setDraftField("includeAgent", e.target.checked)}
+                className="w-3.5 h-3.5 rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
+              />
+              Include custom agent
+            </label>
           )}
           {displayMetrics?.available && targets && (
             <span
@@ -441,51 +463,24 @@ export default function RetrievalMetricsPanel({
           <span className="font-medium text-gray-700 dark:text-slate-200">Compute metrics</span>.
         </div>
       ) : (
-        <>
-          {/* What to improve — rule-based findings over the computed metrics, most-severe first. */}
-          <RecommendationsPanel
-            overall={displayMetrics}
-            byStage={showByStage ? byStage : null}
-            targets={targets}
-            k={activeK}
-            source={displaySource}
-          />
-
-          {/* Score-threshold cutoff explorer — Agentic + rerank only. */}
-          {showByStage && rerankSweep && rerankSweep.length > 0 && (
-            <RerankThreshold sweep={rerankSweep} precisionTarget={targets?.precision ?? null} />
-          )}
-
-          {/* Overall — the selected retriever, in detail. */}
-          <OverallSection
-            metrics={displayMetrics}
-            loading={displayLoading}
-            source={displaySource}
-            activeK={activeK}
-            targets={targets}
-            retrieverLabel={retrieverLabel}
-            retrieverNote={RETRIEVER_NOTES[selectedRetriever]}
-            retriever={selectedRetriever}
-            goldSource={displayGold}
-            minGrade={displayMinGrade}
-            perRetriever={!useBest}
-            bestAvailable={!!overall?.available}
-          />
-
-          {/* By stage — each retrieval method scored separately (labels path only). */}
-          {showByStage && (
-            <div id="retrieval-by-stage" className="mt-10">
-              <h3 className="text-base font-semibold mb-3">By stage</h3>
-              {byStageError ? <ErrorNotice error={byStageError} className="mb-3" /> : null}
-              <ByStageComparison
-                data={byStage}
-                loading={byStageLoading}
-                goldSource={displayGold}
-                selectedK={activeK}
-              />
-            </div>
-          )}
-        </>
+        <RetrievalResultsBody
+          displayMetrics={displayMetrics}
+          byStage={byStage}
+          showByStage={showByStage}
+          targets={targets}
+          activeK={activeK}
+          displaySource={displaySource}
+          rerankSweep={rerankSweep}
+          displayLoading={displayLoading}
+          retrieverLabel={retrieverLabel}
+          selectedRetriever={selectedRetriever}
+          displayGold={displayGold}
+          displayMinGrade={displayMinGrade}
+          useBest={useBest}
+          overall={overall}
+          byStageLoading={byStageLoading}
+          byStageError={byStageError}
+        />
       )}
     </div>
   );

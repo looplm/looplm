@@ -49,6 +49,8 @@ interface GlobalFiltersContextValue extends GlobalFilters {
   retrievalSpanName: string;
   retrievalSpanNameSaving: boolean;
   setRetrievalSpanName: (name: string) => Promise<void>;
+  // The active project (with its settings), so feature panels can read per-project config.
+  currentProject: Project | null;
 }
 
 export const DEFAULT_RETRIEVAL_SPAN_NAME = "retrieval-context";
@@ -247,6 +249,7 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
         retrievalSpanName,
         retrievalSpanNameSaving,
         setRetrievalSpanName,
+        currentProject,
       }}
     >
       {children}

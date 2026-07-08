@@ -27,11 +27,22 @@ TModel = TypeVar("TModel", bound=BaseModel)
 
 
 def result_cache_key(
-    project_id: UUID, view: str, dataset_ids: Iterable[UUID], gold_source: str, min_grade: int
+    project_id: UUID,
+    view: str,
+    dataset_ids: Iterable[UUID],
+    gold_source: str,
+    min_grade: int,
+    include_agent: bool = False,
 ) -> str:
-    """Cache key for one computed metrics response, stable across dataset-id ordering."""
+    """Cache key for one computed metrics response, stable across dataset-id ordering.
+
+    ``include_agent`` (by-stage only) probes the external custom-agent endpoint as an extra stage;
+    it changes the result, so it gets its own key. Kept as a suffix appended only when set, so the
+    common (no-agent) keys stay byte-identical to before.
+    """
     ids = ",".join(sorted(str(i) for i in dataset_ids))
-    return f"retrieval:metrics:{_VERSION}:{project_id}:{view}:{gold_source}:g{min_grade}:{ids}"
+    suffix = ":agent" if include_agent else ""
+    return f"retrieval:metrics:{_VERSION}:{project_id}:{view}:{gold_source}:g{min_grade}:{ids}{suffix}"
 
 
 async def get_cached(key: str, model: type[TModel]) -> TModel | None:

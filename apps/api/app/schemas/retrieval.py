@@ -647,6 +647,9 @@ class RetrievalComputeStart(BaseModel):
     view: str = "overall"  # overall | byStage
     # Recompute forces a fresh live probe + embed; a plain Compute may reuse a warm cache.
     refresh: bool = False
+    # Also score the project's configured custom-agent endpoint as an extra by-stage stage.
+    # Opt-in (byStage only): it's slow and calls the agent once per case.
+    include_agent: bool = False
 
 
 class RetrievalComputeJob(BaseModel):

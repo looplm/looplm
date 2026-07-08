@@ -81,6 +81,7 @@ export const getRetrievalByStageMetrics = (
     goldSource?: "human" | "ai" | "both";
     minGrade?: number;
     refresh?: boolean;
+    includeAgent?: boolean;
   } = {},
   signal?: AbortSignal,
 ) => {
@@ -89,6 +90,7 @@ export const getRetrievalByStageMetrics = (
   if (opts.goldSource && opts.goldSource !== "human") params.set("gold_source", opts.goldSource);
   if (opts.minGrade && opts.minGrade !== 1) params.set("min_grade", String(opts.minGrade));
   if (opts.refresh) params.set("refresh", "true");
+  if (opts.includeAgent) params.set("include_agent", "true");
   const qs = params.toString();
   return request<ByStageMetricsResponse>(
     `/api/pipeline/retrieval-metrics/by-stage${qs ? `?${qs}` : ""}`,

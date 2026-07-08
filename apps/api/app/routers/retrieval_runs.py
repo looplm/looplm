@@ -171,9 +171,12 @@ async def create_run(
             },
         )
 
+    # Prefer the with-agent by-stage breakdown when one was computed (so a run captures the custom
+    # agent stage), else the index-only one.
+    ds_ids = [d.id for d in datasets]
     by_stage = await get_cached_by_stage(
-        project, [d.id for d in datasets], body.gold_source, body.min_grade
-    )
+        project, ds_ids, body.gold_source, body.min_grade, include_agent=True
+    ) or await get_cached_by_stage(project, ds_ids, body.gold_source, body.min_grade)
 
     # Auto-capture the connected index name (Azure config.index_name, else the provider label).
     provider = (

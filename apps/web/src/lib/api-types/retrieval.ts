@@ -435,6 +435,8 @@ export interface RetrievalComputeStartBody {
   min_grade?: number;
   view: "overall" | "byStage";
   refresh?: boolean;
+  // Also score the configured custom-agent endpoint as an extra by-stage stage (opt-in; slow).
+  include_agent?: boolean;
 }
 
 export type RetrievalComputeStatus = "pending" | "running" | "completed" | "failed";
