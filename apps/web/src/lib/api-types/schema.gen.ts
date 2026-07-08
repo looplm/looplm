@@ -3140,6 +3140,7 @@ export interface paths {
          *     assemble the candidate pool (which records each chunk's rank per head), reconstruct each
          *     stage's ranked list, and score it against the chunk-label gold (``gold_source`` = human | ai |
          *     both, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
+         *     ``include_agent`` adds the configured custom-agent endpoint as an extra stage.
          */
         get: operations["get_retrieval_metrics_by_stage_api_pipeline_retrieval_metrics_by_stage_get"];
         put?: never;
@@ -9880,6 +9881,11 @@ export interface components {
              * @default human
              */
             gold_source: string;
+            /**
+             * Include Agent
+             * @default false
+             */
+            include_agent: boolean;
             /**
              * Min Grade
              * @default 1
@@ -17935,6 +17941,7 @@ export interface operations {
                 gold_source?: string;
                 min_grade?: number;
                 refresh?: boolean;
+                include_agent?: boolean;
             };
             header?: {
                 "x-project-id"?: string | null;
