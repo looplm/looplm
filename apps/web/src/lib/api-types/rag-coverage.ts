@@ -63,6 +63,8 @@ export interface CoverageSuggestion {
   team_filter: string[];
   expected_source_types: string[];
   context_filters: Record<string, string>;
+  suggested_dataset_id?: string | null;
+  suggested_dataset_name?: string | null;
 }
 
 export type CoverageRunStatus = "pending" | "running" | "completed" | "failed";

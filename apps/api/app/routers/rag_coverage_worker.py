@@ -64,6 +64,62 @@ def _scope_for(partition_key: str, value: str) -> dict:
     return {"context_filters": {partition_key: value}}
 
 
+def _propose_dataset_name(value: str) -> str:
+    """A readable dataset name for a gap that no existing dataset covers."""
+    label = " ".join(w for w in value.replace("-", " ").replace("_", " ").split())
+    label = " ".join(w.capitalize() for w in label.split()) or value
+    return f"{label} Evaluation"
+
+
+async def _attach_dataset_suggestions(
+    db, project_id: UUID, suggestions: list[CoverageEvalSuggestion]
+) -> None:
+    """For each suggestion, pick the best-fit existing dataset by metadata
+    overlap; when none matches, propose a name for a new dataset. Mirrors the
+    smart-dataset pass in ``feedback_suggestion_worker``."""
+    from app.routers.dataset_helpers import score_dataset_relevance
+
+    ds_rows = (
+        await db.execute(select(TestDataset).where(TestDataset.project_id == project_id))
+    ).scalars().all()
+
+    dataset_cases: dict[str, list[dict]] = {}
+    for ds in ds_rows:
+        cases = (
+            await db.execute(
+                select(
+                    TestCase.team_filter, TestCase.tag_filter, TestCase.context_filters
+                ).where(TestCase.dataset_id == ds.id)
+            )
+        ).all()
+        dataset_cases[str(ds.id)] = [
+            {
+                "team_filter": row.team_filter or [],
+                "tag_filter": row.tag_filter or [],
+                "context_filters": row.context_filters or {},
+            }
+            for row in cases
+        ]
+
+    for sug in suggestions:
+        best_id = None
+        best_score = 0.0
+        for ds in ds_rows:
+            score = score_dataset_relevance(
+                dataset_cases.get(str(ds.id), []),
+                sug.team_filter,
+                sug.tag_filter,
+                sug.context_filters,
+            )
+            if score > best_score:
+                best_score = score
+                best_id = ds.id
+        if best_id is not None:
+            sug.suggested_dataset_id = best_id
+        else:
+            sug.suggested_dataset_name = _propose_dataset_name(sug.partition_value)
+
+
 def _build_user_prompt(partition_key: str, value: str, snippets: list[str]) -> str:
     joined = "\n\n".join(f"- {s}" for s in snippets if s) or "(no text excerpts available)"
     return (
@@ -167,7 +223,7 @@ async def run_coverage_analysis(
             run.results = report.to_dict()
             await db.commit()
 
-            suggestions: list[dict] = []
+            suggestion_objs: list[CoverageEvalSuggestion] = []
             if suggest:
                 try:
                     llm = AnalysisLlmService(user_settings=user_settings)
@@ -208,20 +264,25 @@ async def run_coverage_analysis(
                             )
                         scope = _scope_for(partition_key, gap.value)
                         for q in questions:
-                            suggestions.append(
+                            suggestion_objs.append(
                                 CoverageEvalSuggestion(
                                     partition_value=gap.value,
                                     prompt=q["prompt"],
                                     acceptance_criteria=q["acceptance_criteria"],
                                     **scope,
-                                ).model_dump(mode="json")
+                                )
                             )
                     except Exception:
                         logger.exception(
                             "Suggestion generation failed for %s=%s", partition_key, gap.value
                         )
                     run.processed = i + 1
-                    run.suggestions = list(suggestions)
+                    run.suggestions = [s.model_dump(mode="json") for s in suggestion_objs]
+                    await db.commit()
+
+                if suggestion_objs:
+                    await _attach_dataset_suggestions(db, project_id, suggestion_objs)
+                    run.suggestions = [s.model_dump(mode="json") for s in suggestion_objs]
                     await db.commit()
 
             run.status = "completed"

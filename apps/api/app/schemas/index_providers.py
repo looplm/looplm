@@ -81,6 +81,10 @@ class CoverageEvalSuggestion(BaseModel):
     team_filter: list[str] = Field(default_factory=list)
     expected_source_types: list[str] = Field(default_factory=list)
     context_filters: dict[str, str] = Field(default_factory=dict)
+    # Best-fit existing dataset by metadata overlap, if any. When no existing
+    # dataset matches, ``suggested_dataset_name`` proposes a name for a new one.
+    suggested_dataset_id: Optional[UUID] = None
+    suggested_dataset_name: Optional[str] = None
 
 
 class CoverageRunResponse(BaseModel):

@@ -15,11 +15,25 @@ function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "value";
 }
 
-function suggestionToBody(s: CoverageSuggestion, index: number): TestCaseCreateBody {
+interface SuggestionForm {
+  test_id: string;
+  prompt: string;
+  expected_answer: string;
+}
+
+function formFromSuggestion(s: CoverageSuggestion, index: number): SuggestionForm {
   return {
     test_id: `coverage-${slugify(s.partition_value)}-${index + 1}`,
     prompt: s.prompt,
-    expected_answer: s.acceptance_criteria || undefined,
+    expected_answer: s.acceptance_criteria || "",
+  };
+}
+
+function suggestionToBody(s: CoverageSuggestion, form: SuggestionForm): TestCaseCreateBody {
+  return {
+    test_id: form.test_id.trim() || `coverage-${slugify(s.partition_value)}`,
+    prompt: form.prompt.trim(),
+    expected_answer: form.expected_answer.trim() || undefined,
     tag_filter: s.tag_filter || [],
     team_filter: s.team_filter || [],
     expected_source_types: s.expected_source_types || [],
@@ -155,9 +169,22 @@ function AcceptModal({
   onClose: () => void;
   onAccepted: (index: number) => void;
 }) {
-  const [datasetId, setDatasetId] = useState<string>(datasets[0]?.id || "__new__");
-  const [newName, setNewName] = useState("Eval coverage");
+  // Default to the worker's matched dataset when it found one; otherwise open on
+  // "New dataset" pre-filled with the proposed name so a mismatched gap doesn't
+  // get silently filed under an arbitrary existing dataset.
+  const matchedId =
+    suggestion.suggested_dataset_id &&
+    datasets.some((d) => d.id === suggestion.suggested_dataset_id)
+      ? suggestion.suggested_dataset_id
+      : null;
+  const [datasetId, setDatasetId] = useState<string>(matchedId ?? "__new__");
+  const [newName, setNewName] = useState(suggestion.suggested_dataset_name || "Eval coverage");
+  const [form, setForm] = useState<SuggestionForm>(() => formFromSuggestion(suggestion, index));
   const [saving, setSaving] = useState(false);
+
+  const canSave = Boolean(
+    form.prompt.trim() && form.test_id.trim() && (datasetId !== "__new__" || newName.trim()),
+  );
 
   async function handleSave() {
     setSaving(true);
@@ -167,7 +194,7 @@ function AcceptModal({
         const ds = await createDataset({ name: newName.trim() || "Eval coverage" });
         targetId = ds.id;
       }
-      await createTestCase(targetId, suggestionToBody(suggestion, index));
+      await createTestCase(targetId, suggestionToBody(suggestion, form));
       toast.success("Test case added");
       onAccepted(index);
     } catch (err) {
@@ -179,22 +206,69 @@ function AcceptModal({
 
   const inputCls =
     "w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm";
+  const hasScope =
+    suggestion.tag_filter.length > 0 ||
+    suggestion.team_filter.length > 0 ||
+    suggestion.expected_source_types.length > 0;
 
   return (
     <>
       <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60]" onClick={onClose} />
       <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 shadow-xl w-full max-w-lg">
-          <div className="p-4 border-b border-gray-100 dark:border-slate-800">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+          <div className="p-4 border-b border-gray-100 dark:border-slate-800 shrink-0">
             <h2 className="text-lg font-semibold">Add to dataset</h2>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+              Gap: <span className="text-indigo-600 dark:text-indigo-400">{suggestion.partition_value}</span>
+            </p>
           </div>
-          <div className="p-4 space-y-3">
+          <div className="p-4 space-y-4 overflow-y-auto flex-1">
             <div>
-              <label className="block text-xs text-gray-500 dark:text-slate-400 mb-1">Prompt</label>
-              <p className="text-sm">{suggestion.prompt}</p>
+              <label className="block text-sm font-medium mb-1">Test ID</label>
+              <input
+                value={form.test_id}
+                onChange={(e) => setForm({ ...form, test_id: e.target.value })}
+                className={inputCls}
+              />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 dark:text-slate-400 mb-1">Dataset</label>
+              <label className="block text-sm font-medium mb-1">Prompt</label>
+              <textarea
+                value={form.prompt}
+                onChange={(e) => setForm({ ...form, prompt: e.target.value })}
+                rows={form.prompt.includes("\n") ? 6 : 3}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Expected Answer
+                <span className="ml-2 text-xs font-normal text-indigo-500">AI-drafted criteria</span>
+              </label>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">
+                These are acceptance criteria, not a verified answer. Edit or replace them with the
+                real expected response if you have one.
+              </p>
+              <textarea
+                value={form.expected_answer}
+                onChange={(e) => setForm({ ...form, expected_answer: e.target.value })}
+                rows={4}
+                className={inputCls}
+                placeholder="(optional)"
+              />
+            </div>
+            {hasScope && (
+              <div>
+                <label className="block text-sm font-medium mb-1">Scope</label>
+                <div className="flex items-center flex-wrap gap-y-1">
+                  <Chips label="tags" values={suggestion.tag_filter} />
+                  <Chips label="team" values={suggestion.team_filter} />
+                  <Chips label="source" values={suggestion.expected_source_types} />
+                </div>
+              </div>
+            )}
+            <div>
+              <label className="block text-sm font-medium mb-1">Dataset</label>
               <select
                 value={datasetId}
                 onChange={(e) => setDatasetId(e.target.value)}
@@ -202,22 +276,23 @@ function AcceptModal({
               >
                 {datasets.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.name}
+                    {d.name} ({d.test_count} cases)
+                    {d.id === matchedId ? " — Suggested" : ""}
                   </option>
                 ))}
                 <option value="__new__">+ New dataset…</option>
               </select>
+              {datasetId === "__new__" && (
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="New dataset name"
+                  className={`${inputCls} mt-2`}
+                />
+              )}
             </div>
-            {datasetId === "__new__" && (
-              <div>
-                <label className="block text-xs text-gray-500 dark:text-slate-400 mb-1">
-                  New dataset name
-                </label>
-                <input value={newName} onChange={(e) => setNewName(e.target.value)} className={inputCls} />
-              </div>
-            )}
           </div>
-          <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-slate-800">
+          <div className="flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-slate-800 shrink-0">
             <button
               onClick={onClose}
               className="px-4 py-2 rounded-lg text-sm text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800"
@@ -226,10 +301,10 @@ function AcceptModal({
             </button>
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || !canSave}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50"
             >
-              {saving ? "Adding…" : "Add test case"}
+              {saving ? "Adding…" : datasetId === "__new__" ? "Create & add" : "Add test case"}
             </button>
           </div>
         </div>
