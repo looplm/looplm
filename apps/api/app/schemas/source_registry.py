@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -135,6 +135,60 @@ class SourceChunk(BaseModel):
     title: Optional[str] = None
     url: Optional[str] = None
     text: Optional[str] = None
+
+
+# ── Bulk completeness scan ───────────────────────────────────────────────────
+
+
+class SourceScanRequest(BaseModel):
+    provider_id: UUID
+    # "all" scans every source; "dlq" re-scans only sources that errored last time.
+    scope: Literal["all", "dlq"] = "all"
+
+
+class SourceScanRunResponse(BaseModel):
+    id: UUID
+    provider_id: UUID
+    scope: str
+    status: str
+    total: int
+    processed: int
+    failed: int
+    error: Optional[str] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class SourceScanCreateResponse(BaseModel):
+    scan_id: UUID
+    status: str
+
+
+class SourceScanResultItem(BaseModel):
+    expectation_id: UUID
+    resolution: str
+    resolved: bool
+    kind: Optional[str] = None
+    matched_url: Optional[str] = None
+    matched_title: Optional[str] = None
+    chunk_count: int
+    missing_chunk_count: int
+    ordinal_checked: bool
+    execution_status: str
+    error: Optional[str] = None
+    scanned_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SourceScanResultsResponse(BaseModel):
+    data: list[SourceScanResultItem]
+    # Rollup counts across the scanned sources.
+    summary: dict[str, int] = Field(default_factory=dict)
+    latest_run: Optional[SourceScanRunResponse] = None
 
 
 class SourceChunksResponse(BaseModel):

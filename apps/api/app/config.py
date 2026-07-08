@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # Ceiling on the exponential term so a raised retry count can't produce
     # minutes-long sleeps (delay = min(base * 2**(attempt-1), max) + jitter).
     eval_backoff_max_seconds: float = 30.0
+    # Concurrency for the Data Sources source-completeness scan. Each source runs
+    # a few read-only index queries; kept modest so a large source list can't
+    # trip the retrieval index's own request throttling (retries reuse the eval
+    # backoff settings above). Failures after retries land in the scan DLQ.
+    source_scan_concurrency: int = 4
     # Explicit retry budget for LoopLM's own OpenAI/Azure SDK clients (judges,
     # query embeddings). The SDK retries 429/5xx/timeout internally with backoff;
     # set this instead of relying on the invisible default (2) so grading and

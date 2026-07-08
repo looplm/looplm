@@ -127,6 +127,50 @@ def _ordinal_gaps(docs: list[CorpusDoc]) -> tuple[bool, list[int], list[int], bo
     return True, missing[:_MAX_REPORTED_GAPS], duplicate, truncated
 
 
+@dataclass
+class SourceScanVerdict:
+    """Compact per-source scan verdict (no chunk text) for the bulk scan."""
+
+    resolved: bool
+    resolution: str  # "url" | "title" | "none"
+    kind: str | None = None
+    matched_url: str | None = None
+    matched_title: str | None = None
+    chunk_count: int = 0
+    missing_chunk_count: int = 0
+    ordinal_checked: bool = False
+
+
+async def scan_source(
+    provider: BaseIndexProvider, source: SourceChunkInput, limit: int = 2000
+) -> SourceScanVerdict:
+    """Resolve ``source`` and summarise its indexed chunks — without the text.
+
+    The bulk completeness scan calls this per source; it deliberately fetches
+    ordinals only (``include_text=False``) so scanning hundreds of sources does
+    not pull megabytes of chunk bodies. Raises on provider/transport failures so
+    the caller's retry/backoff can act; a truly unresolved source is not an error
+    (``resolved=False``).
+    """
+    handle = await _resolve_handle(provider, source)
+    if handle is None:
+        return SourceScanVerdict(resolved=False, resolution="none")
+    docs = await provider.list_file_chunks(
+        handle.key, handle.value, handle.kind, limit, include_text=False
+    )
+    ordinal_available, missing, _duplicate, _truncated = _ordinal_gaps(docs)
+    return SourceScanVerdict(
+        resolved=True,
+        resolution=handle.resolution,
+        kind=handle.kind,
+        matched_url=handle.matched_url,
+        matched_title=handle.matched_title,
+        chunk_count=len(docs),
+        missing_chunk_count=len(missing),
+        ordinal_checked=ordinal_available,
+    )
+
+
 async def get_source_chunks(
     provider: BaseIndexProvider, source: SourceChunkInput, limit: int = 500
 ) -> SourceChunksResult:

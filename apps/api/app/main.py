@@ -16,7 +16,7 @@ from app.routers import (
     admin, analysis, analytics, advisor, auth_router, chunk_quality, costs_overview, dashboard, datasets, evaluations,
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
     index_explorer, ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent,
-    permissions, project_members, projects, prompts, rag_coverage, retrieval, retrieval_readiness, retrieval_runs, route_analysis, source_registry, trace_detail,
+    permissions, project_members, projects, prompts, rag_coverage, retrieval, retrieval_readiness, retrieval_runs, route_analysis, source_registry, source_registry_scan, trace_detail,
     traces, user_settings, version, chunk_labels,
 )
 
@@ -250,6 +250,7 @@ app.include_router(retrieval_runs.router)
 app.include_router(chunk_labels.router)
 app.include_router(index_explorer.router)
 app.include_router(source_registry.router)
+app.include_router(source_registry_scan.router)
 app.include_router(chunk_quality.router)
 app.include_router(imports.router)
 app.include_router(code_agent.router)

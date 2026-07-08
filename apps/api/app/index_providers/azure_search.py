@@ -613,11 +613,11 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         return await search_files(self, query, limit)
 
     async def list_file_chunks(
-        self, key: str, value: str, kind: str, limit: int
+        self, key: str, value: str, kind: str, limit: int, *, include_text: bool = True
     ) -> list[CorpusDoc]:
         from app.index_providers.azure_search_files import list_file_chunks
 
-        return await list_file_chunks(self, key, value, kind, limit)
+        return await list_file_chunks(self, key, value, kind, limit, include_text=include_text)
 
     async def aclose(self) -> None:
         await self._search_client.close()

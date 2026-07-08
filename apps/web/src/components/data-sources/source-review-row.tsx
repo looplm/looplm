@@ -13,6 +13,7 @@ import { getSourceChunks } from "@/lib/api";
 import type {
   SourceChunksResponse,
   SourceExpectation,
+  SourceScanResultItem,
 } from "@/lib/api-types/source-registry";
 import { ErrorNotice } from "@/components/error-notice";
 
@@ -34,6 +35,44 @@ const RESOLUTION_BADGE: Record<string, { label: string; cls: string }> = {
   title: { label: "Matched by title", cls: "bg-sky-500/15 text-sky-600 dark:text-sky-400" },
   none: { label: "Not in index", cls: "bg-red-500/15 text-red-600 dark:text-red-400" },
 };
+
+const RED = "bg-red-500/15 text-red-600 dark:text-red-400";
+const AMBER = "bg-amber-500/15 text-amber-600 dark:text-amber-400";
+
+function Badge({ label, cls, title }: { label: string; cls: string; title?: string }) {
+  return (
+    <span
+      title={title}
+      className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${cls}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+/** Header badges derived from the bulk-scan verdict (shown without expanding). */
+function ScanBadges({ result, sparse }: { result: SourceScanResultItem; sparse?: boolean }) {
+  if (result.execution_status === "error") {
+    return <Badge label="Scan error" cls={RED} title={result.error ?? undefined} />;
+  }
+  if (!result.resolved) {
+    return <Badge label="Not in index" cls={RED} />;
+  }
+  const res = RESOLUTION_BADGE[result.resolution] ?? RESOLUTION_BADGE.url;
+  return (
+    <>
+      {result.missing_chunk_count > 0 && (
+        <Badge
+          label={`${result.missing_chunk_count} gap${result.missing_chunk_count === 1 ? "" : "s"}`}
+          cls={AMBER}
+          title="Holes in the chunk-order sequence"
+        />
+      )}
+      {sparse && <Badge label="Few chunks" cls={AMBER} title="Unusually few chunks vs. peers" />}
+      <Badge label={res.label} cls={res.cls} />
+    </>
+  );
+}
 
 function metaLine(e: SourceExpectation): string {
   return [e.typ, e.sparte, e.thema, e.publisher].filter(Boolean).join(" · ");
@@ -133,7 +172,15 @@ function ChunkItem({
   );
 }
 
-export function SourceReviewRow({ expectation }: { expectation: SourceExpectation }) {
+export function SourceReviewRow({
+  expectation,
+  scanResult,
+  sparse,
+}: {
+  expectation: SourceExpectation;
+  scanResult?: SourceScanResultItem;
+  sparse?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<SourceChunksResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -156,7 +203,14 @@ export function SourceReviewRow({ expectation }: { expectation: SourceExpectatio
   };
 
   const meta = metaLine(expectation);
-  const badge = data ? RESOLUTION_BADGE[data.resolution] : null;
+  // Prefer the bulk-scan verdict (available without expanding); fall back to the
+  // on-expand fetch's resolution badge once the row has been opened.
+  const fallbackBadge = !scanResult && data ? RESOLUTION_BADGE[data.resolution] : null;
+  const chunkCount = scanResult?.resolved
+    ? scanResult.chunk_count
+    : data?.resolved
+      ? data.chunk_count
+      : null;
 
   return (
     <div>
@@ -171,14 +225,11 @@ export function SourceReviewRow({ expectation }: { expectation: SourceExpectatio
             <span className="block truncate text-[11px] text-gray-400 dark:text-slate-500">{meta}</span>
           )}
         </span>
-        {badge && (
-          <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
-            {badge.label}
-          </span>
-        )}
-        {data?.resolved && (
+        {scanResult && <ScanBadges result={scanResult} sparse={sparse} />}
+        {fallbackBadge && <Badge label={fallbackBadge.label} cls={fallbackBadge.cls} />}
+        {chunkCount != null && (
           <span className="flex-shrink-0 text-xs tabular-nums text-gray-500 dark:text-slate-400">
-            {data.chunk_count.toLocaleString()} chunk{data.chunk_count === 1 ? "" : "s"}
+            {chunkCount.toLocaleString()} chunk{chunkCount === 1 ? "" : "s"}
           </span>
         )}
       </button>

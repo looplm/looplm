@@ -90,6 +90,49 @@ export interface SourceChunksResponse {
   chunks: SourceChunk[];
 }
 
+export interface SourceScanRun {
+  id: string;
+  provider_id: string;
+  scope: "all" | "dlq";
+  status: string; // pending | running | completed | failed | cancelled
+  total: number;
+  processed: number;
+  failed: number;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface SourceScanResultItem {
+  expectation_id: string;
+  resolution: "url" | "title" | "none";
+  resolved: boolean;
+  kind: string | null;
+  matched_url: string | null;
+  matched_title: string | null;
+  chunk_count: number;
+  missing_chunk_count: number;
+  ordinal_checked: boolean;
+  execution_status: "ok" | "error";
+  error: string | null;
+  scanned_at: string;
+}
+
+export interface SourceScanSummary {
+  total?: number;
+  not_indexed?: number;
+  incomplete?: number;
+  errored?: number;
+  ok?: number;
+}
+
+export interface SourceScanResultsResponse {
+  data: SourceScanResultItem[];
+  summary: SourceScanSummary;
+  latest_run: SourceScanRun | null;
+}
+
 export interface GapRunDetail {
   id: string;
   provider_id: string;

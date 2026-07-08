@@ -13,6 +13,7 @@ verdicts so they survive reloads and can be polled.
 from uuid import uuid4
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -98,3 +99,90 @@ class SourceGapRun(Base):
 
     project = relationship("Project")
     provider = relationship("IndexProvider")
+
+
+class SourceScanRun(Base):
+    """A background completeness scan over a provider's source expectations.
+
+    Runs the per-source resolve+chunk analysis (the one the 'Source review' tab
+    runs on expand) across every source, resilient to index rate-limiting, so a
+    reviewer can flag missing/incomplete sources without opening each one. Owns
+    the run lifecycle + progress; the per-source verdicts live in
+    :class:`SourceScanResult`. ``scope='dlq'`` re-scans only sources that errored
+    on a previous run (mirrors the evaluations dead-letter-queue rerun).
+    """
+
+    __tablename__ = "source_scan_runs"
+    __table_args__ = (
+        Index("idx_source_scan_runs_lookup", "project_id", "provider_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    provider_id = Column(
+        UUID(as_uuid=True), ForeignKey("index_providers.id", ondelete="CASCADE"), nullable=False
+    )
+    scope = Column(String(16), nullable=False, server_default=text("'all'"))  # all | dlq
+    status = Column(String(32), nullable=False, server_default=text("'pending'"))
+    error = Column(Text, nullable=True)
+    total = Column(Integer, nullable=False, server_default=text("0"))  # sources to scan
+    processed = Column(Integer, nullable=False, server_default=text("0"))
+    failed = Column(Integer, nullable=False, server_default=text("0"))  # errored after retries
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    project = relationship("Project")
+    provider = relationship("IndexProvider")
+
+
+class SourceScanResult(Base):
+    """The current scan verdict for one source (upserted by each scan run).
+
+    One row per (project, provider, expectation): the latest scan wins. Rows with
+    ``execution_status='error'`` are the dead-letter set surfaced for retry. The
+    'Source review' tab reads these to label each source without expanding it.
+    """
+
+    __tablename__ = "source_scan_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "provider_id", "expectation_id", name="uq_source_scan_result"
+        ),
+        Index(
+            "idx_source_scan_results_dlq", "project_id", "provider_id", "execution_status"
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    provider_id = Column(
+        UUID(as_uuid=True), ForeignKey("index_providers.id", ondelete="CASCADE"), nullable=False
+    )
+    expectation_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("source_expectations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # How the source was located: url | title | none.
+    resolution = Column(String(16), nullable=False, server_default=text("'none'"))
+    resolved = Column(Boolean, nullable=False, server_default=text("false"))
+    kind = Column(String(32), nullable=True)  # web | page | attachment
+    matched_url = Column(String(2048), nullable=True)
+    matched_title = Column(String(512), nullable=True)
+    chunk_count = Column(Integer, nullable=False, server_default=text("0"))
+    # Holes in the chunk-order sequence; 0 when contiguous or unknown.
+    missing_chunk_count = Column(Integer, nullable=False, server_default=text("0"))
+    ordinal_checked = Column(Boolean, nullable=False, server_default=text("false"))
+    # ok = scanned cleanly; error = failed after retries (the dead-letter set).
+    execution_status = Column(String(16), nullable=False, server_default=text("'ok'"))
+    error = Column(Text, nullable=True)
+    scanned_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    project = relationship("Project")
+    provider = relationship("IndexProvider")
+    expectation = relationship("SourceExpectation")

@@ -212,13 +212,16 @@ class BaseIndexProvider(ABC):
         return []
 
     async def list_file_chunks(
-        self, key: str, value: str, kind: str, limit: int
+        self, key: str, value: str, kind: str, limit: int, *, include_text: bool = True
     ) -> list[CorpusDoc]:
         """Every chunk of one file (``key == value``), in reading order.
 
         Ordered by the chunk's ordinal/sequence field when the index has one, else
         left in index order. ``kind`` is the :class:`FileMatch` kind the value came
-        from. Optional capability — backends without it keep the empty default.
+        from. ``include_text=False`` skips fetching the chunk body (``snippet`` is
+        ``None``) — used by the bulk completeness scan, which only needs ordinals
+        and counts and must not pull megabytes of text per source. Optional
+        capability — backends without it keep the empty default.
         """
         return []
 

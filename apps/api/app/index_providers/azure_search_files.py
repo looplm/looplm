@@ -157,14 +157,23 @@ async def search_files(
 
 
 async def list_file_chunks(
-    provider: "AzureSearchIndexProvider", key: str, value: str, kind: str, limit: int
+    provider: "AzureSearchIndexProvider",
+    key: str,
+    value: str,
+    kind: str,
+    limit: int,
+    *,
+    include_text: bool = True,
 ) -> list[CorpusDoc]:
     f = await provider._file_field_map()
     filter_expr = await _filter_for(provider, key, value)
+    # The bulk completeness scan only needs ordinals + counts, so it drops the
+    # (large) chunk text field from the projection to keep the scan cheap.
+    text_field = f["text"] if include_text else None
     select = [
         x
         for x in (
-            f["text"], f["ordinal"], f["filename"], f["page_title"],
+            text_field, f["ordinal"], f["filename"], f["page_title"],
             f["page_url"], f["attachment_url"], f["parent"], f["key"], key,
         )
         if x
@@ -185,8 +194,9 @@ async def list_file_chunks(
         async for doc in results:
             page += 1
             # Full chunk text (not truncated): this view is for reading a file's
-            # chunks in order, so the whole text is shown.
-            snippet = doc.get(f["text"]) if f["text"] else None
+            # chunks in order, so the whole text is shown. Omitted entirely when
+            # the caller opted out (the bulk scan).
+            snippet = doc.get(text_field) if text_field else None
             docs.append(
                 CorpusDoc(
                     id=str(

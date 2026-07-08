@@ -8,8 +8,27 @@ import type {
   GapRunSummary,
   SourceChunksResponse,
   SourceExpectation,
+  SourceScanResultsResponse,
+  SourceScanRun,
 } from "../api-types/source-registry";
 import { getSelectedProjectId, getToken, request } from "./client";
+
+export const startSourceScan = (providerId: string, scope: "all" | "dlq" = "all") =>
+  request<{ scan_id: string; status: string }>("/api/source-registry/scans", {
+    method: "POST",
+    body: JSON.stringify({ provider_id: providerId, scope }),
+  });
+
+export const getSourceScan = (scanId: string) =>
+  request<SourceScanRun>(`/api/source-registry/scans/${scanId}`);
+
+export const cancelSourceScan = (scanId: string) =>
+  request<SourceScanRun>(`/api/source-registry/scans/${scanId}/cancel`, { method: "POST" });
+
+export const getSourceScanResults = (providerId: string) =>
+  request<SourceScanResultsResponse>(
+    `/api/source-registry/scan-results?provider_id=${encodeURIComponent(providerId)}`,
+  );
 
 export const listSourceExpectations = (providerId: string) =>
   request<{ data: SourceExpectation[] }>(
