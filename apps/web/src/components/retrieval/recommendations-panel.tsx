@@ -91,15 +91,18 @@ export function RecommendationsPanel({
   targets,
   k,
   source,
+  retriever,
 }: {
   overall: RetrievalRunMetrics | null;
   byStage: ByStageMetricsResponse | null;
   targets: RetrievalTargets | null;
   k: number;
   source: "urls" | "labels";
+  // The selected retriever, so the findings reason from the ranking on screen.
+  retriever: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const recs = buildRecommendations({ overall, byStage, targets, k, source });
+  const recs = buildRecommendations({ overall, byStage, targets, k, source, retriever });
   if (recs.length === 0) return null;
 
   const TOP = 5;

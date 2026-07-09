@@ -60,6 +60,7 @@ export function RetrievalResultsBody({
         targets={targets}
         k={activeK}
         source={displaySource}
+        retriever={selectedRetriever}
       />
 
       {/* Score-threshold cutoff explorer — Agentic + rerank only. */}

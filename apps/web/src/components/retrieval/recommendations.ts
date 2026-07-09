@@ -4,7 +4,7 @@ import type {
   RetrievalTargets,
   StageMetrics,
 } from "@/lib/api";
-import { dec, pct, statusOf } from "./constants";
+import { dec, pct, RETRIEVERS, statusOf } from "./constants";
 
 // Turns the already-computed retrieval metrics into "here is what to fix" guidance. Pure and
 // deterministic — no I/O, no LLM. The relationships between the metrics and the pipeline are
@@ -36,7 +36,24 @@ export interface RecommendationInput {
   targets: RetrievalTargets | null;
   k: number;
   source: "urls" | "labels";
+  // The selected retriever value (e.g. "agentic", "agentic_rerank"). Every rule reasons from this
+  // one frame so the cards never describe a ranking other than the one on screen.
+  retriever: string;
 }
+
+// Retrievers that already apply the semantic reranker. "best" prefers it when available.
+const RERANKED = new Set(["semantic", "agentic_rerank", "best"]);
+// The reranked sibling of an un-reranked path: the By-stage stage that applies the reranker to the
+// same candidate pool, plus what to switch the Retriever selector to.
+const RERANK_SIBLING: Record<string, { stage: string; label: string }> = {
+  agentic: { stage: "agentic_rerank", label: "Agentic + rerank" },
+  keyword: { stage: "semantic", label: "Reranked" },
+  vector: { stage: "semantic", label: "Reranked" },
+  hybrid: { stage: "semantic", label: "Reranked" },
+};
+const RETRIEVER_LABEL: Record<string, string> = Object.fromEntries(
+  RETRIEVERS.map((r) => [r.value, r.label]),
+);
 
 const SEV_ORDER: Record<Severity, number> = { high: 0, medium: 1, low: 2, good: 3 };
 const STAGE_ORDER: Record<Stage, number> = {
@@ -74,7 +91,7 @@ const meets = (value: number | null, target: number | null | undefined): boolean
   statusOf(value, target ?? null) === "good";
 
 export function buildRecommendations(input: RecommendationInput): Recommendation[] {
-  const { overall, byStage, targets, k, source } = input;
+  const { overall, byStage, targets, k, source, retriever } = input;
   if (!overall || !overall.available || !targets) return [];
 
   const lk = String(k);
@@ -87,25 +104,72 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
   const hitHigh = hit != null && hit >= 0.9;
   const recallOk = meets(recall, targets.recall) || hitHigh;
 
+  // By-stage nDCG lookup + the shared "Compare by stage" action, available before the cross-stage
+  // block so the ranking rule can reason about the selected path's reranked sibling.
+  const stageNdcg = (v: string): number | null =>
+    byStage?.available ? num(byStage.stages.find((s) => s.stage === v)?.ndcg_at_k?.[lk]) : null;
+  const byStageAction = byStage?.available
+    ? { label: "Compare by stage", kind: "byStage" as const }
+    : undefined;
+
   const recs: Recommendation[] = [];
 
   // --- Ranking: the right chunks are retrieved but ranked below the cutoff. -----------------
   const rankingWeak =
     (ndcg != null && !meets(ndcg, targets.ndcg)) || (mrr != null && !meets(mrr, targets.mrr));
   if (recallOk && rankingWeak) {
-    recs.push({
-      id: "found-but-buried",
-      severity: "high",
-      stage: "rerank",
-      title: "Relevant chunks are found but ranked too low",
-      detail:
-        `Recall@${k} is ${pct(recall)} and hit-rate ${pct(hit)}, but nDCG@${k} is ${pct(ndcg)} ` +
-        `and MRR ${dec(mrr)}. The right chunks are in the pool — they're just below the cutoff. ` +
-        `This is a ranking problem: the lever is the semantic reranker and where you cut, not ` +
-        `indexing or retrieval breadth.`,
-      action: { label: "Compare by stage", kind: "byStage" },
-      basis: [`Recall@${k}`, `Hit-rate@${k}`, `nDCG@${k}`, "MRR"],
-    });
+    const sib = RERANK_SIBLING[retriever];
+    const sibNdcg = sib ? stageNdcg(sib.stage) : null;
+    const rerankHelps = sib != null && sibNdcg != null && ndcg != null && sibNdcg > ndcg + 0.03;
+
+    if (RERANKED.has(retriever)) {
+      // Reranking is already applied on this path — don't tell them to add it. What's left is the
+      // cutoff and the hard cases.
+      recs.push({
+        id: "found-but-buried",
+        severity: "medium",
+        stage: "cutoff",
+        title: "Ranking is close, but not at target yet",
+        detail:
+          `Recall@${k} is ${pct(recall)} and hit-rate ${pct(hit)}; reranking is already applied on ` +
+          `this path (MRR ${dec(mrr)}, nDCG@${k} ${pct(ndcg)}). The gap left to your nDCG target is ` +
+          `the cutoff and the hardest queries — tune the score-threshold cutoff (it trades ` +
+          `precision against recall) and use per-case Diagnose on the worst cases.`,
+        action: { label: "Diagnose worst cases", kind: "diagnose" },
+        basis: [`nDCG@${k}`, "MRR", `Recall@${k}`],
+      });
+    } else if (rerankHelps && sib) {
+      // An un-reranked path that its reranked sibling clearly beats on the same pool.
+      recs.push({
+        id: "found-but-buried",
+        severity: "high",
+        stage: "rerank",
+        title: "This path isn't reranked — route it through the reranker",
+        detail:
+          `Recall@${k} is ${pct(recall)} and hit-rate ${pct(hit)}, but nDCG@${k} is ${pct(ndcg)} ` +
+          `and MRR ${dec(mrr)} — the right chunks are in the pool, just below the cutoff. ` +
+          `${RETRIEVER_LABEL[retriever] ?? "This path"} isn't reranked: the reranker reaches ` +
+          `nDCG@${k} ${pct(sibNdcg)} on the same pool. Switch the Retriever to ${sib.label} to ` +
+          `confirm, then apply reranking to this path in production.`,
+        action: byStageAction,
+        basis: [`Recall@${k}`, `Hit-rate@${k}`, `nDCG@${k}`, "MRR"],
+      });
+    } else {
+      // No By-stage evidence (e.g. URLs path) — the generic ranking diagnosis.
+      recs.push({
+        id: "found-but-buried",
+        severity: "high",
+        stage: "rerank",
+        title: "Relevant chunks are found but ranked too low",
+        detail:
+          `Recall@${k} is ${pct(recall)} and hit-rate ${pct(hit)}, but nDCG@${k} is ${pct(ndcg)} ` +
+          `and MRR ${dec(mrr)}. The right chunks are in the pool — they're just below the cutoff. ` +
+          `This is a ranking problem: the lever is the semantic reranker and where you cut, not ` +
+          `indexing or retrieval breadth.`,
+        action: byStageAction,
+        basis: [`Recall@${k}`, `Hit-rate@${k}`, `nDCG@${k}`, "MRR"],
+      });
+    }
   }
 
   // --- Coverage: some relevant chunks are never retrieved (a ceiling reranking can't lift). ---
@@ -179,8 +243,9 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
           stage: "rerank",
           title: "The reranker is earning its keep",
           detail:
-            `The semantic reranker lifts nDCG@${k} from ${pct(hybNdcg)} (RRF) to ${pct(semNdcg)}. ` +
-            `Reranking is pulling the good chunks toward the top.`,
+            `The semantic reranker lifts nDCG@${k} from ${pct(hybNdcg)} (RRF) to ${pct(semNdcg)} — ` +
+            `it pulls the good chunks toward the top. Worth applying on any path that isn't already ` +
+            `reranked.`,
           basis: [`nDCG@${k} (Reranked)`, `nDCG@${k} (RRF)`],
         });
       }
@@ -209,23 +274,29 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
       });
     }
 
-    // Is the agentic (multi-query) path adding coverage over single-query retrieval?
-    const ag = recallOf("agentic");
-    const single = [recallOf("semantic"), recallOf("hybrid")]
-      .filter((x): x is number => x != null)
-      .reduce((m, x) => Math.max(m, x), Number.NEGATIVE_INFINITY);
-    if (ag != null && Number.isFinite(single) && ag <= single + 0.01) {
-      recs.push({
-        id: "agentic-no-gain",
-        severity: "low",
-        stage: "retrieval",
-        title: "The agentic path isn't adding coverage",
-        detail:
-          `Agentic (multi-query) recall@${k} is ${pct(ag)}, no better than single-query retrieval ` +
-          `(${pct(single)}). Query planning isn't surfacing new chunks — review how sub-queries are ` +
-          `generated and how their results are merged.`,
-        basis: [`Recall@${k} (Agentic)`, `Recall@${k} (single-query)`],
-      });
+    // Is the agentic (multi-query) path adding coverage over single-query retrieval? Only judged
+    // when an agentic-family path is selected, and against that selected path's own recall — so it
+    // reflects the view you're on (once Agentic + rerank edges past single-query, this clears).
+    if (retriever === "agentic" || retriever === "agentic_rerank") {
+      const single = [recallOf("semantic"), recallOf("hybrid")]
+        .filter((x): x is number => x != null)
+        .reduce((m, x) => Math.max(m, x), Number.NEGATIVE_INFINITY);
+      // Strict: any positive margin over single-query counts as adding coverage, so the card
+      // clears the moment the selected path edges past it (e.g. Agentic + rerank at 52% vs 51%).
+      if (recall != null && Number.isFinite(single) && recall <= single) {
+        const label = RETRIEVER_LABEL[retriever] ?? "Agentic";
+        recs.push({
+          id: "agentic-no-gain",
+          severity: "low",
+          stage: "retrieval",
+          title: "The agentic path isn't adding coverage",
+          detail:
+            `${label} (multi-query) recall@${k} is ${pct(recall)}, no better than single-query ` +
+            `retrieval (${pct(single)}). Query planning isn't surfacing new chunks — review how ` +
+            `sub-queries are generated and how their results are merged.`,
+          basis: [`Recall@${k} (${label})`, `Recall@${k} (single-query)`],
+        });
+      }
     }
   }
 
