@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  cancelChunkQualityRun,
   getChunkQualityRun,
   listChunkQualityRuns,
   startChunkQualityRun,
@@ -61,7 +62,7 @@ export function useChunkQuality(
       try {
         const detail = await getChunkQualityRun(run.id);
         setRun(detail);
-        if (detail.status === "completed" || detail.status === "failed") {
+        if (["completed", "failed", "cancelled"].includes(detail.status)) {
           setRunning(false);
           // Refresh the summaries so the trend panel picks up the new run.
           const { data } = await listChunkQualityRuns(providerId);
@@ -91,5 +92,17 @@ export function useChunkQuality(
     [providerId, setError],
   );
 
-  return { run, runs, running, handleRun };
+  const handleCancel = useCallback(async () => {
+    if (!run) return;
+    try {
+      await cancelChunkQualityRun(run.id);
+      const detail = await getChunkQualityRun(run.id);
+      setRun(detail);
+      setRunning(false);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [run, setError]);
+
+  return { run, runs, running, handleRun, handleCancel };
 }

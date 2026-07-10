@@ -403,6 +403,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chunk-quality/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Run
+         * @description Stop a pending/running analysis.
+         *
+         *     Flips the row to 'cancelled' first (so a worker that survives the task
+         *     cancellation cannot overwrite it), then cancels the in-process task.
+         *     Interim results persisted by already-finished passes are kept.
+         */
+        post: operations["cancel_run_api_chunk_quality_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/code-agent/suggestions/{suggestion_id}": {
         parameters: {
             query?: never;
@@ -5471,6 +5495,8 @@ export interface components {
             } | null;
             /** Sample Size */
             sample_size: number;
+            /** Stage */
+            stage?: string | null;
             /** Started At */
             started_at?: string | null;
             /** Status */
@@ -5523,6 +5549,8 @@ export interface components {
             sample_size: number;
             /** Score */
             score?: number | null;
+            /** Stage */
+            stage?: string | null;
             /** Status */
             status: string;
             /** Total Docs */
@@ -12788,6 +12816,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChunkQualityRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_run_api_chunk_quality_runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkQualityRunCreateResponse"];
                 };
             };
             /** @description Validation Error */

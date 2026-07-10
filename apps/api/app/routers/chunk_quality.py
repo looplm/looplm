@@ -9,6 +9,7 @@ Lives under the same permission page as those views ("data-sources").
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -124,12 +125,54 @@ async def create_run(
     return ChunkQualityRunCreateResponse(run_id=run_id, status="pending")
 
 
+@router.post(
+    "/runs/{run_id}/cancel",
+    response_model=ChunkQualityRunCreateResponse,
+    dependencies=[require_write("observe", "data-sources")],
+)
+async def cancel_run(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+):
+    """Stop a pending/running analysis.
+
+    Flips the row to 'cancelled' first (so a worker that survives the task
+    cancellation cannot overwrite it), then cancels the in-process task.
+    Interim results persisted by already-finished passes are kept.
+    """
+    run = (
+        await db.execute(
+            select(ChunkQualityRun).where(
+                ChunkQualityRun.id == run_id, ChunkQualityRun.project_id == project.id
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise _not_found("Chunk quality run")
+    if run.status not in ("pending", "running"):
+        raise HTTPException(
+            status_code=409,
+            detail={"error": {"code": "NOT_RUNNING", "message": "Run is not in progress"}},
+        )
+    run.status = "cancelled"
+    run.stage = None
+    run.completed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    task = _tasks.get(run_id)
+    if task is not None:
+        task.cancel()
+    return ChunkQualityRunCreateResponse(run_id=run_id, status="cancelled")
+
+
 def _summary_from_run(run: ChunkQualityRun) -> ChunkQualityRunSummary:
     summary = (run.results or {}).get("summary", {})
     return ChunkQualityRunSummary(
         id=run.id,
         provider_id=run.provider_id,
         status=run.status,
+        stage=run.stage,
         sample_size=run.sample_size,
         total_docs=run.total_docs,
         processed=run.processed,

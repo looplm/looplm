@@ -30,3 +30,8 @@ export const listChunkQualityRuns = (providerId: string) =>
 
 export const getChunkQualityRun = (runId: string) =>
   request<ChunkQualityRunDetail>(`/api/chunk-quality/runs/${runId}`);
+
+export const cancelChunkQualityRun = (runId: string) =>
+  request<{ run_id: string; status: string }>(`/api/chunk-quality/runs/${runId}/cancel`, {
+    method: "POST",
+  });

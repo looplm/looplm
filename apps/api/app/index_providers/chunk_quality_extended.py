@@ -105,6 +105,7 @@ async def run_extended_passes(
         for name in enabled:
             cfg = passes[name]
             usage: LlmUsageInfo | None = None
+            await _set_stage(db_factory, run_id=run_id, stage=name)
             try:
                 if name == "standalone":
                     metrics, findings, usage = await _run_standalone(
@@ -256,6 +257,17 @@ async def _run_claim_boundary(
             max_cases=int(cfg.get("max_cases") or 50),
         )
     return metrics, findings, usage
+
+
+async def _set_stage(db_factory, *, run_id: UUID, stage: str) -> None:
+    """Record which pass the run is on, so the UI can narrate progress."""
+    async with db_factory() as db:
+        run = (
+            await db.execute(select(ChunkQualityRun).where(ChunkQualityRun.id == run_id))
+        ).scalar_one_or_none()
+        if run is not None and run.status == "running":
+            run.stage = stage
+            await db.commit()
 
 
 async def _persist_interim(

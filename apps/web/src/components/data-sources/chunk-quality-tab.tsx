@@ -44,6 +44,15 @@ const FAMILY_TITLES: Record<QualityFamily, string> = {
 
 const SEVERITY_RANK: Record<Severity, number> = { critical: 0, warn: 1, info: 2 };
 
+const STAGE_LABELS: Record<string, string> = {
+  sampling: "Sampling chunks from the index",
+  analyzing: "Running the base checks",
+  standalone: "Judging standalone interpretability (LLM)",
+  cohesion: "Scoring embedding cohesion",
+  retrieval_frequency: "Counting retrieval frequency",
+  claim_boundary: "Checking claim boundaries (LLM)",
+};
+
 function worstSeverity(findings: ChunkQualityFinding[]): Severity | undefined {
   if (findings.some((f) => f.severity === "critical")) return "critical";
   if (findings.some((f) => f.severity === "warn")) return "warn";
@@ -54,7 +63,7 @@ function worstSeverity(findings: ChunkQualityFinding[]): Severity | undefined {
 export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; canEdit: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
-  const { run, runs, running, handleRun } = useChunkQuality(providerId, setError);
+  const { run, runs, running, handleRun, handleCancel } = useChunkQuality(providerId, setError);
 
   const results = run?.results ?? null;
   const findingsByFamily = useMemo(() => {
@@ -123,15 +132,42 @@ export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; c
         </div>
       )}
 
-      {running && !results && (
-        <p className="text-sm text-gray-400 dark:text-slate-500 py-6">
-          Sampling and analyzing chunks… this runs in the background and can take a minute.
-        </p>
+      {running && run && (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/50 dark:bg-indigo-950/20 px-4 py-3 mb-5">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="w-3.5 h-3.5 flex-shrink-0 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">
+                {STAGE_LABELS[run.stage ?? ""] ?? "Starting analysis"}…
+              </p>
+              <p className="text-xs text-gray-500 dark:text-slate-400">
+                {run.processed > 0
+                  ? `${run.processed.toLocaleString()} chunks sampled`
+                  : `sampling up to ${run.sample_size.toLocaleString()} chunks`}
+                {results ? " · finished passes are shown below and update as the run progresses" : ""}
+              </p>
+            </div>
+          </div>
+          {canEdit && (
+            <button
+              onClick={handleCancel}
+              className="flex-shrink-0 px-3 py-1.5 rounded-lg text-sm text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-900/20"
+            >
+              Stop
+            </button>
+          )}
+        </div>
       )}
 
       {run?.status === "failed" && (
-        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg px-4 py-3">
+        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg px-4 py-3 mb-5">
           Analysis failed: {run.error ?? "unknown error"}
+        </div>
+      )}
+
+      {run?.status === "cancelled" && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-sm rounded-lg px-4 py-3 mb-5">
+          Analysis stopped{results ? ". Results from the passes that finished are shown below." : " before any results were produced."}
         </div>
       )}
 

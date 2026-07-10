@@ -70,7 +70,7 @@ export function TrendPanel({ runs }: { runs: ChunkQualityRunSummary[] }) {
                 ? "bg-amber-500"
                 : "bg-indigo-500";
           return (
-            <div key={r.id} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+            <div key={r.id} className="flex-1 max-w-24 flex flex-col items-center gap-1 min-w-0">
               <span className="text-[10px] text-gray-500 dark:text-slate-400">
                 {v === null ? "—" : Math.round(v * 10) / 10}
               </span>

@@ -256,6 +256,7 @@ export interface ChunkQualityRunSummary {
   id: string;
   provider_id: string;
   status: string;
+  stage: string | null;
   sample_size: number;
   total_docs: number;
   processed: number;
@@ -275,6 +276,7 @@ export interface ChunkQualityRunDetail {
   id: string;
   provider_id: string;
   status: string;
+  stage: string | null;
   sample_size: number;
   total_docs: number;
   processed: number;

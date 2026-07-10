@@ -40,6 +40,9 @@ class ChunkQualityRun(Base):
         UUID(as_uuid=True), ForeignKey("index_providers.id", ondelete="CASCADE"), nullable=False
     )
     status = Column(String(32), nullable=False, server_default=text("'pending'"))
+    # Which step the worker is on while running (sampling | analyzing | one of
+    # the extended pass names). Null once the run is terminal.
+    stage = Column(String(64), nullable=True)
     error = Column(Text, nullable=True)
     sample_size = Column(Integer, nullable=False, server_default=text("0"))  # requested sample
     # Which extended passes ran and with what caps — see

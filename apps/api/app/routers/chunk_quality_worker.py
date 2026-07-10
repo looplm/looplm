@@ -11,6 +11,7 @@ explain why there's nothing to show.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -58,6 +59,7 @@ async def run_chunk_quality_analysis(
             if run is None:
                 raise ValueError(f"Chunk quality run {run_id} not found")
             run.status = "running"
+            run.stage = "sampling"
             run.started_at = datetime.now(timezone.utc)
 
             provider_row = (
@@ -82,6 +84,9 @@ async def run_chunk_quality_analysis(
                     ).scalar_one_or_none()
                     if progress_run is not None:
                         progress_run.processed = processed
+                        # First progress call fires right after sampling finishes.
+                        if progress_run.stage == "sampling":
+                            progress_run.stage = "analyzing"
                         await progress_db.commit()
 
             try:
@@ -115,13 +120,32 @@ async def run_chunk_quality_analysis(
                         select(ChunkQualityRun).where(ChunkQualityRun.id == run_id)
                     )
                 ).scalar_one_or_none()
-                if final_run is not None:
+                # Don't resurrect a run the user cancelled while we were finishing.
+                if final_run is not None and final_run.status != "cancelled":
                     final_run.results = results
                     final_run.total_docs = total_docs
                     final_run.processed = processed
                     final_run.status = "completed"
+                    final_run.stage = None
                     final_run.completed_at = datetime.now(timezone.utc)
                     await final_db.commit()
+    except asyncio.CancelledError:
+        # The cancel endpoint already flipped status to 'cancelled' before
+        # cancelling the task; just stamp the end time and keep any interim
+        # results that were persisted along the way.
+        logger.info("Chunk quality run %s cancelled", run_id)
+        try:
+            async with db_factory() as db:
+                run = (
+                    await db.execute(select(ChunkQualityRun).where(ChunkQualityRun.id == run_id))
+                ).scalar_one_or_none()
+                if run is not None and run.status in ("pending", "running", "cancelled"):
+                    run.status = "cancelled"
+                    run.stage = None
+                    run.completed_at = run.completed_at or datetime.now(timezone.utc)
+                    await db.commit()
+        except Exception:
+            logger.exception("Failed to record chunk quality cancellation for %s", run_id)
     except Exception as e:
         logger.exception("Chunk quality run %s failed", run_id)
         try:
@@ -131,6 +155,7 @@ async def run_chunk_quality_analysis(
                 ).scalar_one_or_none()
                 if run is not None:
                     run.status = "failed"
+                    run.stage = None
                     run.error = str(e)
                     run.completed_at = datetime.now(timezone.utc)
                     await db.commit()
