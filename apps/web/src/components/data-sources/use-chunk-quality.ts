@@ -25,6 +25,9 @@ export function useChunkQuality(
 ) {
   const [run, setRun] = useState<ChunkQualityRunDetail | null>(null);
   const [runs, setRuns] = useState<ChunkQualityRunSummary[]>([]);
+  // Newest run with a full report, kept separately so a failed or cancelled
+  // latest attempt never hides the last good results.
+  const [lastCompleted, setLastCompleted] = useState<ChunkQualityRunDetail | null>(null);
   const [running, setRunning] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -35,10 +38,17 @@ export function useChunkQuality(
       const latest = data[0];
       if (!latest) {
         setRun(null);
+        setLastCompleted(null);
         return;
       }
       const detail = await getChunkQualityRun(latest.id);
       setRun(detail);
+      if (detail.status === "completed") {
+        setLastCompleted(detail);
+      } else {
+        const completed = data.find((r) => r.status === "completed");
+        setLastCompleted(completed ? await getChunkQualityRun(completed.id) : null);
+      }
       if (detail.status === "pending" || detail.status === "running") {
         setRunning(true);
       }
@@ -51,6 +61,7 @@ export function useChunkQuality(
   useEffect(() => {
     setRun(null);
     setRuns([]);
+    setLastCompleted(null);
     setRunning(false);
     loadLatestRun();
   }, [loadLatestRun]);
@@ -64,6 +75,7 @@ export function useChunkQuality(
         setRun(detail);
         if (["completed", "failed", "cancelled"].includes(detail.status)) {
           setRunning(false);
+          if (detail.status === "completed") setLastCompleted(detail);
           // Refresh the summaries so the trend panel picks up the new run.
           const { data } = await listChunkQualityRuns(providerId);
           setRuns(data);
@@ -104,5 +116,5 @@ export function useChunkQuality(
     }
   }, [run, setError]);
 
-  return { run, runs, running, handleRun, handleCancel };
+  return { run, runs, lastCompleted, running, handleRun, handleCancel };
 }

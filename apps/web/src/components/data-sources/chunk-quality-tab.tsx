@@ -7,7 +7,7 @@
  * in `useChunkQuality`; the per-family rendering in `chunk-quality/`.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   ChunkQualityFinding,
@@ -86,9 +86,20 @@ function worstSeverity(findings: ChunkQualityFinding[]): Severity | undefined {
 export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; canEdit: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
-  const { run, runs, running, handleRun, handleCancel } = useChunkQuality(providerId, setError);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const { run, runs, lastCompleted, running, handleRun, handleCancel } = useChunkQuality(
+    providerId,
+    setError,
+  );
 
-  const results = run?.results ?? null;
+  // The latest attempt may have failed or been stopped without producing a
+  // report; fall back to the newest completed run so results never vanish.
+  const resultsRun = run?.results ? run : lastCompleted;
+  const results = resultsRun?.results ?? null;
+  const showingPrevious = !!results && resultsRun !== run;
+
+  // A new attempt gets a fresh notice.
+  useEffect(() => setNoticeDismissed(false), [run?.id]);
   const findingsByFamily = useMemo(() => {
     const map: Record<string, ChunkQualityFinding[]> = {};
     for (const f of results?.findings ?? []) (map[f.family] ??= []).push(f);
@@ -105,7 +116,9 @@ export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; c
 
   const score = results?.summary.score ?? null;
   const tone = score === null ? null : scoreTone(score);
-  const analyzedAt = run?.completed_at ? new Date(run.completed_at).toLocaleString() : null;
+  const analyzedAt = resultsRun?.completed_at
+    ? new Date(resultsRun.completed_at).toLocaleString()
+    : null;
 
   return (
     <div>
@@ -185,15 +198,45 @@ export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; c
         </div>
       )}
 
-      {run?.status === "failed" && (
-        <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg px-4 py-3 mb-5">
-          Analysis failed: {run.error ?? "unknown error"}
+      {run?.status === "failed" && !noticeDismissed && (
+        <div className="flex items-start justify-between gap-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg px-4 py-3 mb-5">
+          <p>
+            The last analysis attempt ({new Date(run.created_at).toLocaleString()}) failed:{" "}
+            {run.error ?? "unknown error"}.
+            {showingPrevious &&
+              ` Showing the previous completed report from ${
+                resultsRun?.completed_at
+                  ? new Date(resultsRun.completed_at).toLocaleString()
+                  : "an earlier run"
+              } below.`}
+          </p>
+          <button
+            onClick={() => setNoticeDismissed(true)}
+            aria-label="Dismiss"
+            className="flex-shrink-0 font-medium hover:opacity-70"
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {run?.status === "cancelled" && (
-        <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-sm rounded-lg px-4 py-3 mb-5">
-          Analysis stopped{results ? ". Results from the passes that finished are shown below." : " before any results were produced."}
+      {run?.status === "cancelled" && !noticeDismissed && (
+        <div className="flex items-start justify-between gap-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-sm rounded-lg px-4 py-3 mb-5">
+          <p>
+            Analysis stopped
+            {run.results
+              ? ". Results from the passes that finished are shown below."
+              : showingPrevious
+                ? ". Showing the previous completed report below."
+                : " before any results were produced."}
+          </p>
+          <button
+            onClick={() => setNoticeDismissed(true)}
+            aria-label="Dismiss"
+            className="flex-shrink-0 font-medium hover:opacity-70"
+          >
+            ✕
+          </button>
         </div>
       )}
 
