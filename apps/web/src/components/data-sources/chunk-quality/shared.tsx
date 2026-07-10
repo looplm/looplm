@@ -72,6 +72,18 @@ export function FamilyCard({
   );
 }
 
+/**
+ * A plain-language intro at the top of a family card: what this family
+ * measures and why a reader should care, written for non-experts.
+ */
+export function Explainer({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-xs leading-relaxed text-gray-500 dark:text-slate-400 bg-gray-50 dark:bg-slate-800/40 rounded-lg px-3 py-2">
+      {children}
+    </p>
+  );
+}
+
 /** A small labelled metric, used in the per-family stat strips. */
 export function Metric({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (

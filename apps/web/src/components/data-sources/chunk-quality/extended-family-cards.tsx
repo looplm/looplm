@@ -16,7 +16,7 @@ import type {
 } from "@/lib/api-types/chunk-quality";
 
 import { FlaggedChunks } from "./flagged-chunks";
-import { Bar, fmtPct, Metric } from "./shared";
+import { Bar, Explainer, fmtPct, Metric } from "./shared";
 
 const numberFmt = (v: number | undefined) =>
   v === undefined ? "—" : v.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -45,6 +45,14 @@ export function BoundaryCard({ boundary }: { boundary: BoundaryFamily }) {
   if (!boundary.available) return <Unavailable reason={boundary.reason} />;
   return (
     <div className="space-y-4">
+      <Explainer>
+        Checks where the chunker cuts the text. A chunk that starts lowercase or on a comma
+        continues a sentence that lives in the previous chunk; one that ends without punctuation
+        was cut off mid-thought. Split tables and numbered steps severed across two chunks (step 2
+        ends one chunk, step 3 opens the next) mean a reader of a single retrieved chunk gets half
+        the information. High numbers here usually mean the splitter cuts at a size limit instead
+        of at sentence or section boundaries.
+      </Explainer>
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         <Metric label="End mid-content" value={fmtPct(boundary.bad_end_pct)} sub={`${numberFmt(boundary.bad_end)} chunks`} />
         <Metric label="Start mid-sentence" value={fmtPct(boundary.bad_start_pct)} sub={`${numberFmt(boundary.bad_start)} chunks`} />
@@ -79,6 +87,14 @@ export function StandaloneCard({
   if (!standalone.available) return <Unavailable reason={standalone.reason} />;
   return (
     <div className="space-y-4">
+      <Explainer>
+        Search returns each chunk on its own, without the page around it. Here an LLM reads a
+        sample of chunks exactly that way and asks: can this be understood standalone? A chunk
+        like &quot;In this case the dose is halved&quot; fails because nothing in the chunk says
+        which case is meant. Context-dependent chunks are wasted index space: even when retrieval
+        finds them, the answer model cannot safely use them. This percentage is the single best
+        number to compare chunking strategies on.
+      </Explainer>
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         <Metric
           label="Context-dependent"
@@ -116,13 +132,26 @@ export function CohesionCard({ cohesion }: { cohesion: CohesionFamily }) {
   const smear = cohesion.smear ?? { count: 0 };
   return (
     <div className="space-y-4">
+      <Explainer>
+        A chunk is found by comparing one vector (its embedding) against the question. When a
+        chunk mixes several topics, that single vector becomes an average of all of them and
+        matches no specific question well. To measure this, each sentence of the chunk is embedded
+        separately and the spread between the sentence vectors is computed: 0 means every sentence
+        is about the same thing, higher values mean the sentences drift apart. Chunks above the
+        threshold likely want splitting into one-topic pieces. Compare values within this index
+        rather than as absolutes; the natural baseline varies by embedding model and language.
+      </Explainer>
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         <Metric
           label="Multi-topic chunks"
           value={fmtPct(cohesion.high_spread_pct)}
           sub={`spread ≥ ${cohesion.threshold ?? "—"}`}
         />
-        <Metric label="Median spread" value={smear.p50 ?? "—"} sub={`p95 ${smear.p95 ?? "—"}`} />
+        <Metric
+          label="Median spread"
+          value={smear.p50 ?? "—"}
+          sub="0 = one topic, 1 = unrelated"
+        />
         <Metric
           label="Scored"
           value={numberFmt(cohesion.scored)}
@@ -151,6 +180,14 @@ export function RetrievalFrequencyCard({ freq }: { freq: RetrievalFrequencyFamil
       : `traces, last ${freq.window_days ?? "?"} days`;
   return (
     <div className="space-y-4">
+      <Explainer>
+        Counts how often each sampled chunk actually appeared in retrieval results. Both extremes
+        point at problems. Dead chunks were never retrieved once: they are junk, badly indexed, or
+        content nobody asks about, and they still dilute every search. Hot chunks show up for a
+        large share of all queries regardless of topic; that is usually boilerplate (intros,
+        disclaimers) generic enough to match everything, crowding better results out of the top
+        spots.
+      </Explainer>
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         <Metric label="Dead chunks" value={fmtPct(freq.dead_pct)} sub={`${numberFmt(freq.dead)} never retrieved`} />
         <Metric label="Hot chunks" value={numberFmt(freq.hot)} sub={`≥ ${numberFmt(freq.hot_threshold)} events`} />
@@ -208,6 +245,15 @@ export function ClaimBoundaryCard({
   if (!claims.available) return <Unavailable reason={claims.reason} />;
   return (
     <div className="space-y-4">
+      <Explainer>
+        Takes known-good answers from your test dataset, splits each into its individual facts,
+        and checks per fact: does one single chunk contain the full evidence for it? A fact whose
+        evidence is spread over two chunks (cross-boundary) forces the system to retrieve both
+        halves and stitch them together, which often fails. When the two halves are adjacent
+        chunks of the same document, the chunker itself cut through the fact; a coarser chunking
+        would fix it. Unsupported means no combination of the labeled chunks backs the fact at
+        all.
+      </Explainer>
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         <Metric
           label="Cross-boundary claims"

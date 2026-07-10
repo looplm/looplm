@@ -187,6 +187,12 @@ export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; c
             <StatCard label="Analyzed" value={analyzedAt ? "✓" : running ? "…" : "—"} sub={analyzedAt ?? undefined} />
           </div>
 
+          <p className="text-xs text-gray-400 dark:text-slate-500 mb-5 -mt-2">
+            The health score starts at 100 and loses points for every finding below: 15 for
+            critical, 6 for warn, 1 for info. All numbers describe the random sample of chunks
+            listed above, not the whole index. Open a section for what each check means.
+          </p>
+
           {sortedFindings.length > 0 && (
             <div className="rounded-xl border border-gray-100 dark:border-slate-800 p-4 mb-5">
               <p className="text-sm font-semibold mb-2">Findings</p>

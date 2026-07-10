@@ -7,7 +7,7 @@ import type {
   SizeFamily,
 } from "@/lib/api-types/chunk-quality";
 
-import { Bar, fmtPct, Metric } from "./shared";
+import { Bar, Explainer, fmtPct, Metric } from "./shared";
 
 const numberFmt = (v: number | undefined) =>
   v === undefined ? "—" : v.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -21,6 +21,13 @@ export function SizeCard({ size }: { size: SizeFamily }) {
   const groups = Object.entries(size.by_group ?? {});
   return (
     <div className="space-y-4">
+      <Explainer>
+        Chunks are the text snippets your search retrieves, and their length matters. Chunks under
+        about 40 tokens (roughly 30 words) rarely contain enough information to be found or to
+        answer anything; chunks over about 1200 tokens get cut off by the embedding model, so
+        their later content becomes invisible to search. A pile-up at one size usually means the
+        splitter is cutting at a hard limit instead of at natural boundaries.
+      </Explainer>
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         <Metric label="Median tokens" value={numberFmt(t.p50)} sub={`p95 ${numberFmt(t.p95)}`} />
         <Metric label="Mean" value={numberFmt(t.mean)} sub={`±${numberFmt(t.stdev)}`} />
@@ -85,6 +92,13 @@ export function DuplicationCard({ dup }: { dup: DuplicationFamily }) {
   const adj = dup.adjacency;
   return (
     <div className="space-y-4">
+      <Explainer>
+        When the same text is indexed more than once, a search returns copies instead of different
+        results, wasting the few slots the answer model gets to see. Exact duplicates are
+        identical chunks; near-duplicates are almost identical (think the same disclaimer on every
+        page). Some overlap between neighboring chunks is intentional so sentences are not lost at
+        the cut, but a high overlap means the index stores the same content twice.
+      </Explainer>
       <div className="flex flex-wrap gap-x-8 gap-y-3">
         <Metric label="Exact duplicates" value={fmtPct(dup.exact_duplicate_pct)} sub={`${numberFmt(dup.exact_clusters)} clusters`} />
         <Metric label="Near-duplicate pairs" value={numberFmt(dup.near_duplicate_pairs)} sub={`of ${numberFmt(dup.near_dup_scanned)} scanned`} />
@@ -121,6 +135,12 @@ export function MetadataCard({ meta }: { meta: MetadataFamily }) {
   ];
   return (
     <div className="space-y-4">
+      <Explainer>
+        Besides its text, each chunk carries fields like title, source URL and document id. When
+        these are missing, results cannot be filtered, cited or traced back to their source.
+        Orphan chunks have neither a URL nor a parent document, so nobody can tell where their
+        content came from.
+      </Explainer>
       <div>
         <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-1.5">Critical fields</p>
         <div className="space-y-1.5">
@@ -205,10 +225,17 @@ export function ContentCard({ content }: { content: ContentFamily }) {
   if (!content.available) return <Unavailable reason="No chunk-body field was detected in this index." />;
   return (
     <div className="space-y-4">
+      <Explainer>
+        Checks whether the text itself arrived intact from the ingestion pipeline. Mojibake is
+        broken character encoding (a German ü turning into Ã¼), which ruins both keyword matching
+        and embeddings. Table-heavy chunks are tables flattened into pipe characters that read as
+        noise. Raw markup means leftover HTML tags. Embedding coverage shows how many chunks
+        actually have a search vector; a chunk without one is invisible to semantic search.
+      </Explainer>
       <div className="flex flex-wrap gap-x-8 gap-y-3">
-        <Metric label="Mojibake" value={fmtPct(content.mojibake_pct)} />
-        <Metric label="Table-heavy" value={fmtPct(content.table_heavy_pct)} />
-        <Metric label="Raw markup" value={fmtPct(content.markup_heavy_pct)} />
+        <Metric label="Mojibake" value={fmtPct(content.mojibake_pct)} sub="broken characters" />
+        <Metric label="Table-heavy" value={fmtPct(content.table_heavy_pct)} sub="flattened tables" />
+        <Metric label="Raw markup" value={fmtPct(content.markup_heavy_pct)} sub="leftover HTML" />
         <Metric
           label="Embedding coverage"
           value={fmtPct(content.embedding?.coverage_pct)}
