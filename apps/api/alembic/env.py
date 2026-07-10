@@ -2,13 +2,18 @@
 
 import asyncio
 import os
+import sys
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.models.models import Base
+# Make `app` importable regardless of how alembic is invoked: the CLI does not
+# put the working directory on sys.path, so point at the api root explicitly.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.models.models import Base  # noqa: E402
 from app.models.user import User  # noqa: F401
 from app.models.project import Project  # noqa: F401
 from app.models.project_member import ProjectMember  # noqa: F401
