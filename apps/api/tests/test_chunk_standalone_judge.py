@@ -92,6 +92,24 @@ async def test_judge_batches_and_accumulates_usage(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_judge_reports_progress_per_batch(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "ai_judge_max_batch_chunks", 1)
+    chunks = [AiJudgeChunk("a", "One."), AiJudgeChunk("b", "Two.")]
+    response = json.dumps({"verdicts": [{"chunk": 1, "standalone": True, "reason": ""}]})
+    llm = FakeLlm([response, response])
+
+    seen = []
+
+    async def progress_cb(done, total):
+        seen.append((done, total))
+
+    await judge_standalone(llm, chunks, progress_cb=progress_cb)
+    assert seen == [(1, 2), (2, 2)]
+
+
+@pytest.mark.asyncio
 async def test_omitted_chunks_stay_unjudged():
     chunks = [AiJudgeChunk("a", "One."), AiJudgeChunk("b", "Two.")]
     llm = FakeLlm([json.dumps({"verdicts": [{"chunk": 2, "standalone": False, "reason": "x"}]})])

@@ -92,6 +92,7 @@ async def analyze_cohesion(
     id_field: str | None,
     sample_size: int,
     max_sentences: int,
+    progress_cb=None,
 ) -> tuple[dict, list[Finding]]:
     """Embed sentence sets for up to ``sample_size`` chunks and score their spread.
 
@@ -117,6 +118,8 @@ async def analyze_cohesion(
             vectors.extend(await embedder.embed_batch(sentences[start : start + _EMBED_BATCH]))
         sentences_embedded += len(sentences)
         scored.append((cid, text, smear_score(vectors)))
+        if progress_cb is not None:
+            await progress_cb(len(scored), len(candidates))
 
     n = len(scored)
     high = [(cid, text, s) for cid, text, s in scored if s >= HIGH_SPREAD_THRESHOLD]

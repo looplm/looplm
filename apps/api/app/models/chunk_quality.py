@@ -43,6 +43,10 @@ class ChunkQualityRun(Base):
     # Which step the worker is on while running (sampling | analyzing | one of
     # the extended pass names). Null once the run is terminal.
     stage = Column(String(64), nullable=True)
+    # Within-stage progress (units depend on the stage: judged chunks, scored
+    # chunks, probed queries, checked cases). Null when the stage has no counter.
+    stage_current = Column(Integer, nullable=True)
+    stage_total = Column(Integer, nullable=True)
     error = Column(Text, nullable=True)
     sample_size = Column(Integer, nullable=False, server_default=text("0"))  # requested sample
     # Which extended passes ran and with what caps — see

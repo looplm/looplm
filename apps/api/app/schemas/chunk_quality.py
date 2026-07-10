@@ -77,6 +77,8 @@ class ChunkQualityRunSummary(BaseModel):
     provider_id: UUID
     status: str
     stage: Optional[str] = None
+    stage_current: Optional[int] = None
+    stage_total: Optional[int] = None
     sample_size: int
     total_docs: int
     processed: int
@@ -102,6 +104,8 @@ class ChunkQualityRunResponse(BaseModel):
     provider_id: UUID
     status: str
     stage: Optional[str] = None
+    stage_current: Optional[int] = None
+    stage_total: Optional[int] = None
     sample_size: int
     total_docs: int
     processed: int

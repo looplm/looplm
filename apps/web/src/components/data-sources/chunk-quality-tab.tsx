@@ -26,7 +26,7 @@ import {
 } from "./chunk-quality/extended-family-cards";
 import { ContentCard, DuplicationCard, MetadataCard, SizeCard } from "./chunk-quality/family-cards";
 import { RunConfigDialog } from "./chunk-quality/run-config-dialog";
-import { FamilyCard, SeverityChip, scoreTone } from "./chunk-quality/shared";
+import { Bar, FamilyCard, SeverityChip, scoreTone } from "./chunk-quality/shared";
 import { TrendPanel } from "./chunk-quality/trend-panel";
 import { useChunkQuality } from "./use-chunk-quality";
 
@@ -52,6 +52,29 @@ const STAGE_LABELS: Record<string, string> = {
   retrieval_frequency: "Counting retrieval frequency",
   claim_boundary: "Checking claim boundaries (LLM)",
 };
+
+const STAGE_UNITS: Record<string, string> = {
+  standalone: "chunks judged",
+  cohesion: "chunks scored",
+  retrieval_frequency: "queries probed",
+  claim_boundary: "test cases checked",
+};
+
+function progressDetail(run: {
+  stage: string | null;
+  stage_current: number | null;
+  stage_total: number | null;
+  processed: number;
+  sample_size: number;
+}): string {
+  if (run.stage && run.stage_current !== null && run.stage_total !== null) {
+    const unit = STAGE_UNITS[run.stage] ?? "done";
+    return `${run.stage_current.toLocaleString()} of ${run.stage_total.toLocaleString()} ${unit}`;
+  }
+  return run.processed > 0
+    ? `${run.processed.toLocaleString()} chunks sampled`
+    : `sampling up to ${run.sample_size.toLocaleString()} chunks`;
+}
 
 function worstSeverity(findings: ChunkQualityFinding[]): Severity | undefined {
   if (findings.some((f) => f.severity === "critical")) return "critical";
@@ -141,11 +164,14 @@ export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; c
                 {STAGE_LABELS[run.stage ?? ""] ?? "Starting analysis"}…
               </p>
               <p className="text-xs text-gray-500 dark:text-slate-400">
-                {run.processed > 0
-                  ? `${run.processed.toLocaleString()} chunks sampled`
-                  : `sampling up to ${run.sample_size.toLocaleString()} chunks`}
+                {progressDetail(run)}
                 {results ? " · finished passes are shown below and update as the run progresses" : ""}
               </p>
+              {run.stage_current !== null && run.stage_total !== null && run.stage_total > 0 && (
+                <div className="mt-1.5 max-w-xs">
+                  <Bar pct={(run.stage_current / run.stage_total) * 100} />
+                </div>
+              )}
             </div>
           </div>
           {canEdit && (

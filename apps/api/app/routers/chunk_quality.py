@@ -173,6 +173,8 @@ def _summary_from_run(run: ChunkQualityRun) -> ChunkQualityRunSummary:
         provider_id=run.provider_id,
         status=run.status,
         stage=run.stage,
+        stage_current=run.stage_current,
+        stage_total=run.stage_total,
         sample_size=run.sample_size,
         total_docs=run.total_docs,
         processed=run.processed,

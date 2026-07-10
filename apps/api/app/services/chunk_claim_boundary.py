@@ -279,6 +279,7 @@ async def run_claim_boundary_pass(
     *,
     dataset_id: UUID | None,
     max_cases: int,
+    progress_cb=None,
 ) -> tuple[dict, list[Finding], LlmUsageInfo]:
     """Run the whole pass: select cases, fetch labels + chunk texts, decompose, ground."""
     stmt = (
@@ -294,9 +295,13 @@ async def run_claim_boundary_pass(
     rows: list[dict] = []
     analyzed = 0
     skipped = 0
+    examined = 0
     for case in cases:
         if analyzed >= max_cases:
             break
+        examined += 1
+        if progress_cb is not None:
+            await progress_cb(examined, len(cases))
         answer = as_text(case.expected_answer).strip()
         if not answer or is_no_retrieval_expected(case.tags):
             skipped += 1

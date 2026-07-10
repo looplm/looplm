@@ -5497,6 +5497,10 @@ export interface components {
             sample_size: number;
             /** Stage */
             stage?: string | null;
+            /** Stage Current */
+            stage_current?: number | null;
+            /** Stage Total */
+            stage_total?: number | null;
             /** Started At */
             started_at?: string | null;
             /** Status */
@@ -5551,6 +5555,10 @@ export interface components {
             score?: number | null;
             /** Stage */
             stage?: string | null;
+            /** Stage Current */
+            stage_current?: number | null;
+            /** Stage Total */
+            stage_total?: number | null;
             /** Status */
             status: string;
             /** Total Docs */

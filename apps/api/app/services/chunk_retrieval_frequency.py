@@ -96,6 +96,7 @@ async def frequency_from_probe(
     *,
     dataset_id: UUID | None,
     max_queries: int,
+    progress_cb=None,
 ) -> tuple[Counter[str], int]:
     """``(chunk_id -> count, queries probed)`` from a keyword-only index probe.
 
@@ -114,6 +115,7 @@ async def frequency_from_probe(
 
     counter: Counter[str] = Counter()
     queries = 0
+    target = min(max_queries, len(rows))
     for prompt, tags in rows:
         if queries >= max_queries:
             break
@@ -125,6 +127,8 @@ async def frequency_from_probe(
         queries += 1
         for chunk in result.chunks:
             counter[chunk.chunk_id] += 1
+        if progress_cb is not None:
+            await progress_cb(queries, target)
     return counter, queries
 
 

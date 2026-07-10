@@ -106,26 +106,31 @@ async def run_extended_passes(
             cfg = passes[name]
             usage: LlmUsageInfo | None = None
             await _set_stage(db_factory, run_id=run_id, stage=name)
+            stage_progress = _stage_progress_cb(db_factory, run_id=run_id)
             try:
                 if name == "standalone":
                     metrics, findings, usage = await _run_standalone(
                         report, cfg, llm=llm, llm_error=llm_error,
                         id_field=id_field, text_field=text_field,
+                        progress_cb=stage_progress,
                     )
                 elif name == "cohesion":
                     metrics, findings = await _run_cohesion(
                         report, cfg, embedder=embedder,
                         id_field=id_field, text_field=text_field,
+                        progress_cb=stage_progress,
                     )
                 elif name == "retrieval_frequency":
                     metrics, findings = await _run_retrieval_frequency(
                         report, cfg, provider=provider, db_factory=db_factory,
                         project_id=project_id, id_field=id_field,
+                        progress_cb=stage_progress,
                     )
                 else:  # claim_boundary
                     metrics, findings, usage = await _run_claim_boundary(
                         cfg, provider=provider, db_factory=db_factory,
                         project_id=project_id, llm=llm, llm_error=llm_error,
+                        progress_cb=stage_progress,
                     )
             except Exception as exc:  # noqa: BLE001 — one broken pass must not fail the run
                 logger.exception("Chunk quality pass %s failed for run %s", name, run_id)
@@ -158,6 +163,7 @@ async def _run_standalone(
     report: ChunkQualityReport, cfg: dict, *,
     llm: AnalysisLlmService | None, llm_error: str | None,
     id_field: str | None, text_field: str | None,
+    progress_cb=None,
 ) -> tuple[dict, list[Finding], LlmUsageInfo | None]:
     if llm is None:
         return {"available": False, "reason": llm_error or "analysis LLM not configured"}, [], None
@@ -169,7 +175,7 @@ async def _run_standalone(
     if not chunks:
         return {"available": False, "reason": "no non-empty chunks in the sample"}, [], None
 
-    verdicts, usage = await judge_standalone(llm, chunks)
+    verdicts, usage = await judge_standalone(llm, chunks, progress_cb=progress_cb)
     texts_by_id = {c.chunk_id: c.text for c in chunks}
     metrics, findings = summarize_standalone(
         verdicts, sampled=len(chunks), texts_by_id=texts_by_id
@@ -180,6 +186,7 @@ async def _run_standalone(
 async def _run_cohesion(
     report: ChunkQualityReport, cfg: dict, *,
     embedder, id_field: str | None, text_field: str | None,
+    progress_cb=None,
 ) -> tuple[dict, list[Finding]]:
     if embedder is None:
         return {"available": False, "reason": "no embedding model configured"}, []
@@ -192,12 +199,14 @@ async def _run_cohesion(
         id_field=id_field,
         sample_size=int(cfg.get("sample_size") or 150),
         max_sentences=int(cfg.get("max_sentences") or 30),
+        progress_cb=progress_cb,
     )
 
 
 async def _run_retrieval_frequency(
     report: ChunkQualityReport, cfg: dict, *,
     provider: BaseIndexProvider, db_factory, project_id: UUID, id_field: str | None,
+    progress_cb=None,
 ) -> tuple[dict, list[Finding]]:
     if not id_field:
         return {"available": False, "reason": "no chunk id field detected in the sample"}, []
@@ -213,6 +222,7 @@ async def _run_retrieval_frequency(
                 db, provider, project_id,
                 dataset_id=dataset_uuid,
                 max_queries=int(cfg.get("max_queries") or 100),
+                progress_cb=progress_cb,
             )
         else:
             from app.models.project import Project
@@ -246,6 +256,7 @@ async def _run_claim_boundary(
     cfg: dict, *,
     provider: BaseIndexProvider, db_factory, project_id: UUID,
     llm: AnalysisLlmService | None, llm_error: str | None,
+    progress_cb=None,
 ) -> tuple[dict, list[Finding], LlmUsageInfo | None]:
     if llm is None:
         return {"available": False, "reason": llm_error or "analysis LLM not configured"}, [], None
@@ -255,6 +266,7 @@ async def _run_claim_boundary(
             db, llm, provider, project_id,
             dataset_id=UUID(str(dataset_id)) if dataset_id else None,
             max_cases=int(cfg.get("max_cases") or 50),
+            progress_cb=progress_cb,
         )
     return metrics, findings, usage
 
@@ -267,7 +279,29 @@ async def _set_stage(db_factory, *, run_id: UUID, stage: str) -> None:
         ).scalar_one_or_none()
         if run is not None and run.status == "running":
             run.stage = stage
+            run.stage_current = None
+            run.stage_total = None
             await db.commit()
+
+
+def _stage_progress_cb(db_factory, *, run_id: UUID):
+    """``progress_cb(done, total)`` that persists within-stage counters.
+
+    Each pass awaits this after a unit of work (an LLM batch, a scored chunk, a
+    probed query, an examined case), so the UI's poll sees movement instead of a
+    frozen banner.
+    """
+    async def progress_cb(done: int, total: int) -> None:
+        async with db_factory() as db:
+            run = (
+                await db.execute(select(ChunkQualityRun).where(ChunkQualityRun.id == run_id))
+            ).scalar_one_or_none()
+            if run is not None and run.status == "running":
+                run.stage_current = done
+                run.stage_total = total
+                await db.commit()
+
+    return progress_cb
 
 
 async def _persist_interim(

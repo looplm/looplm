@@ -89,18 +89,21 @@ async def judge_standalone(
     chunks: list[AiJudgeChunk],
     *,
     instructions: str | None = None,
+    progress_cb=None,
 ) -> tuple[dict[str, StandaloneVerdict], LlmUsageInfo]:
     """Judge each chunk's standalone interpretability. Returns ``{chunk_id: verdict}``.
 
     Chunks go out in full, split into context-budgeted batches. Chunks the model
     omits or answers invalidly for are absent from the result — a partial
-    response never invents verdicts.
+    response never invents verdicts. ``progress_cb(done, total)`` is awaited
+    after each batch with cumulative chunk counts.
     """
     system = (instructions or DEFAULT_STANDALONE_INSTRUCTIONS).strip()
     batches = batch_chunks(chunks, fixed_texts=(system,))
 
     verdicts: dict[str, StandaloneVerdict] = {}
     usage = empty_usage()
+    done = 0
     for batch in batches:
         content, batch_usage = await llm.tracked_chat_completion(
             messages=[
@@ -113,6 +116,9 @@ async def judge_standalone(
         add_usage(usage, batch_usage)
         for n, v in _parse_verdicts(content, len(batch)).items():
             verdicts[batch[n - 1].chunk_id] = v
+        done += len(batch)
+        if progress_cb is not None:
+            await progress_cb(done, len(chunks))
     return verdicts, usage
 
 
