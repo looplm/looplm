@@ -132,6 +132,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if result.rowcount:
             logger.warning("Reconciled %d retrieval compute job(s) orphaned by restart", result.rowcount)
 
+    # Reconcile chunk-quality runs orphaned the same way: the spawning task died
+    # with the process, so a stale 'running'/'pending' row would poll forever.
+    async with async_session() as session:
+        result = await session.execute(
+            _sa_update(ChunkQualityRun)
+            .where(ChunkQualityRun.status.in_(("pending", "running")))
+            .values(
+                status="failed",
+                error="Run interrupted by server restart",
+                completed_at=_dt.now(_tz.utc),
+            )
+        )
+        await session.commit()
+        if result.rowcount:
+            logger.warning("Reconciled %d chunk quality run(s) orphaned by restart", result.rowcount)
+
     # Start batch eval poller
     from app.services.batch_poller import start_batch_poller, stop_batch_poller
     await start_batch_poller()

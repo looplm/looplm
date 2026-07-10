@@ -42,6 +42,9 @@ class ChunkQualityRun(Base):
     status = Column(String(32), nullable=False, server_default=text("'pending'"))
     error = Column(Text, nullable=True)
     sample_size = Column(Integer, nullable=False, server_default=text("0"))  # requested sample
+    # Which extended passes ran and with what caps — see
+    # schemas.chunk_quality.ChunkQualityRunConfig. Null = base families only.
+    config = Column(JSONB, nullable=True)
     total_docs = Column(Integer, nullable=False, server_default=text("0"))
     processed = Column(Integer, nullable=False, server_default=text("0"))  # docs analysed so far
     # {summary: {...}, score, fields, families: {...}, findings: [...]} — see

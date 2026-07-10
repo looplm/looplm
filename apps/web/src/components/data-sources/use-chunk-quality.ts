@@ -7,7 +7,11 @@ import {
   listChunkQualityRuns,
   startChunkQualityRun,
 } from "@/lib/api";
-import type { ChunkQualityRunDetail } from "@/lib/api-types/chunk-quality";
+import type {
+  ChunkQualityRunConfig,
+  ChunkQualityRunDetail,
+  ChunkQualityRunSummary,
+} from "@/lib/api-types/chunk-quality";
 
 /**
  * Owns the chunk-quality run lifecycle for one provider: load the latest run,
@@ -19,12 +23,14 @@ export function useChunkQuality(
   setError: (msg: string | null) => void,
 ) {
   const [run, setRun] = useState<ChunkQualityRunDetail | null>(null);
+  const [runs, setRuns] = useState<ChunkQualityRunSummary[]>([]);
   const [running, setRunning] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadLatestRun = useCallback(async () => {
     try {
       const { data } = await listChunkQualityRuns(providerId);
+      setRuns(data);
       const latest = data[0];
       if (!latest) {
         setRun(null);
@@ -43,6 +49,7 @@ export function useChunkQuality(
   // Reset + reload when the provider changes.
   useEffect(() => {
     setRun(null);
+    setRuns([]);
     setRunning(false);
     loadLatestRun();
   }, [loadLatestRun]);
@@ -56,6 +63,9 @@ export function useChunkQuality(
         setRun(detail);
         if (detail.status === "completed" || detail.status === "failed") {
           setRunning(false);
+          // Refresh the summaries so the trend panel picks up the new run.
+          const { data } = await listChunkQualityRuns(providerId);
+          setRuns(data);
         }
       } catch {
         setRunning(false);
@@ -67,10 +77,10 @@ export function useChunkQuality(
   }, [running, run?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRun = useCallback(
-    async (sampleSize = 8000) => {
+    async (sampleSize = 8000, config?: ChunkQualityRunConfig) => {
       setError(null);
       try {
-        const { run_id } = await startChunkQualityRun(providerId, sampleSize);
+        const { run_id } = await startChunkQualityRun(providerId, sampleSize, config);
         const detail = await getChunkQualityRun(run_id);
         setRun(detail);
         setRunning(true);
@@ -81,5 +91,5 @@ export function useChunkQuality(
     [providerId, setError],
   );
 
-  return { run, running, handleRun };
+  return { run, runs, running, handleRun };
 }

@@ -17,8 +17,17 @@ import type {
 } from "@/lib/api-types/chunk-quality";
 import { StatCard } from "@/components/eval-shared";
 
+import {
+  BoundaryCard,
+  ClaimBoundaryCard,
+  CohesionCard,
+  RetrievalFrequencyCard,
+  StandaloneCard,
+} from "./chunk-quality/extended-family-cards";
 import { ContentCard, DuplicationCard, MetadataCard, SizeCard } from "./chunk-quality/family-cards";
+import { RunConfigDialog } from "./chunk-quality/run-config-dialog";
 import { FamilyCard, SeverityChip, scoreTone } from "./chunk-quality/shared";
+import { TrendPanel } from "./chunk-quality/trend-panel";
 import { useChunkQuality } from "./use-chunk-quality";
 
 const FAMILY_TITLES: Record<QualityFamily, string> = {
@@ -26,6 +35,11 @@ const FAMILY_TITLES: Record<QualityFamily, string> = {
   duplication: "Duplication & overlap",
   metadata: "Metadata completeness",
   content: "Content & parser quality",
+  boundary: "Boundary quality",
+  standalone: "Standalone interpretability",
+  cohesion: "Embedding cohesion",
+  retrieval_frequency: "Retrieval frequency",
+  claim_boundary: "Claim boundaries",
 };
 
 const SEVERITY_RANK: Record<Severity, number> = { critical: 0, warn: 1, info: 2 };
@@ -39,7 +53,8 @@ function worstSeverity(findings: ChunkQualityFinding[]): Severity | undefined {
 
 export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; canEdit: boolean }) {
   const [error, setError] = useState<string | null>(null);
-  const { run, running, handleRun } = useChunkQuality(providerId, setError);
+  const [configOpen, setConfigOpen] = useState(false);
+  const { run, runs, running, handleRun } = useChunkQuality(providerId, setError);
 
   const results = run?.results ?? null;
   const findingsByFamily = useMemo(() => {
@@ -66,13 +81,14 @@ export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; c
         <div>
           <h2 className="text-lg font-semibold">Chunk quality</h2>
           <p className="text-xs text-gray-500 dark:text-slate-400">
-            A sampled, read-only health check of the indexed chunks — sizes, duplication, metadata,
-            and parser quality. Nothing is written back to the index.
+            A sampled, read-only health check of the indexed chunks: sizes, duplication, metadata,
+            parser quality, and boundary quality, plus opt-in LLM and retrieval passes. Nothing is
+            written back to the index.
           </p>
         </div>
         {canEdit && (
           <button
-            onClick={() => handleRun()}
+            onClick={() => setConfigOpen(true)}
             disabled={running}
             className="flex-shrink-0 px-3 py-2 rounded-lg text-sm bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
           >
@@ -80,6 +96,18 @@ export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; c
           </button>
         )}
       </div>
+
+      {configOpen && (
+        <RunConfigDialog
+          sampleSize={run?.sample_size || 8000}
+          initialConfig={run?.config ?? null}
+          onCancel={() => setConfigOpen(false)}
+          onStart={(sampleSize, config) => {
+            setConfigOpen(false);
+            handleRun(sampleSize, config);
+          }}
+        />
+      )}
 
       {error && (
         <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg px-4 py-3 mb-4">
@@ -106,6 +134,8 @@ export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; c
           Analysis failed: {run.error ?? "unknown error"}
         </div>
       )}
+
+      <TrendPanel runs={runs} />
 
       {results && (
         <>
@@ -159,10 +189,42 @@ export function ChunkQualityTab({ providerId, canEdit }: { providerId: string; c
           <FamilyCard title={FAMILY_TITLES.content} summary={contentSummary(results)} accent={worstSeverity(findingsByFamily.content ?? [])}>
             <ContentCard content={results.families.content} />
           </FamilyCard>
+          {results.families.boundary && (
+            <FamilyCard title={FAMILY_TITLES.boundary} summary={boundarySummary(results)} accent={worstSeverity(findingsByFamily.boundary ?? [])}>
+              <BoundaryCard boundary={results.families.boundary} />
+            </FamilyCard>
+          )}
+          {results.families.standalone && (
+            <FamilyCard title={FAMILY_TITLES.standalone} summary={extSummary(results.families.standalone, (f) => `${f.dependent_pct ?? 0}% context-dependent`)} accent={worstSeverity(findingsByFamily.standalone ?? [])}>
+              <StandaloneCard standalone={results.families.standalone} usage={results.usage?.standalone} />
+            </FamilyCard>
+          )}
+          {results.families.cohesion && (
+            <FamilyCard title={FAMILY_TITLES.cohesion} summary={extSummary(results.families.cohesion, (f) => `${f.high_spread_pct ?? 0}% multi-topic`)} accent={worstSeverity(findingsByFamily.cohesion ?? [])}>
+              <CohesionCard cohesion={results.families.cohesion} />
+            </FamilyCard>
+          )}
+          {results.families.retrieval_frequency && (
+            <FamilyCard title={FAMILY_TITLES.retrieval_frequency} summary={extSummary(results.families.retrieval_frequency, (f) => `${f.dead_pct ?? 0}% dead`)} accent={worstSeverity(findingsByFamily.retrieval_frequency ?? [])}>
+              <RetrievalFrequencyCard freq={results.families.retrieval_frequency} />
+            </FamilyCard>
+          )}
+          {results.families.claim_boundary && (
+            <FamilyCard title={FAMILY_TITLES.claim_boundary} summary={extSummary(results.families.claim_boundary, (f) => `${f.cross_boundary_pct ?? 0}% cross-boundary`)} accent={worstSeverity(findingsByFamily.claim_boundary ?? [])}>
+              <ClaimBoundaryCard claims={results.families.claim_boundary} usage={results.usage?.claim_boundary} />
+            </FamilyCard>
+          )}
         </>
       )}
     </div>
   );
+}
+
+function extSummary<T extends { available: boolean; reason?: string }>(
+  family: T,
+  fmt: (f: T) => string,
+): string {
+  return family.available ? fmt(family) : (family.reason ?? "did not run");
 }
 
 function sizeSummary(r: ChunkQualityResults): string {
@@ -182,4 +244,9 @@ function contentSummary(r: ChunkQualityResults): string {
   const c = r.families.content;
   if (!c.available) return "no body field";
   return `${c.mojibake_pct ?? 0}% mojibake`;
+}
+function boundarySummary(r: ChunkQualityResults): string {
+  const b = r.families.boundary;
+  if (!b?.available) return "no body field";
+  return `${b.bad_end_pct ?? 0}% end mid-content`;
 }

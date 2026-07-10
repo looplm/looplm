@@ -5350,6 +5350,70 @@ export interface components {
              */
             provider_connected: boolean;
         };
+        /** ChunkQualityPasses */
+        ChunkQualityPasses: {
+            /**
+             * @default {
+             *       "enabled": false,
+             *       "max_cases": 50
+             *     }
+             */
+            claim_boundary: components["schemas"]["ClaimBoundaryPassConfig"];
+            /**
+             * @default {
+             *       "enabled": false,
+             *       "max_sentences": 30,
+             *       "sample_size": 150
+             *     }
+             */
+            cohesion: components["schemas"]["CohesionPassConfig"];
+            /**
+             * @default {
+             *       "enabled": false,
+             *       "max_queries": 100,
+             *       "source": "traces",
+             *       "window_days": 30
+             *     }
+             */
+            retrieval_frequency: components["schemas"]["RetrievalFrequencyPassConfig"];
+            /**
+             * @default {
+             *       "enabled": false,
+             *       "sample_size": 200
+             *     }
+             */
+            standalone: components["schemas"]["StandalonePassConfig"];
+        };
+        /**
+         * ChunkQualityRunConfig
+         * @description Opt-in extended passes. The base families always run and cost nothing.
+         */
+        ChunkQualityRunConfig: {
+            /**
+             * @default {
+             *       "claim_boundary": {
+             *         "enabled": false,
+             *         "max_cases": 50
+             *       },
+             *       "cohesion": {
+             *         "enabled": false,
+             *         "max_sentences": 30,
+             *         "sample_size": 150
+             *       },
+             *       "retrieval_frequency": {
+             *         "enabled": false,
+             *         "max_queries": 100,
+             *         "source": "traces",
+             *         "window_days": 30
+             *       },
+             *       "standalone": {
+             *         "enabled": false,
+             *         "sample_size": 200
+             *       }
+             *     }
+             */
+            passes: components["schemas"]["ChunkQualityPasses"];
+        };
         /** ChunkQualityRunCreateResponse */
         ChunkQualityRunCreateResponse: {
             /**
@@ -5362,6 +5426,7 @@ export interface components {
         };
         /** ChunkQualityRunRequest */
         ChunkQualityRunRequest: {
+            config?: components["schemas"]["ChunkQualityRunConfig"] | null;
             /**
              * Provider Id
              * Format: uuid
@@ -5377,6 +5442,10 @@ export interface components {
         ChunkQualityRunResponse: {
             /** Completed At */
             completed_at?: string | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Created At
              * Format: date-time
@@ -5413,6 +5482,10 @@ export interface components {
         ChunkQualityRunSummary: {
             /** Completed At */
             completed_at?: string | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Created At
              * Format: date-time
@@ -5425,6 +5498,10 @@ export interface components {
             critical: number;
             /** Error */
             error?: string | null;
+            /** Headline */
+            headline?: {
+                [key: string]: number | null;
+            };
             /**
              * Id
              * Format: uuid
@@ -5460,6 +5537,24 @@ export interface components {
         ChunkQualityRunSummaryListResponse: {
             /** Data */
             data: components["schemas"]["ChunkQualityRunSummary"][];
+        };
+        /**
+         * ClaimBoundaryPassConfig
+         * @description Atomic claims of gold answers grounded in one chunk vs split across chunks.
+         */
+        ClaimBoundaryPassConfig: {
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Max Cases
+             * @default 50
+             */
+            max_cases: number;
         };
         /**
          * ClassifyFailuresResponse
@@ -5547,6 +5642,27 @@ export interface components {
              * @description applied or dismissed
              */
             status: string;
+        };
+        /**
+         * CohesionPassConfig
+         * @description Embedding spread of a chunk's sentences — flags multi-topic chunks.
+         */
+        CohesionPassConfig: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Max Sentences
+             * @default 30
+             */
+            max_sentences: number;
+            /**
+             * Sample Size
+             * @default 150
+             */
+            sample_size: number;
         };
         /**
          * ComplexityBucket
@@ -9903,6 +10019,35 @@ export interface components {
             view: string;
         };
         /**
+         * RetrievalFrequencyPassConfig
+         * @description How often each chunk shows up in retrieval — dead and hot tails.
+         */
+        RetrievalFrequencyPassConfig: {
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Max Queries
+             * @default 100
+             */
+            max_queries: number;
+            /**
+             * Source
+             * @default traces
+             * @enum {string}
+             */
+            source: "traces" | "probe";
+            /**
+             * Window Days
+             * @default 30
+             */
+            window_days: number;
+        };
+        /**
          * RetrievalMetric
          * @description A single preformatted stat shown on a pipeline node.
          *
@@ -10815,6 +10960,22 @@ export interface components {
             stage: string;
             /** Threshold Sweep */
             threshold_sweep?: components["schemas"]["RerankThresholdPoint"][];
+        };
+        /**
+         * StandalonePassConfig
+         * @description LLM judge: is each sampled chunk interpretable without its surroundings?
+         */
+        StandalonePassConfig: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Sample Size
+             * @default 200
+             */
+            sample_size: number;
         };
         /** StatusResponse */
         StatusResponse: {

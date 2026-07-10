@@ -5,7 +5,16 @@
  */
 
 export type Severity = "info" | "warn" | "critical";
-export type QualityFamily = "size" | "duplication" | "metadata" | "content";
+export type QualityFamily =
+  | "size"
+  | "duplication"
+  | "metadata"
+  | "content"
+  | "boundary"
+  | "standalone"
+  | "cohesion"
+  | "retrieval_frequency"
+  | "claim_boundary";
 
 export interface ChunkQualityFinding {
   family: QualityFamily;
@@ -95,6 +104,115 @@ export interface ContentFamily {
   embedding?: { field: string | null; coverage_pct: number | null };
 }
 
+export interface BoundaryFamily {
+  available: boolean;
+  reason?: string;
+  sampled?: number;
+  bad_start?: number;
+  bad_start_pct?: number;
+  bad_end?: number;
+  bad_end_pct?: number;
+  mid_table?: number;
+  mid_table_pct?: number;
+  mid_list?: number;
+  mid_list_pct?: number;
+  severed_steps?: number;
+  adjacent_pairs_checked?: number;
+  examples?: { chunk_id: string; issue: string; snippet: string }[];
+}
+
+export interface StandaloneFamily {
+  available: boolean;
+  reason?: string;
+  sampled?: number;
+  judged?: number;
+  dependent?: number;
+  dependent_pct?: number;
+  examples?: { chunk_id: string; reason: string; snippet: string }[];
+}
+
+export interface CohesionFamily {
+  available: boolean;
+  reason?: string;
+  sampled?: number;
+  scored?: number;
+  sentences_embedded?: number;
+  smear?: Distribution;
+  high_spread?: number;
+  high_spread_pct?: number;
+  threshold?: number;
+  examples?: { chunk_id: string; smear: number; snippet: string }[];
+}
+
+export interface RetrievalFrequencyFamily {
+  available: boolean;
+  reason?: string;
+  source?: "traces" | "probe";
+  window_days?: number | null;
+  events_scanned?: number;
+  unique_chunks_retrieved?: number;
+  sampled_chunks?: number;
+  dead?: number;
+  dead_pct?: number;
+  hot?: number;
+  hot_pct?: number;
+  hot_threshold?: number;
+  histogram?: { label: string; count: number }[];
+  top_hot?: { chunk_id: string; count: number; title: string }[];
+}
+
+export interface ClaimBoundaryFamily {
+  available: boolean;
+  reason?: string;
+  dataset_id?: string | null;
+  cases_analyzed?: number;
+  cases_skipped?: number;
+  claims_total?: number;
+  single_chunk?: number;
+  cross_boundary?: number;
+  cross_boundary_pct?: number;
+  cross_adjacent?: number;
+  unsupported?: number;
+  examples?: { test_case_id: string; claim: string; chunk_ids: string[]; adjacent: boolean }[];
+}
+
+export interface PassUsage {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number | null;
+}
+
+export interface ChunkQualityRunConfig {
+  passes: {
+    standalone: { enabled: boolean; sample_size: number };
+    cohesion: { enabled: boolean; sample_size: number; max_sentences: number };
+    retrieval_frequency: {
+      enabled: boolean;
+      source: "traces" | "probe";
+      window_days: number;
+      dataset_id: string | null;
+      max_queries: number;
+    };
+    claim_boundary: { enabled: boolean; dataset_id: string | null; max_cases: number };
+  };
+}
+
+export const DEFAULT_RUN_CONFIG: ChunkQualityRunConfig = {
+  passes: {
+    standalone: { enabled: false, sample_size: 200 },
+    cohesion: { enabled: false, sample_size: 150, max_sentences: 30 },
+    retrieval_frequency: {
+      enabled: false,
+      source: "traces",
+      window_days: 30,
+      dataset_id: null,
+      max_queries: 100,
+    },
+    claim_boundary: { enabled: false, dataset_id: null, max_cases: 50 },
+  },
+};
+
 export interface ChunkQualityResults {
   summary: {
     score: number;
@@ -111,6 +229,7 @@ export interface ChunkQualityResults {
   sample_size: number;
   requested_sample: number;
   fields: {
+    id: string | null;
     text: string | null;
     title: string | null;
     url: string | null;
@@ -123,8 +242,14 @@ export interface ChunkQualityResults {
     duplication: DuplicationFamily;
     metadata: MetadataFamily;
     content: ContentFamily;
+    boundary?: BoundaryFamily;
+    standalone?: StandaloneFamily;
+    cohesion?: CohesionFamily;
+    retrieval_frequency?: RetrievalFrequencyFamily;
+    claim_boundary?: ClaimBoundaryFamily;
   };
   findings: ChunkQualityFinding[];
+  usage?: Record<string, PassUsage>;
 }
 
 export interface ChunkQualityRunSummary {
@@ -141,6 +266,9 @@ export interface ChunkQualityRunSummary {
   error: string | null;
   created_at: string;
   completed_at: string | null;
+  // Per-family headline metrics lifted out of results, for cross-run trends.
+  headline: Record<string, number | null>;
+  config: ChunkQualityRunConfig | null;
 }
 
 export interface ChunkQualityRunDetail {
@@ -152,6 +280,7 @@ export interface ChunkQualityRunDetail {
   processed: number;
   error: string | null;
   results: ChunkQualityResults | null;
+  config: ChunkQualityRunConfig | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;

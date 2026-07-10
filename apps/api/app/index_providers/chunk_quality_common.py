@@ -24,6 +24,7 @@ GIANT_TOKENS = 1200   # above this many embedding models truncate
 # Field-name candidates, lowercased, in priority order. The index schema is
 # external and not guaranteed to use these names, so detection is best-effort
 # with sensible fallbacks.
+ID_FIELDS = ["id", "chunk_id", "key", "document_id"]
 TEXT_FIELDS = ["chunk_text", "content", "text", "body", "chunk", "passage"]
 TITLE_FIELDS = ["page_title", "title", "heading", "document_title", "attachment_filename", "name"]
 URL_FIELDS = ["page_url", "url", "attachment_url", "source_url", "link", "uri"]

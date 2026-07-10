@@ -22,12 +22,34 @@ from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.routers.chunk_quality_worker import run_chunk_quality_analysis
 from app.schemas.chunk_quality import (
+    ChunkQualityRunConfig,
     ChunkQualityRunCreateResponse,
     ChunkQualityRunRequest,
     ChunkQualityRunResponse,
     ChunkQualityRunSummary,
     ChunkQualityRunSummaryListResponse,
 )
+
+# results["families"][family][metric] lifted into each run summary so the runs
+# list doubles as the cross-run trend series without shipping full results.
+_HEADLINE_METRICS = (
+    ("boundary", "bad_end_pct", "boundary_bad_end_pct"),
+    ("boundary", "bad_start_pct", "boundary_bad_start_pct"),
+    ("standalone", "dependent_pct", "standalone_dependent_pct"),
+    ("cohesion", "high_spread_pct", "cohesion_high_spread_pct"),
+    ("retrieval_frequency", "dead_pct", "retrieval_dead_pct"),
+    ("claim_boundary", "cross_boundary_pct", "claim_cross_boundary_pct"),
+)
+
+
+def _headline(results: dict | None) -> dict[str, float | None]:
+    families = (results or {}).get("families") or {}
+    out: dict[str, float | None] = {}
+    for family, metric, key in _HEADLINE_METRICS:
+        fam = families.get(family) or {}
+        value = fam.get(metric) if fam.get("available") else None
+        out[key] = float(value) if isinstance(value, (int, float)) else None
+    return out
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +94,13 @@ async def create_run(
     project: Project = Depends(get_current_project),
 ):
     await _provider_or_404(db, body.provider_id, project)
+    config = (body.config or ChunkQualityRunConfig()).model_dump(mode="json")
     run = ChunkQualityRun(
         project_id=project.id,
         provider_id=body.provider_id,
         status="pending",
         sample_size=body.sample_size,
+        config=config,
     )
     db.add(run)
     await db.flush()
@@ -91,6 +115,7 @@ async def create_run(
             project_id=project.id,
             provider_id=body.provider_id,
             sample_size=body.sample_size,
+            config=config,
             db_factory=async_session,
         )
     )
@@ -115,6 +140,8 @@ def _summary_from_run(run: ChunkQualityRun) -> ChunkQualityRunSummary:
         error=run.error,
         created_at=run.created_at,
         completed_at=run.completed_at,
+        headline=_headline(run.results),
+        config=run.config,
     )
 
 

@@ -42,6 +42,21 @@ class QueryEmbedder:
         resp = await self._client.embeddings.create(**kwargs)
         return list(resp.data[0].embedding)
 
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed many texts in one API call, preserving order.
+
+        The OpenAI embeddings endpoint accepts list input; callers should keep
+        batches modest (≤ ~64) to stay under request-size limits.
+        """
+        if not texts:
+            return []
+        kwargs: dict = {"model": self._model, "input": texts}
+        if self._dimensions:
+            kwargs["dimensions"] = self._dimensions
+        resp = await self._client.embeddings.create(**kwargs)
+        ordered = sorted(resp.data, key=lambda d: d.index)
+        return [list(d.embedding) for d in ordered]
+
     async def aclose(self) -> None:
         await self._client.close()
 

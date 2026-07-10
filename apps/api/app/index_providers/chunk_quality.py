@@ -2,7 +2,7 @@
 
 The index is chunk-level (each indexed document is one chunk). This reads a
 representative *sample* of chunks once (``provider.sample_corpus``) and scores
-their quality across four families:
+their quality across five always-on families:
 
 * **size** — length distribution & consistency, tiny/giant/empty outliers;
 * **duplication** — exact duplicates, near-duplicates, and adjacent-chunk
@@ -10,10 +10,14 @@ their quality across four families:
 * **metadata** — per-field fill rate, cardinality, orphans, enum drift
   (see :mod:`chunk_quality_checks`);
 * **content** — boilerplate, table soup, mojibake, embedding coverage
-  (see :mod:`chunk_quality_checks`).
+  (see :mod:`chunk_quality_checks`);
+* **boundary** — chunks cut mid-sentence/mid-table, severed numbered steps
+  (see :mod:`chunk_quality_boundary`).
 
-Everything except the metadata facet calls is pure and synchronous, so the
-families are unit-testable against a synthetic doc list with no live index.
+Opt-in extended passes (LLM judge, embedding cohesion, retrieval frequency,
+claim boundary) live in :mod:`chunk_quality_extended` and merge into the same
+report. Everything except the metadata facet calls is pure and synchronous, so
+the families are unit-testable against a synthetic doc list with no live index.
 """
 
 from __future__ import annotations
@@ -23,10 +27,12 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from app.index_providers.base import BaseIndexProvider
+from app.index_providers.chunk_quality_boundary import analyze_boundaries
 from app.index_providers.chunk_quality_checks import analyze_content, analyze_metadata
 from app.index_providers.chunk_quality_common import (
     GIANT_TOKENS,
     GROUP_FIELDS,
+    ID_FIELDS,
     ORDINAL_FIELDS,
     PARENT_FIELDS,
     SEVERITY_WEIGHTS,
@@ -65,6 +71,11 @@ class ChunkQualityReport:
     fields: dict = field(default_factory=dict)
     families: dict = field(default_factory=dict)
     findings: list[Finding] = field(default_factory=list)
+    # Per-pass LLM/embedding usage totals (extended passes only), serialized.
+    usage: dict = field(default_factory=dict)
+    # The sampled docs, kept in memory so extended passes reuse the sample
+    # instead of re-reading the index. Never serialized.
+    docs: list[dict] = field(default_factory=list, repr=False)
 
     def summary(self) -> dict:
         by_sev = Counter(f.severity for f in self.findings)
@@ -89,6 +100,7 @@ class ChunkQualityReport:
             "fields": self.fields,
             "families": self.families,
             "findings": [f.to_dict() for f in self.findings],
+            "usage": self.usage,
         }
 
 
@@ -373,6 +385,7 @@ async def run_chunk_quality(
         await progress_cb(len(docs))
 
     keys: set[str] = set().union(*(d.keys() for d in docs)) if docs else set()
+    id_field = pick_field(keys, ID_FIELDS)
     text_field = pick_field(keys, TEXT_FIELDS)
     title_field = pick_field(keys, TITLE_FIELDS)
     url_field = pick_field(keys, URL_FIELDS)
@@ -404,6 +417,13 @@ async def run_chunk_quality(
     families["content"] = content_m
     findings += content_f
 
+    boundary_m, boundary_f = analyze_boundaries(
+        docs, text_field=text_field, id_field=id_field,
+        parent_field=parent_field, ordinal_field=ordinal_field,
+    )
+    families["boundary"] = boundary_m
+    findings += boundary_f
+
     if progress_cb is not None:
         await progress_cb(len(docs))
 
@@ -413,9 +433,10 @@ async def run_chunk_quality(
         sample_size=len(docs),
         requested_sample=sample_size,
         fields={
-            "text": text_field, "title": title_field, "url": url_field,
+            "id": id_field, "text": text_field, "title": title_field, "url": url_field,
             "parent": parent_field, "ordinal": ordinal_field, "group": group_field,
         },
         families=families,
         findings=findings,
+        docs=docs,
     )

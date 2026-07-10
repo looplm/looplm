@@ -18,6 +18,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.index_providers.chunk_quality import run_chunk_quality
+from app.index_providers.chunk_quality_extended import run_extended_passes
 from app.index_providers.registry import build_index_provider
 from app.models.chunk_quality import ChunkQualityRun
 from app.models.index_providers import IndexProvider
@@ -46,6 +47,7 @@ async def run_chunk_quality_analysis(
     provider_id: UUID,
     sample_size: int,
     db_factory,
+    config: dict | None = None,
 ) -> None:
     provider_obj = None
     try:
@@ -85,6 +87,17 @@ async def run_chunk_quality_analysis(
             try:
                 report = await run_chunk_quality(
                     provider_obj, sample_size=sample_size, progress_cb=save_progress
+                )
+                # Opt-in extended passes (LLM judge, cohesion, retrieval frequency,
+                # claim boundary) merge into the same report; each pass persists
+                # interim results so the UI sees families appear while running.
+                await run_extended_passes(
+                    provider=provider_obj,
+                    report=report,
+                    config=config or {},
+                    db_factory=db_factory,
+                    project_id=project_id,
+                    run_id=run_id,
                 )
                 results = report.to_dict()
                 total_docs = report.total_docs

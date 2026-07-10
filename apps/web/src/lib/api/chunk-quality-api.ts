@@ -3,15 +3,24 @@
  */
 
 import type {
+  ChunkQualityRunConfig,
   ChunkQualityRunDetail,
   ChunkQualityRunSummary,
 } from "../api-types/chunk-quality";
 import { request } from "./client";
 
-export const startChunkQualityRun = (providerId: string, sampleSize = 8000) =>
+export const startChunkQualityRun = (
+  providerId: string,
+  sampleSize = 8000,
+  config?: ChunkQualityRunConfig,
+) =>
   request<{ run_id: string; status: string }>("/api/chunk-quality/runs", {
     method: "POST",
-    body: JSON.stringify({ provider_id: providerId, sample_size: sampleSize }),
+    body: JSON.stringify({
+      provider_id: providerId,
+      sample_size: sampleSize,
+      ...(config ? { config } : {}),
+    }),
   });
 
 export const listChunkQualityRuns = (providerId: string) =>

@@ -1,6 +1,6 @@
 """Unit tests for the chunk/metadata quality engine.
 
-The four families are pure functions over a synthetic doc list, so they need no
+The base families are pure functions over a synthetic doc list, so they need no
 live index; ``run_chunk_quality`` is exercised against a small in-memory fake
 provider.
 """
@@ -163,10 +163,13 @@ async def test_run_chunk_quality_end_to_end():
     assert report.sample_size == len(docs)
     assert report.total_docs == len(docs)
     assert 0 <= report.score <= 100
-    assert set(report.families) == {"size", "duplication", "metadata", "content"}
+    assert set(report.families) == {"size", "duplication", "metadata", "content", "boundary"}
     blob = report.to_dict()
     assert blob["summary"]["score"] == report.score
     assert blob["fields"]["text"] == "chunk_text"
+    assert blob["usage"] == {}
+    # The sampled docs stay in memory for the extended passes but never serialize.
+    assert report.docs and "docs" not in blob
 
 
 @pytest.mark.asyncio
@@ -177,3 +180,64 @@ async def test_run_chunk_quality_handles_no_sampling():
 
     with pytest.raises(NotImplementedError):
         await run_chunk_quality(_NoSample([]), sample_size=10)
+
+
+# ── Extended passes (opt-in) ─────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_extended_passes_disabled_leave_report_untouched(db_session, test_project):
+    from uuid import uuid4
+
+    from app.index_providers.chunk_quality_extended import run_extended_passes
+
+    docs = [_doc("Some perfectly ordinary body text here.", id="c1")]
+    provider = _FakeProvider(docs)
+    report = await run_chunk_quality(provider, sample_size=10)
+    before = report.to_dict()
+
+    await run_extended_passes(
+        provider=provider, report=report, config={},
+        db_factory=None, project_id=test_project.id, run_id=uuid4(),
+    )
+    assert report.to_dict() == before
+
+
+@pytest.mark.asyncio
+async def test_extended_pass_without_llm_reports_unavailable(
+    db_session, test_project, monkeypatch
+):
+
+    from app.config import settings
+    from app.index_providers.chunk_quality_extended import run_extended_passes
+    from app.models.chunk_quality import ChunkQualityRun
+    from tests.conftest import TestSessionLocal
+
+    # No LLM credentials anywhere → the pass must degrade, not fail the run.
+    monkeypatch.setattr(settings, "analysis_llm_provider", "openai")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+
+    run = ChunkQualityRun(
+        project_id=test_project.id, provider_id=test_project.id, status="running",
+    )
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(run)
+
+    docs = [_doc("Some perfectly ordinary body text here.", id="c1")]
+    provider = _FakeProvider(docs)
+    report = await run_chunk_quality(provider, sample_size=10)
+    score_before = report.score
+
+    await run_extended_passes(
+        provider=provider, report=report,
+        config={"passes": {"standalone": {"enabled": True, "sample_size": 20}}},
+        db_factory=TestSessionLocal, project_id=test_project.id, run_id=run.id,
+    )
+
+    standalone = report.families["standalone"]
+    assert standalone["available"] is False
+    assert "API key" in standalone["reason"]
+    assert report.score == score_before  # a config gap adds no findings
+    # Interim results were persisted on the run row.
+    await db_session.refresh(run)
+    assert run.results["families"]["standalone"]["available"] is False

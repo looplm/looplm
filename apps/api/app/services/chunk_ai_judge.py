@@ -15,17 +15,24 @@ so it inherits the project's configured OpenAI / Azure provider.
 
 from __future__ import annotations
 
-import json
-import math
-import re
-from dataclasses import dataclass
-
-from app.config import settings
 from app.models.chunk_labels import GRADE_MAX, GRADE_MIN
 from app.services.analysis_llm import AnalysisLlmService, LlmUsageInfo
+from app.services.chunk_judge_common import (
+    AiJudgeChunk,
+    add_usage,
+    batch_chunks,
+    clean,
+    empty_usage,
+    extract_json_object,
+)
 
-# Rough token cost of the per-chunk scaffolding (the ``[n]`` marker and blank-line separator).
-_PER_CHUNK_OVERHEAD_TOKENS = 8
+__all__ = [
+    "AiJudgeChunk",
+    "DEFAULT_AI_JUDGE_INSTRUCTIONS",
+    "ai_judge_chunks",
+    "build_ai_judge_messages",
+    "plan_ai_judge_prompts",
+]
 
 # Editable in the request; this is the default rubric. Mirrors the human grading scale exactly
 # so AI and human judgments are directly comparable.
@@ -40,60 +47,14 @@ DEFAULT_AI_JUDGE_INSTRUCTIONS = (
 )
 
 
-@dataclass
-class AiJudgeChunk:
-    """A chunk to be judged: its index-key plus the text the judge reads."""
-
-    chunk_id: str
-    text: str
-
-
-def _clean(text: str | None) -> str:
-    """Collapse runs of whitespace so a chunk sits on as few tokens as possible without loss."""
-    return re.sub(r"\s+", " ", str(text or "")).strip()
-
-
-def _estimate_tokens(text: str) -> int:
-    """Conservative char-based token estimate (deliberately under-fills the budget)."""
-    per_token = max(1.0, float(settings.ai_judge_chars_per_token))
-    return math.ceil(len(text) / per_token)
-
-
 def _batch_chunks(
     system: str, query: str, chunks: list[AiJudgeChunk], *, expected_answer: str | None = None
 ) -> list[list[AiJudgeChunk]]:
-    """Greedy-pack chunks into the fewest calls that fit the judge model's context window.
+    """Token-budgeted batches for this judge's fixed prompt parts (see ``batch_chunks``)."""
+    return batch_chunks(chunks, fixed_texts=(system, query, expected_answer or ""))
 
-    The budget is the model's context minus the response reserve, the system prompt and the fixed
-    part of every user message (the query, plus the reference answer when present). A chunk larger
-    than the whole budget still goes out on its own rather than being dropped.
-    ``ai_judge_max_batch_chunks`` caps how many chunks share one call so grading quality does not
-    degrade on pools of many short chunks.
-    """
-    budget = max(
-        1,
-        int(settings.ai_judge_context_tokens)
-        - int(settings.ai_judge_response_reserve_tokens)
-        - _estimate_tokens(system)
-        - _estimate_tokens(query)
-        - _estimate_tokens(expected_answer or ""),
-    )
-    max_per_batch = max(1, int(settings.ai_judge_max_batch_chunks))
 
-    batches: list[list[AiJudgeChunk]] = []
-    current: list[AiJudgeChunk] = []
-    tokens = 0
-    for chunk in chunks:
-        cost = _estimate_tokens(_clean(chunk.text)) + _PER_CHUNK_OVERHEAD_TOKENS
-        if current and (tokens + cost > budget or len(current) >= max_per_batch):
-            batches.append(current)
-            current = []
-            tokens = 0
-        current.append(chunk)
-        tokens += cost
-    if current:
-        batches.append(current)
-    return batches
+_clean = clean
 
 
 def _build_user_prompt(
@@ -171,17 +132,8 @@ def _parse_grades(content: str, chunk_count: int) -> dict[int, int]:
     Tolerates code fences and stray prose by extracting the first JSON object; ignores numbers
     outside the chunk range or grades outside ``GRADE_MIN..GRADE_MAX``.
     """
-    text = content.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", text).strip()
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return {}
-    try:
-        data = json.loads(match.group(0))
-    except (ValueError, TypeError):
-        return {}
-    entries = data.get("grades") if isinstance(data, dict) else None
+    data = extract_json_object(content)
+    entries = data.get("grades") if data else None
     if not isinstance(entries, list):
         return {}
     out: dict[int, int] = {}
@@ -199,29 +151,6 @@ def _parse_grades(content: str, chunk_count: int) -> dict[int, int]:
         ):
             out[n] = g
     return out
-
-
-def _empty_usage() -> LlmUsageInfo:
-    return LlmUsageInfo(
-        input_tokens=0,
-        output_tokens=0,
-        total_tokens=0,
-        cost_usd=None,
-        cached_tokens=0,
-        reasoning_tokens=0,
-        duration_ms=0,
-    )
-
-
-def _add_usage(acc: LlmUsageInfo, one: LlmUsageInfo) -> None:
-    acc.input_tokens += one.input_tokens
-    acc.output_tokens += one.output_tokens
-    acc.total_tokens += one.total_tokens
-    acc.cached_tokens += one.cached_tokens
-    acc.reasoning_tokens += one.reasoning_tokens
-    acc.duration_ms += one.duration_ms
-    if one.cost_usd is not None:
-        acc.cost_usd = (acc.cost_usd or 0.0) + one.cost_usd
 
 
 async def ai_judge_chunks(
@@ -244,7 +173,7 @@ async def ai_judge_chunks(
     batches = _batch_chunks(system, query, chunks, expected_answer=expected_answer)
 
     grades: dict[str, int] = {}
-    usage = _empty_usage()
+    usage = empty_usage()
     for batch in batches:
         content, batch_usage = await llm.tracked_chat_completion(
             messages=build_ai_judge_messages(
@@ -253,7 +182,7 @@ async def ai_judge_chunks(
             temperature=0.0,
             response_format={"type": "json_object"},
         )
-        _add_usage(usage, batch_usage)
+        add_usage(usage, batch_usage)
         for n, g in _parse_grades(content, len(batch)).items():
             grades[batch[n - 1].chunk_id] = g
     return grades, usage
