@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   createDataset,
   createTestCase,
+  deleteTestCase,
   type CoverageSuggestion,
   type TestCaseCreateBody,
   type TestDatasetItem,
@@ -76,7 +77,35 @@ export function SuggestionList({
   const [accepting, setAccepting] = useState<{ suggestion: CoverageSuggestion; index: number } | null>(
     null,
   );
-  const [acceptedKeys, setAcceptedKeys] = useState<Set<number>>(new Set());
+  // Track what was created for each accepted suggestion so the add can be undone.
+  const [acceptedCases, setAcceptedCases] = useState<
+    Map<number, { datasetId: string; caseId: string }>
+  >(new Map());
+  const [undoing, setUndoing] = useState<Set<number>>(new Set());
+
+  async function handleUndo(index: number) {
+    const created = acceptedCases.get(index);
+    if (!created) return;
+    setUndoing((prev) => new Set(prev).add(index));
+    try {
+      await deleteTestCase(created.datasetId, created.caseId);
+      setAcceptedCases((prev) => {
+        const next = new Map(prev);
+        next.delete(index);
+        return next;
+      });
+      toast.success("Removed test case");
+      onDatasetsChanged();
+    } catch (err) {
+      toast.error("Failed to undo", { description: String(err) });
+    } finally {
+      setUndoing((prev) => {
+        const next = new Set(prev);
+        next.delete(index);
+        return next;
+      });
+    }
+  }
 
   if (suggestions.length === 0) return null;
 
@@ -119,9 +148,18 @@ export function SuggestionList({
                   <Chips label="team" values={s.team_filter} />
                   <Chips label="source" values={s.expected_source_types} />
                 </div>
-                <div className="mt-2 flex justify-end">
-                  {acceptedKeys.has(index) ? (
-                    <span className="text-xs text-green-600 dark:text-green-400">✓ Added</span>
+                <div className="mt-2 flex justify-end items-center gap-2">
+                  {acceptedCases.has(index) ? (
+                    <>
+                      <span className="text-xs text-green-600 dark:text-green-400">✓ Added</span>
+                      <button
+                        onClick={() => handleUndo(index)}
+                        disabled={undoing.has(index)}
+                        className="text-xs text-gray-500 dark:text-slate-400 underline hover:text-gray-700 dark:hover:text-slate-200 disabled:opacity-50"
+                      >
+                        {undoing.has(index) ? "Undoing…" : "Undo"}
+                      </button>
+                    </>
                   ) : (
                     <button
                       onClick={() => setAccepting({ suggestion: s, index })}
@@ -145,10 +183,13 @@ export function SuggestionList({
           index={accepting.index}
           datasets={datasets}
           onClose={() => setAccepting(null)}
-          onAccepted={(idx) => {
-            setAcceptedKeys((prev) => new Set(prev).add(idx));
+          onAccepted={(idx, created) => {
+            setAcceptedCases((prev) => new Map(prev).set(idx, created));
             setAccepting(null);
             onDatasetsChanged();
+            toast.success("Test case added", {
+              action: { label: "Undo", onClick: () => handleUndo(idx) },
+            });
           }}
         />
       )}
@@ -167,7 +208,7 @@ function AcceptModal({
   index: number;
   datasets: TestDatasetItem[];
   onClose: () => void;
-  onAccepted: (index: number) => void;
+  onAccepted: (index: number, created: { datasetId: string; caseId: string }) => void;
 }) {
   // Default to the worker's matched dataset when it found one; otherwise open on
   // "New dataset" pre-filled with the proposed name so a mismatched gap doesn't
@@ -181,6 +222,26 @@ function AcceptModal({
   const [newName, setNewName] = useState(suggestion.suggested_dataset_name || "Eval coverage");
   const [form, setForm] = useState<SuggestionForm>(() => formFromSuggestion(suggestion, index));
   const [saving, setSaving] = useState(false);
+  // When the user selects an existing dataset because the name they typed
+  // already exists, keep a note so we can explain why the dropdown changed.
+  const [autoSelectedName, setAutoSelectedName] = useState<string | null>(null);
+
+  function findExistingByName(name: string): TestDatasetItem | undefined {
+    const norm = name.trim().toLowerCase();
+    if (!norm) return undefined;
+    return datasets.find((d) => d.name.trim().toLowerCase() === norm);
+  }
+
+  function handleNewNameChange(value: string) {
+    setNewName(value);
+    const existing = findExistingByName(value);
+    if (existing) {
+      // A dataset with this name already exists — select it instead of creating a
+      // duplicate, and surface a message explaining the switch.
+      setDatasetId(existing.id);
+      setAutoSelectedName(existing.name);
+    }
+  }
 
   const canSave = Boolean(
     form.prompt.trim() && form.test_id.trim() && (datasetId !== "__new__" || newName.trim()),
@@ -191,12 +252,18 @@ function AcceptModal({
     try {
       let targetId = datasetId;
       if (datasetId === "__new__") {
-        const ds = await createDataset({ name: newName.trim() || "Eval coverage" });
-        targetId = ds.id;
+        // Guard against creating a duplicate when the pre-filled name already
+        // matches an existing dataset (no onChange fired to auto-select it).
+        const existing = findExistingByName(newName);
+        if (existing) {
+          targetId = existing.id;
+        } else {
+          const ds = await createDataset({ name: newName.trim() || "Eval coverage" });
+          targetId = ds.id;
+        }
       }
-      await createTestCase(targetId, suggestionToBody(suggestion, form));
-      toast.success("Test case added");
-      onAccepted(index);
+      const created = await createTestCase(targetId, suggestionToBody(suggestion, form));
+      onAccepted(index, { datasetId: targetId, caseId: created.id });
     } catch (err) {
       toast.error("Failed to add", { description: String(err) });
     } finally {
@@ -271,7 +338,10 @@ function AcceptModal({
               <label className="block text-sm font-medium mb-1">Dataset</label>
               <select
                 value={datasetId}
-                onChange={(e) => setDatasetId(e.target.value)}
+                onChange={(e) => {
+                  setDatasetId(e.target.value);
+                  setAutoSelectedName(null);
+                }}
                 className={inputCls}
               >
                 {datasets.map((d) => (
@@ -285,10 +355,16 @@ function AcceptModal({
               {datasetId === "__new__" && (
                 <input
                   value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
+                  onChange={(e) => handleNewNameChange(e.target.value)}
                   placeholder="New dataset name"
                   className={`${inputCls} mt-2`}
                 />
+              )}
+              {autoSelectedName && datasetId !== "__new__" && (
+                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                  A dataset named “{autoSelectedName}” already exists — selected it instead of
+                  creating a duplicate.
+                </p>
               )}
             </div>
           </div>
