@@ -256,6 +256,7 @@ export function WorkbenchView({
             <PoolChunkRow
               key={chunk.chunk_id}
               chunk={chunk}
+              testId={c.test_id}
               relevance={chunk.relevance ?? null}
               disabled={!canEdit}
               indexConnected={indexConnected}

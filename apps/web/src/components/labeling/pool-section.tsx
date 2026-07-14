@@ -144,6 +144,7 @@ export function PoolSection({
                 <PoolChunkRow
                   key={chunk.chunk_id}
                   chunk={chunk}
+                  testId={testId}
                   relevance={
                     chunk.chunk_id in labels ? labels[chunk.chunk_id] : chunk.relevance ?? null
                   }

@@ -47,6 +47,24 @@ LABELING_QUERIES_META_KEY = "labeling_queries"
 # INDEX_TEXT_FIELDS (chunk-row.tsx) so the judge reads the same text "Show full chunk" renders.
 INDEX_TEXT_FIELDS = ("chunk_text", "content", "text", "chunkText")
 
+# Index fields that hold a chunk's heading/section context, in priority order. Used as the display
+# grouping for the passage-selection panel (the section header labels the checkbox list).
+INDEX_HEADING_FIELDS = ("heading_context", "headingContext", "section_path", "section", "headings")
+
+
+def _first_str_field(fields: dict, names: tuple[str, ...]) -> str | None:
+    """First non-empty string value among ``names`` in an index document, else None."""
+    for name in names:
+        v = fields.get(name)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        # Heading context is sometimes a list of ancestor headings; join it.
+        if isinstance(v, (list, tuple)) and v:
+            joined = " › ".join(str(p).strip() for p in v if str(p).strip())
+            if joined:
+                return joined
+    return None
+
 
 def _display_name(email: str | None) -> str | None:
     """Compact display name for a labeler — the local part of their email."""
@@ -310,6 +328,38 @@ async def fetch_full_chunk_texts(
                 out[cid] = v
                 break
     return out
+
+
+async def fetch_chunk_fields(
+    db: AsyncSession, project: Project, chunk_id: str
+) -> tuple[dict | None, bool]:
+    """One chunk's full index document, fetched live from the project's index provider.
+
+    Returns ``(fields, provider_connected)``: ``fields`` is the ``{field: value}`` document, or
+    ``None`` when there's no provider or the chunk isn't found; ``provider_connected`` distinguishes
+    "no index" from "index has no such chunk" so the passage panel can be honest. Powers the local
+    (A) passage split, which needs the chunk's full body + heading — not the truncated pool preview.
+    """
+    provider_row = (
+        await db.execute(
+            select(IndexProvider)
+            .where(IndexProvider.project_id == project.id)
+            .order_by(IndexProvider.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if provider_row is None:
+        return None, False
+    provider = build_index_provider(provider_row)
+    try:
+        docs = await provider.fetch_documents_by_key([chunk_id])
+    except Exception:  # noqa: BLE001 — capability gap / transient error → treat as not found
+        logger.exception("Fetching chunk fields failed for chunk_id=%s", chunk_id)
+        return None, True
+    finally:
+        await provider.aclose()
+    fields = docs.get(chunk_id)
+    return (fields if isinstance(fields, dict) else None), True
 
 
 async def _project_labels(

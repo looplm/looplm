@@ -47,6 +47,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         ChunkRelevanceLabel,
         TestCaseLabelingStatus,
     )
+    from app.models.passage_labels import (  # noqa: F401 — ensure table is created
+        PassageRelevanceLabel,
+    )
     from app.models.chunk_quality import ChunkQualityRun  # noqa: F401 — ensure table is created
     from app.models.retrieval_runs import RetrievalRun  # noqa: F401 — ensure table is created
     from app.models.retrieval_metrics_jobs import (  # noqa: F401 — ensure table is created

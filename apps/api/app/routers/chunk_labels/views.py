@@ -14,14 +14,17 @@ from app.index_providers.registry import build_index_provider
 from app.models.chunk_labels import TestCaseLabelingStatus
 from app.models.datasets import TestCase
 from app.models.index_providers import IndexProvider
+from app.models.passage_labels import PASSAGE_SOURCE_CHUNK_SPLIT, PassageRelevanceLabel
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import (
     ChunkMetadataResponse,
+    ChunkPassagesResponse,
     LabelingPoolResponse,
     LabelingPromptDefaults,
     LabelingQueries,
     LabelingRunResponse,
+    PassageForLabeling,
 )
 from app.services.chunk_ai_judge import DEFAULT_AI_JUDGE_INSTRUCTIONS
 from app.services.chunk_labeling import (
@@ -29,15 +32,21 @@ from app.services.chunk_labeling import (
     build_pool_view,
     merge_labeling_view,
 )
+from app.services.passage_split import split_chunk_into_passages
 from app.services.query_planner import DEFAULT_QUERY_PLANNER_INSTRUCTIONS
 
 from ._helpers import (
+    INDEX_HEADING_FIELDS,
+    INDEX_TEXT_FIELDS,
     _dataset_case_query,
+    _display_name,
+    _first_str_field,
     _list_dataset_options,
     _project_labels,
     _resolve_dataset,
     assemble_case_pool,
     ensure_case_agentic_queries,
+    fetch_chunk_fields,
 )
 
 router = APIRouter()
@@ -173,6 +182,80 @@ async def get_labeling_prompts(
     return LabelingPromptDefaults(
         ai_judge=DEFAULT_AI_JUDGE_INSTRUCTIONS,
         query_planner=DEFAULT_QUERY_PLANNER_INSTRUCTIONS,
+    )
+
+
+@router.get("/chunk-passages", response_model=ChunkPassagesResponse)
+async def get_chunk_passages(
+    test_id: str,
+    chunk_id: str,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """The finer-grained passages of one pooled chunk, for the passage-selection panel.
+
+    An additive refinement of chunk labeling: the chunk grade stays primary; here a labeler can
+    additionally mark which passages *within* the chunk help answer the query. Fetches the chunk's
+    full body from the index and splits it locally into sentence/line passages (the *A* source);
+    the viewer's own prior selections are overlaid so the checkboxes reflect their state. Returns
+    ``available=False`` when no index is connected or the chunk has no splittable text.
+    """
+    fields, provider_connected = await fetch_chunk_fields(db, project, chunk_id)
+    if not provider_connected or fields is None:
+        return ChunkPassagesResponse(
+            test_id=test_id,
+            chunk_id=chunk_id,
+            provider_connected=provider_connected,
+            available=False,
+        )
+
+    text = _first_str_field(fields, INDEX_TEXT_FIELDS)
+    heading = _first_str_field(fields, INDEX_HEADING_FIELDS)
+    split = split_chunk_into_passages(chunk_id, text, section_path=heading)
+    if not split:
+        return ChunkPassagesResponse(
+            test_id=test_id,
+            chunk_id=chunk_id,
+            provider_connected=True,
+            available=False,
+            section_path=heading,
+        )
+
+    # Overlay the viewer's own prior selections (human rows only — annotator NULL).
+    existing = (
+        await db.execute(
+            select(PassageRelevanceLabel).where(
+                PassageRelevanceLabel.project_id == project.id,
+                PassageRelevanceLabel.test_id == test_id,
+                PassageRelevanceLabel.chunk_id == chunk_id,
+                PassageRelevanceLabel.labeled_by == user.id,
+                PassageRelevanceLabel.annotator.is_(None),
+            )
+        )
+    ).scalars().all()
+    relevant_by_pid = {row.passage_id: row.relevant for row in existing}
+    viewer_name = _display_name(user.email)
+
+    passages = [
+        PassageForLabeling(
+            passage_id=p.passage_id,
+            text=p.text,
+            section_path=p.section_path,
+            passage_source=p.passage_source,
+            relevant=relevant_by_pid.get(p.passage_id),
+            labeled_by=viewer_name if p.passage_id in relevant_by_pid else None,
+        )
+        for p in split
+    ]
+    return ChunkPassagesResponse(
+        test_id=test_id,
+        chunk_id=chunk_id,
+        provider_connected=True,
+        available=True,
+        passage_source=PASSAGE_SOURCE_CHUNK_SPLIT,
+        section_path=heading,
+        passages=passages,
     )
 
 

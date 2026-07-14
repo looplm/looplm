@@ -239,6 +239,69 @@ class PooledChunkForLabeling(BaseModel):
     ai_relevance: int | None = None
 
 
+# --- Per-passage relevance selection (additive refinement of chunk labeling) ---------
+
+
+class PassageForLabeling(BaseModel):
+    """One finer-grained passage of a chunk, presented for a helps/doesn't-help selection.
+
+    Passages are shown grouped by ``section_path`` (the chunk's heading context) as a checkbox
+    list under the chunk. ``relevant`` is the viewer's current binary selection (1 = helps,
+    0 = unchecked, ``None`` = never touched — treated as still-relevant until they uncheck it).
+    """
+
+    passage_id: str
+    text: str
+    section_path: str | None = None
+    # "rde" (stable, offset-anchored) | "chunk_split" (chunk-derived, orphans on re-chunk).
+    passage_source: str
+    # The viewer's binary selection (1 = helps, 0 = unchecked), or None when unlabeled.
+    relevant: int | None = None
+    labeled_by: str | None = None
+
+
+class ChunkPassagesResponse(BaseModel):
+    """The passages of one pooled chunk, for the passage-selection panel.
+
+    ``provider_connected`` is False when the project has no index provider (nothing to split);
+    ``available`` is False when the chunk isn't found in the index or carries no splittable text.
+    ``passage_source`` records which source produced these passages (``rde`` when the durable
+    sub-passages were used, ``chunk_split`` for the local fallback).
+    """
+
+    test_id: str
+    chunk_id: str
+    provider_connected: bool = False
+    available: bool = False
+    passage_source: str | None = None
+    section_path: str | None = None
+    passages: list[PassageForLabeling] = Field(default_factory=list)
+
+
+class PassageSelectionItem(BaseModel):
+    """One passage's selection state in an upsert batch."""
+
+    passage_id: str
+    # Binary relevance: 1 = helps answer the question, 0 = does not.
+    relevant: int
+    passage_source: str
+    section_path: str | None = None
+    text_preview: str | None = None
+
+
+class PassageSelectionUpsert(BaseModel):
+    """Batch of passage selections for one chunk under one test case (the labeler's own rows).
+
+    Passages omitted from ``passages`` are left untouched; a passage set ``relevant=0`` records an
+    explicit "does not help" (distinct from unlabeled). The whole batch shares one ``(test_id,
+    chunk_id)`` — the chunk stays the primary labeled unit these hang off.
+    """
+
+    test_id: str
+    chunk_id: str
+    passages: list[PassageSelectionItem] = Field(default_factory=list)
+
+
 class LabelingQueries(BaseModel):
     """The queries run to build a case's pool: the base question + any agentic sub-queries.
 

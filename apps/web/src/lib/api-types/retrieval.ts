@@ -199,6 +199,39 @@ export interface PooledChunkForLabeling {
   ai_relevance?: number | null;
 }
 
+// --- Per-passage relevance selection (additive refinement of chunk labeling) ---
+
+// One finer-grained passage of a chunk, shown as a checkbox under the chunk. `relevant` is the
+// viewer's current binary selection: 1 = helps, 0 = unchecked, null = never touched.
+export interface PassageForLabeling {
+  passage_id: string;
+  text: string;
+  section_path?: string | null;
+  // "rde" (durable, offset-anchored) | "chunk_split" (chunk-derived, orphans on re-chunk).
+  passage_source: string;
+  relevant?: number | null;
+  labeled_by?: string | null;
+}
+
+export interface ChunkPassagesResponse {
+  test_id: string;
+  chunk_id: string;
+  provider_connected: boolean;
+  available: boolean;
+  passage_source?: string | null;
+  section_path?: string | null;
+  passages: PassageForLabeling[];
+}
+
+// One passage's selection state in an upsert batch (binary relevant: 1 helps, 0 does not).
+export interface PassageSelectionItem {
+  passage_id: string;
+  relevant: number;
+  passage_source: string;
+  section_path?: string | null;
+  text_preview?: string | null;
+}
+
 // The queries a case's pool was built from: the base question + any agentic sub-queries.
 export interface LabelingQueries {
   base: string[];

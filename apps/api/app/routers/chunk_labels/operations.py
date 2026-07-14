@@ -20,6 +20,11 @@ from app.models.chunk_labels import (
     TestCaseLabelingStatus,
     is_valid_grade,
 )
+from app.models.passage_labels import (
+    PASSAGE_SOURCES,
+    PassageRelevanceLabel,
+    is_valid_passage_relevance,
+)
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.retrieval import (
@@ -28,6 +33,7 @@ from app.schemas.retrieval import (
     GoldUpdate,
     LabelingSliceUpdate,
     LabelingStatusUpdate,
+    PassageSelectionUpsert,
 )
 from app.services.chunk_agreement import Vote, build_agreement_report
 
@@ -175,6 +181,87 @@ async def upsert_labels(
                 current.url = item.url
             if item.title is not None:
                 current.title = item.title
+        saved += 1
+
+    await db.flush()
+    return {"saved": saved}
+
+
+@router.post(
+    "/passage-labels",
+    dependencies=[require_write("evaluate", "labeling")],
+)
+async def upsert_passage_labels(
+    body: PassageSelectionUpsert,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
+):
+    """Create or update the current user's passage selections for one chunk under a test case.
+
+    An additive refinement of chunk labeling: within a chunk the labeler judged relevant, each
+    passage is marked helps (``relevant=1``) or does-not-help (``relevant=0``). Rows are
+    per-annotator (keyed by ``(test_id, chunk_id, passage_id, labeled_by)``), so this only ever
+    touches the caller's own selections — the chunk label and other annotators are untouched.
+    """
+    for item in body.passages:
+        if not is_valid_passage_relevance(item.relevant):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": {
+                        "code": "INVALID_PASSAGE_GRADE",
+                        "message": "relevant must be 0 or 1",
+                    }
+                },
+            )
+        if item.passage_source not in PASSAGE_SOURCES:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": {
+                        "code": "INVALID_PASSAGE_SOURCE",
+                        "message": f"passage_source must be one of {PASSAGE_SOURCES}",
+                    }
+                },
+            )
+
+    existing = (
+        await db.execute(
+            select(PassageRelevanceLabel).where(
+                PassageRelevanceLabel.project_id == project.id,
+                PassageRelevanceLabel.labeled_by == user.id,
+                PassageRelevanceLabel.test_id == body.test_id,
+                PassageRelevanceLabel.chunk_id == body.chunk_id,
+            )
+        )
+    ).scalars().all()
+    by_pid = {lbl.passage_id: lbl for lbl in existing}
+
+    saved = 0
+    for item in body.passages:
+        current = by_pid.get(item.passage_id)
+        if current is None:
+            db.add(
+                PassageRelevanceLabel(
+                    project_id=project.id,
+                    test_id=body.test_id,
+                    chunk_id=body.chunk_id,
+                    passage_id=item.passage_id,
+                    relevant=item.relevant,
+                    passage_source=item.passage_source,
+                    section_path=item.section_path,
+                    text_preview=item.text_preview,
+                    labeled_by=user.id,
+                )
+            )
+        else:
+            current.relevant = item.relevant
+            current.passage_source = item.passage_source
+            if item.section_path is not None:
+                current.section_path = item.section_path
+            if item.text_preview is not None:
+                current.text_preview = item.text_preview
         saved += 1
 
     await db.flush()

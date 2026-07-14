@@ -14,6 +14,8 @@ import type {
   LabelingPoolResponse,
   ChunkLabelUpsert,
   ChunkMetadataResponse,
+  ChunkPassagesResponse,
+  PassageSelectionItem,
   AgreementReport,
   AiJudgeResponse,
   AiJudgePreviewResponse,
@@ -307,6 +309,27 @@ export const getChunkMetadata = (chunkId: string) =>
   request<ChunkMetadataResponse>(
     `/api/pipeline/chunk-metadata?chunk_id=${encodeURIComponent(chunkId)}`,
   );
+
+// The finer-grained passages of one pooled chunk (sentence-level), for the passage-selection
+// panel. Fetched lazily on expand — the chunk grade stays the primary label; this is a refinement.
+export const getChunkPassages = (testId: string, chunkId: string) => {
+  const params = new URLSearchParams({ test_id: testId, chunk_id: chunkId });
+  return request<ChunkPassagesResponse>(
+    `/api/pipeline/chunk-passages?${params.toString()}`,
+  );
+};
+
+// Upsert the caller's own passage selections for one chunk under a test case (binary: 1 helps,
+// 0 does not). Only the caller's rows are touched; the chunk label is untouched.
+export const savePassageSelections = (
+  testId: string,
+  chunkId: string,
+  passages: PassageSelectionItem[],
+) =>
+  request<{ saved: number }>(`/api/pipeline/passage-labels`, {
+    method: "POST",
+    body: JSON.stringify({ test_id: testId, chunk_id: chunkId, passages }),
+  });
 
 export const getRetrievalTargets = () =>
   request<RetrievalTargets>(`/api/pipeline/targets`);

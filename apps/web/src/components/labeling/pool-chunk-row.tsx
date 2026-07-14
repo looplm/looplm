@@ -5,11 +5,13 @@ import { getChunkMetadata, type PooledChunkForLabeling } from "@/lib/api";
 import { gradeTint } from "./types";
 import { GradeSelector } from "./grade-selector";
 import { AiGradeBadge, ProvenanceBadges, pickIndexText } from "./chunk-row";
+import { PassagePanel } from "./passage-panel";
 
 // A pooled candidate chunk (from an index search head). Lighter than ChunkRow — no rank or
 // document locators — but judgeable the same way, with provenance badges and full-text fetch.
 export function PoolChunkRow({
   chunk,
+  testId,
   relevance,
   disabled,
   indexConnected,
@@ -18,6 +20,8 @@ export function PoolChunkRow({
   onClear,
 }: {
   chunk: PooledChunkForLabeling;
+  // The test case this chunk is being judged under — passage selections hang off (test_id, chunk_id).
+  testId: string;
   relevance: number | null;
   disabled: boolean;
   indexConnected: boolean;
@@ -110,6 +114,17 @@ export function PoolChunkRow({
             </span>
           )}
         </div>
+
+        {/* Passage-selection refinement: only offered once the chunk is judged relevant — it
+            narrows *which* passages inside a relevant chunk help, so it's moot for a 0 grade. */}
+        {relevance != null && relevance >= 1 && (
+          <PassagePanel
+            testId={testId}
+            chunkId={chunk.chunk_id}
+            canEdit={!disabled}
+            indexConnected={indexConnected}
+          />
+        )}
       </div>
 
       <div className="shrink-0 flex items-center gap-2">
