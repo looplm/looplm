@@ -2836,6 +2836,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipeline/chunk-passages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Chunk Passages
+         * @description The finer-grained passages of one pooled chunk, for the passage-selection panel.
+         *
+         *     An additive refinement of chunk labeling: the chunk grade stays primary; here a labeler can
+         *     additionally mark which passages *within* the chunk help answer the query. Fetches the chunk's
+         *     full body from the index and splits it locally into sentence/line passages (the *A* source);
+         *     the viewer's own prior selections are overlaid so the checkboxes reflect their state. Returns
+         *     ``available=False`` when no index is connected or the chunk has no splittable text.
+         */
+        get: operations["get_chunk_passages_api_pipeline_chunk_passages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipeline/graph": {
         parameters: {
             query?: never;
@@ -3116,6 +3142,31 @@ export interface paths {
          *     label that doesn't exist still succeeds, with ``deleted=False``.
          */
         delete: operations["delete_label_api_pipeline_labels_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/passage-labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upsert Passage Labels
+         * @description Create or update the current user's passage selections for one chunk under a test case.
+         *
+         *     An additive refinement of chunk labeling: within a chunk the labeler judged relevant, each
+         *     passage is marked helps (``relevant=1``) or does-not-help (``relevant=0``). Rows are
+         *     per-annotator (keyed by ``(test_id, chunk_id, passage_id, labeled_by)``), so this only ever
+         *     touches the caller's own selections — the chunk label and other annotators are untouched.
+         */
+        post: operations["upsert_passage_labels_api_pipeline_passage_labels_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5373,6 +5424,37 @@ export interface components {
              * @default false
              */
             provider_connected: boolean;
+        };
+        /**
+         * ChunkPassagesResponse
+         * @description The passages of one pooled chunk, for the passage-selection panel.
+         *
+         *     ``provider_connected`` is False when the project has no index provider (nothing to split);
+         *     ``available`` is False when the chunk isn't found in the index or carries no splittable text.
+         *     ``passage_source`` records which source produced these passages (``rde`` when the durable
+         *     sub-passages were used, ``chunk_split`` for the local fallback).
+         */
+        ChunkPassagesResponse: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /** Chunk Id */
+            chunk_id: string;
+            /** Passage Source */
+            passage_source?: string | null;
+            /** Passages */
+            passages?: components["schemas"]["PassageForLabeling"][];
+            /**
+             * Provider Connected
+             * @default false
+             */
+            provider_connected: boolean;
+            /** Section Path */
+            section_path?: string | null;
+            /** Test Id */
+            test_id: string;
         };
         /** ChunkQualityPasses */
         ChunkQualityPasses: {
@@ -9041,6 +9123,60 @@ export interface components {
              * @default false
              */
             multivalued: boolean;
+        };
+        /**
+         * PassageForLabeling
+         * @description One finer-grained passage of a chunk, presented for a helps/doesn't-help selection.
+         *
+         *     Passages are shown grouped by ``section_path`` (the chunk's heading context) as a checkbox
+         *     list under the chunk. ``relevant`` is the viewer's current binary selection (1 = helps,
+         *     0 = unchecked, ``None`` = never touched — treated as still-relevant until they uncheck it).
+         */
+        PassageForLabeling: {
+            /** Labeled By */
+            labeled_by?: string | null;
+            /** Passage Id */
+            passage_id: string;
+            /** Passage Source */
+            passage_source: string;
+            /** Relevant */
+            relevant?: number | null;
+            /** Section Path */
+            section_path?: string | null;
+            /** Text */
+            text: string;
+        };
+        /**
+         * PassageSelectionItem
+         * @description One passage's selection state in an upsert batch.
+         */
+        PassageSelectionItem: {
+            /** Passage Id */
+            passage_id: string;
+            /** Passage Source */
+            passage_source: string;
+            /** Relevant */
+            relevant: number;
+            /** Section Path */
+            section_path?: string | null;
+            /** Text Preview */
+            text_preview?: string | null;
+        };
+        /**
+         * PassageSelectionUpsert
+         * @description Batch of passage selections for one chunk under one test case (the labeler's own rows).
+         *
+         *     Passages omitted from ``passages`` are left untouched; a passage set ``relevant=0`` records an
+         *     explicit "does not help" (distinct from unlabeled). The whole batch shares one ``(test_id,
+         *     chunk_id)`` — the chunk stays the primary labeled unit these hang off.
+         */
+        PassageSelectionUpsert: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Passages */
+            passages?: components["schemas"]["PassageSelectionItem"][];
+            /** Test Id */
+            test_id: string;
         };
         /** PermissionsResponse */
         PermissionsResponse: {
@@ -17676,6 +17812,40 @@ export interface operations {
             };
         };
     };
+    get_chunk_passages_api_pipeline_chunk_passages_get: {
+        parameters: {
+            query: {
+                test_id: string;
+                chunk_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkPassagesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_retrieval_pipeline_api_pipeline_graph_get: {
         parameters: {
             query?: {
@@ -18103,6 +18273,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_passage_labels_api_pipeline_passage_labels_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PassageSelectionUpsert"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
