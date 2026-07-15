@@ -1,5 +1,7 @@
 "use client";
 
+import { PassageOffsetBackfill } from "./passage-offset-backfill";
+
 // The labeling index's controls bar: overall progress (cases complete) and the dataset-level bulk
 // actions (recompute every pool, AI-judge every case) kept here as a secondary path — the primary
 // flow is per-question in the workbench. Split out so the page stays focused on data + handlers.
@@ -102,6 +104,7 @@ export function LabelingControls({
               >
                 Recompute all
               </button>
+              <PassageOffsetBackfill canEdit={canEdit} />
               <span className="h-4 w-px bg-gray-200 dark:bg-slate-700" aria-hidden />
               {/* AI-judge cluster: the shared option, then the two scopes it governs. */}
               <label

@@ -16,6 +16,8 @@ import type {
   ChunkMetadataResponse,
   ChunkPassagesResponse,
   PassageSelectionItem,
+  PassageOffsetBackfillRun,
+  PassageOffsetBackfillLatest,
   AgreementReport,
   AiJudgeResponse,
   AiJudgePreviewResponse,
@@ -330,6 +332,17 @@ export const savePassageSelections = (
     method: "POST",
     body: JSON.stringify({ test_id: testId, chunk_id: chunkId, passages }),
   });
+
+// Launch the passage document-offset backfill for the current project (anchors null-offset
+// selections once their chunk carries chunk_char_start). Returns the created run; poll for status.
+export const startPassageOffsetBackfill = () =>
+  request<PassageOffsetBackfillRun>(`/api/pipeline/passage-offset-backfill`, {
+    method: "POST",
+  });
+
+// The project's most recent backfill run (status + per-outcome tallies), or { run: null }.
+export const getPassageOffsetBackfillLatest = () =>
+  request<PassageOffsetBackfillLatest>(`/api/pipeline/passage-offset-backfill/latest`);
 
 export const getRetrievalTargets = () =>
   request<RetrievalTargets>(`/api/pipeline/targets`);

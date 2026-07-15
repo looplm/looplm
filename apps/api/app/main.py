@@ -50,6 +50,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.models.passage_labels import (  # noqa: F401 — ensure table is created
         PassageRelevanceLabel,
     )
+    from app.models.passage_offset_backfill import (  # noqa: F401 — ensure table is created
+        PassageOffsetBackfillRun,
+    )
     from app.models.chunk_quality import ChunkQualityRun  # noqa: F401 — ensure table is created
     from app.models.retrieval_runs import RetrievalRun  # noqa: F401 — ensure table is created
     from app.models.retrieval_metrics_jobs import (  # noqa: F401 — ensure table is created
@@ -150,6 +153,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await session.commit()
         if result.rowcount:
             logger.warning("Reconciled %d chunk quality run(s) orphaned by restart", result.rowcount)
+
+    # Reconcile passage-offset backfill runs orphaned by a restart the same way.
+    async with async_session() as session:
+        result = await session.execute(
+            _sa_update(PassageOffsetBackfillRun)
+            .where(PassageOffsetBackfillRun.status.in_(("pending", "running")))
+            .values(
+                status="failed",
+                error="Run interrupted by server restart",
+                completed_at=_dt.now(_tz.utc),
+            )
+        )
+        await session.commit()
+        if result.rowcount:
+            logger.warning(
+                "Reconciled %d passage offset backfill run(s) orphaned by restart", result.rowcount
+            )
 
     # Start batch eval poller
     from app.services.batch_poller import start_batch_poller, stop_batch_poller

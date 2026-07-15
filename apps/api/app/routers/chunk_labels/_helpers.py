@@ -43,47 +43,16 @@ logger = logging.getLogger(__name__)
 # re-spending an LLM call.
 LABELING_QUERIES_META_KEY = "labeling_queries"
 
-# Index fields that hold a chunk's full body, in priority order. Mirrors the web client's
-# INDEX_TEXT_FIELDS (chunk-row.tsx) so the judge reads the same text "Show full chunk" renders.
-INDEX_TEXT_FIELDS = ("chunk_text", "content", "text", "chunkText")
-
-# Index fields that hold a chunk's heading/section context, in priority order. Used as the display
-# grouping for the passage-selection panel (the section header labels the checkbox list).
-INDEX_HEADING_FIELDS = ("heading_context", "headingContext", "section_path", "section", "headings")
-
-# Index fields that hold a chunk's character start offset into the parsed document, in priority
-# order. Emitted by the rde indexer's markdown/DI chunker (``chunk_char_start``); absent on legacy
-# sliding-window chunker pages. Lets the passage split be anchored to document coordinates so a
-# selection survives re-chunking (the *A+* path).
-INDEX_CHAR_START_FIELDS = ("chunk_char_start", "char_start", "chunkCharStart")
-
-
-def _first_int_field(fields: dict, names: tuple[str, ...]) -> int | None:
-    """First integer value among ``names`` in an index document, else None.
-
-    Booleans are ``int`` subclasses in Python but never a valid offset, so they're skipped.
-    """
-    for name in names:
-        v = fields.get(name)
-        if isinstance(v, bool):
-            continue
-        if isinstance(v, int):
-            return v
-    return None
-
-
-def _first_str_field(fields: dict, names: tuple[str, ...]) -> str | None:
-    """First non-empty string value among ``names`` in an index document, else None."""
-    for name in names:
-        v = fields.get(name)
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-        # Heading context is sometimes a list of ancestor headings; join it.
-        if isinstance(v, (list, tuple)) and v:
-            joined = " › ".join(str(p).strip() for p in v if str(p).strip())
-            if joined:
-                return joined
-    return None
+# Index-field constants + readers live in the service layer (app.services.index_fields) so both
+# routers and background services share them without importing each other. Re-exported here under
+# the underscore names this module's callers already use.
+from app.services.index_fields import (  # noqa: E402,F401 — re-exported for this package's routers
+    INDEX_CHAR_START_FIELDS,
+    INDEX_HEADING_FIELDS,
+    INDEX_TEXT_FIELDS,
+    first_int_field as _first_int_field,
+    first_str_field as _first_str_field,
+)
 
 
 def _display_name(email: str | None) -> str | None:

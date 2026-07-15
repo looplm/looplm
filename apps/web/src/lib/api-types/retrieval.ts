@@ -238,6 +238,28 @@ export interface PassageSelectionItem {
   char_end?: number | null;
 }
 
+// One passage document-offset backfill run's status + per-outcome tallies. `anchored` is rows
+// given offsets; the rest explain skips (see the endpoint docstring).
+export interface PassageOffsetBackfillRun {
+  id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  total_chunks: number;
+  processed_chunks: number;
+  anchored: number;
+  no_offset: number;
+  chunk_missing: number;
+  no_split_match: number;
+  drifted: number;
+  error?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+}
+
+export interface PassageOffsetBackfillLatest {
+  run: PassageOffsetBackfillRun | null;
+}
+
 // The queries a case's pool was built from: the base question + any agentic sub-queries.
 export interface LabelingQueries {
   base: string[];

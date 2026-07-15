@@ -82,6 +82,8 @@ export type {
   ChunkPassagesResponse,
   PassageForLabeling,
   PassageSelectionItem,
+  PassageOffsetBackfillRun,
+  PassageOffsetBackfillLatest,
   AgreementReport,
   Disagreement,
   RouteNode,

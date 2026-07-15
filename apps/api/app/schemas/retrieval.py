@@ -9,7 +9,9 @@ observable in the traces is carried per-node via ``status``.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -308,6 +310,41 @@ class PassageSelectionUpsert(BaseModel):
     test_id: str
     chunk_id: str
     passages: list[PassageSelectionItem] = Field(default_factory=list)
+
+
+# --- Passage document-offset backfill (maintenance job) --------------------------------
+
+
+class PassageOffsetBackfillRunResponse(BaseModel):
+    """One passage document-offset backfill run's status + per-outcome tallies.
+
+    ``anchored`` is rows given fresh document offsets; the rest are skips explaining why a label
+    couldn't be anchored: ``no_offset`` (chunk's index doc still lacks ``chunk_char_start``),
+    ``chunk_missing`` (chunk id gone from the index — likely re-chunked), ``no_split_match``
+    (passage id not produced by the current split), ``drifted`` (text changed since labeling).
+    """
+
+    id: UUID
+    status: str  # pending | running | completed | failed
+    total_chunks: int
+    processed_chunks: int
+    anchored: int
+    no_offset: int
+    chunk_missing: int
+    no_split_match: int
+    drifted: int
+    error: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PassageOffsetBackfillLatest(BaseModel):
+    """The project's most recent backfill run, or ``None`` if it has never been run."""
+
+    run: PassageOffsetBackfillRunResponse | None = None
 
 
 class LabelingQueries(BaseModel):

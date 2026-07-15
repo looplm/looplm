@@ -11,7 +11,7 @@ from fastapi import APIRouter
 
 from app.auth import require_section
 
-from . import diagnosis, llm_ops, operations, views
+from . import backfill, diagnosis, llm_ops, operations, views
 
 router = APIRouter(
     prefix="/api/pipeline",
@@ -26,5 +26,6 @@ router.include_router(views.router)
 router.include_router(operations.router)
 router.include_router(llm_ops.router)
 router.include_router(diagnosis.router)
+router.include_router(backfill.router)
 
 __all__ = ["router"]
