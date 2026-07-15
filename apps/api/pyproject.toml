@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "looplm-api"
-version = "0.33.0"
+version = "0.34.0"
 description = "LoopLM API - LLM debugging platform backend"
 package-mode = false
 
