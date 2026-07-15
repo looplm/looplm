@@ -47,6 +47,27 @@ def test_split_empty_text_yields_nothing():
     assert split_chunk_into_passages("c3", None) == []
 
 
+def test_split_offsets_are_none_without_chunk_anchor():
+    passages = split_chunk_into_passages("c4", "First sentence here. Second one follows!")
+    assert all(p.char_start is None and p.char_end is None for p in passages)
+
+
+def test_split_offsets_are_document_anchored_when_chunk_offset_known():
+    # A+ path: with the chunk's own document offset, each passage carries [char_start, char_end)
+    # into the parsed document, and text[start-anchor:end-anchor] recovers the passage's source.
+    text = "First sentence here. Second one follows!\n- a list item long enough to keep"
+    anchor = 1000
+    passages = split_chunk_into_passages("c5", text, chunk_char_start=anchor)
+    assert passages
+    for p in passages:
+        assert p.char_start is not None and p.char_end is not None
+        assert p.char_start >= anchor and p.char_end > p.char_start
+        assert text[p.char_start - anchor : p.char_end - anchor] == p.text
+    # Passages are non-overlapping and in reading order.
+    bounds = [(p.char_start, p.char_end) for p in passages]
+    assert all(a[1] <= b[0] for a, b in zip(bounds, bounds[1:]))
+
+
 def test_is_valid_passage_relevance():
     assert is_valid_passage_relevance(0)
     assert is_valid_passage_relevance(1)

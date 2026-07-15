@@ -252,6 +252,8 @@ async def upsert_passage_labels(
                     passage_source=item.passage_source,
                     section_path=item.section_path,
                     text_preview=item.text_preview,
+                    char_start=item.char_start,
+                    char_end=item.char_end,
                     labeled_by=user.id,
                 )
             )
@@ -262,6 +264,11 @@ async def upsert_passage_labels(
                 current.section_path = item.section_path
             if item.text_preview is not None:
                 current.text_preview = item.text_preview
+            # Don't clobber a known offset with a null (e.g. a re-save after the index lost offsets).
+            if item.char_start is not None:
+                current.char_start = item.char_start
+            if item.char_end is not None:
+                current.char_end = item.char_end
         saved += 1
 
     await db.flush()

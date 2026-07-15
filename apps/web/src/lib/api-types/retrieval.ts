@@ -211,6 +211,9 @@ export interface PassageForLabeling {
   passage_source: string;
   relevant?: number | null;
   labeled_by?: string | null;
+  // Document-anchored offsets [char_start, char_end) into the parsed doc; null on legacy pages.
+  char_start?: number | null;
+  char_end?: number | null;
 }
 
 export interface ChunkPassagesResponse {
@@ -230,6 +233,9 @@ export interface PassageSelectionItem {
   passage_source: string;
   section_path?: string | null;
   text_preview?: string | null;
+  // Document-anchored offsets [char_start, char_end) into the parsed doc; null on legacy pages.
+  char_start?: number | null;
+  char_end?: number | null;
 }
 
 // The queries a case's pool was built from: the base question + any agentic sub-queries.

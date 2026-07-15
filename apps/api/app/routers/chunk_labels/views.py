@@ -36,10 +36,12 @@ from app.services.passage_split import split_chunk_into_passages
 from app.services.query_planner import DEFAULT_QUERY_PLANNER_INSTRUCTIONS
 
 from ._helpers import (
+    INDEX_CHAR_START_FIELDS,
     INDEX_HEADING_FIELDS,
     INDEX_TEXT_FIELDS,
     _dataset_case_query,
     _display_name,
+    _first_int_field,
     _first_str_field,
     _list_dataset_options,
     _project_labels,
@@ -212,7 +214,13 @@ async def get_chunk_passages(
 
     text = _first_str_field(fields, INDEX_TEXT_FIELDS)
     heading = _first_str_field(fields, INDEX_HEADING_FIELDS)
-    split = split_chunk_into_passages(chunk_id, text, section_path=heading)
+    # The chunk's own offset into the parsed document (rde markdown/DI chunker); None on legacy
+    # pages. When present, the split is anchored to document coordinates so selections survive
+    # re-chunking (the A+ path); when absent, passage offsets stay None.
+    chunk_char_start = _first_int_field(fields, INDEX_CHAR_START_FIELDS)
+    split = split_chunk_into_passages(
+        chunk_id, text, section_path=heading, chunk_char_start=chunk_char_start
+    )
     if not split:
         return ChunkPassagesResponse(
             test_id=test_id,
@@ -245,6 +253,8 @@ async def get_chunk_passages(
             passage_source=p.passage_source,
             relevant=relevant_by_pid.get(p.passage_id),
             labeled_by=viewer_name if p.passage_id in relevant_by_pid else None,
+            char_start=p.char_start,
+            char_end=p.char_end,
         )
         for p in split
     ]

@@ -95,6 +95,15 @@ class PassageRelevanceLabel(Base):
     section_path = Column(Text, nullable=True)
     text_preview = Column(Text, nullable=True)
 
+    # Document-anchored offsets: the passage's [char_start, char_end) into the parsed document,
+    # derived by anchoring the local split to the chunk's own ``chunk_char_start`` from the index
+    # (doc offset = chunk_char_start + offset-within-chunk). These share the parsed-markdown
+    # coordinate space, so a selection can be re-matched to a *new* chunking by offset overlap —
+    # i.e. it survives re-chunking, unlike the ``{chunk_id}#s{n}`` passage_id. NULL when the chunk
+    # carries no offset (legacy-chunker pages, where the index lacks ``chunk_char_start``).
+    char_start = Column(Integer, nullable=True)
+    char_end = Column(Integer, nullable=True)
+
     # Non-human annotator identity (e.g. ``AI``); NULL for human labels, where the annotator is
     # ``labeled_by``. A non-NULL annotator means ``labeled_by`` is NULL.
     annotator = Column(String(64), nullable=True)

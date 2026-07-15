@@ -258,6 +258,10 @@ class PassageForLabeling(BaseModel):
     # The viewer's binary selection (1 = helps, 0 = unchecked), or None when unlabeled.
     relevant: int | None = None
     labeled_by: str | None = None
+    # Document-anchored offsets [char_start, char_end) into the parsed document, or None when the
+    # chunk carries no offset (legacy-chunker pages). Round-tripped so a saved selection records them.
+    char_start: int | None = None
+    char_end: int | None = None
 
 
 class ChunkPassagesResponse(BaseModel):
@@ -287,6 +291,10 @@ class PassageSelectionItem(BaseModel):
     passage_source: str
     section_path: str | None = None
     text_preview: str | None = None
+    # Document-anchored offsets [char_start, char_end) into the parsed document; persisted so the
+    # selection survives re-chunking. None on legacy-chunker pages (index carries no chunk offset).
+    char_start: int | None = None
+    char_end: int | None = None
 
 
 class PassageSelectionUpsert(BaseModel):

@@ -57,6 +57,8 @@ export function PassagePanel({
         passage_source: p.passage_source,
         section_path: p.section_path,
         text_preview: p.text,
+        char_start: p.char_start,
+        char_end: p.char_end,
       },
     ]).catch(() => {
       toast.error("Failed to save passage selection");
