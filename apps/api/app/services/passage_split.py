@@ -8,6 +8,12 @@ back here: split the pooled chunk's ``chunk_text`` locally into sentence/line pa
 heading context. These ids are chunk-derived (``{chunk_id}#s{n}``) so they orphan when the index
 is re-chunked — acceptable for the fallback, whose only job is to give the same UX.
 
+Chunk text extracted from PDFs is typically **hard-wrapped** mid-sentence at a fixed column width,
+so a physical line break is not a sentence boundary. We therefore *reflow* consecutive prose lines
+back into a paragraph before sentence-splitting; only genuinely structural lines (blank line, list
+item, table row, heading) act as boundaries. Without this a single wrapped sentence would surface
+as several stray checkboxes.
+
 The split is deterministic (same text → same passages/ids) so a passage a labeler selected keeps
 its id across visits as long as the chunk text is unchanged.
 """
@@ -28,6 +34,28 @@ _MIN_PASSAGE_CHARS = 12
 # whitespace. Kept intentionally simple — this is a display/labeling aid, not linguistic parsing;
 # the durable, offset-anchored split is rde's job (the B path).
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+")
+
+# A list marker ("- ", "* ", "+ ", "1. ", "1) ") or ATX heading ("# " … "###### ") at line start.
+# These lines — plus table rows ("| a | b |") — are whole judgeable units, never joined into a
+# reflowed paragraph and never broken at internal punctuation.
+_LIST_MARKER = re.compile(r"^([-*+]\s|\d+[.)]\s)")
+_HEADING = re.compile(r"^#{1,6}\s")
+
+# Every newline char, replaced 1:1 with a space when reflowing so the reflowed paragraph is
+# length-preserving — offsets into it map straight back to the original chunk text.
+_NEWLINE_CHAR = re.compile(r"[\r\n]")
+
+
+def _is_whole_line_unit(stripped: str) -> bool:
+    """True for a line that is its own passage — a list item, table row, or heading.
+
+    Such a line is neither joined into a reflowed prose paragraph nor split at internal punctuation.
+    """
+    return (
+        bool(_LIST_MARKER.match(stripped))
+        or stripped.startswith("|")
+        or bool(_HEADING.match(stripped))
+    )
 
 
 @dataclass
@@ -63,10 +91,8 @@ def _split_line_spans(line: str, base: int) -> list[_Span]:
     if not stripped:
         return []
     lead = line.index(stripped)  # leading-whitespace length; stripped is a contiguous substring
-    # List markers ("- ", "* ", "1. ", "1) ") and table rows ("| a | b |") stay whole.
-    is_list = bool(re.match(r"^([-*+]\s|\d+[.)]\s)", stripped))
-    is_table_row = stripped.startswith("|")
-    if is_list or is_table_row:
+    # List markers, table rows, and headings stay whole (see ``_is_whole_line_unit``).
+    if _is_whole_line_unit(stripped):
         start = base + lead
         return [(stripped, start, start + len(stripped))]
     parts = [p.strip() for p in _SENTENCE_BOUNDARY.split(stripped) if p.strip()]
@@ -113,8 +139,10 @@ def split_chunk_into_passages(
 ) -> list[SplitPassage]:
     """Deterministically split a chunk's text into sentence/line passages.
 
-    Splits on line breaks first (so list items and table rows stay whole), then on sentence
-    boundaries within prose lines, coalescing fragments too short to judge on their own. Ids are
+    Reflows consecutive prose lines into a paragraph (undoing PDF hard-wrapping), then splits each
+    paragraph on sentence boundaries, coalescing fragments too short to judge on their own. Only
+    structural lines act as boundaries: a blank line separates paragraphs, and a list item / table
+    row / heading is its own whole unit (never joined, never split at internal punctuation). Ids are
     ``{chunk_id}#s{n}`` (1-indexed, in reading order) so a selection keeps its id across visits as
     long as the text is unchanged.
 
@@ -126,16 +154,41 @@ def split_chunk_into_passages(
     if not text or not text.strip():
         return []
 
-    # Coalesce short fragments *within* a line only. A list item or table row is a whole line of
-    # its own, so per-line coalescing leaves it intact (nothing to merge it with); only the
-    # sentence fragments of a prose line get merged. Cross-line merging would wrongly fold a short
-    # heading line or a short table row into its neighbour.
     spans: list[_Span] = []
+    # A prose paragraph in progress: [para_start, para_end) into the chunk text, spanning one or
+    # more hard-wrapped lines. Flushed (reflowed and sentence-split) at the next structural line,
+    # blank line, or end of text.
+    para_start: int | None = None
+    para_end = 0
+
+    def _flush_paragraph() -> None:
+        nonlocal para_start
+        if para_start is None:
+            return
+        # The slice covers the prose lines plus the newline chars between them; replacing each
+        # newline with a space is length-preserving, so sentence offsets map 1:1 back to the chunk.
+        reflowed = _NEWLINE_CHAR.sub(" ", text[para_start:para_end])
+        spans.extend(_coalesce_short_spans(_split_line_spans(reflowed, para_start)))
+        para_start = None
+
     offset = 0
     for line in text.splitlines(keepends=True):
         content = line.rstrip("\r\n")
-        spans.extend(_coalesce_short_spans(_split_line_spans(content, offset)))
+        start = offset
         offset += len(line)
+        stripped = content.strip()
+        if not stripped:  # blank line — paragraph boundary, nothing to emit
+            _flush_paragraph()
+            continue
+        if _is_whole_line_unit(stripped):  # list item / table row / heading — its own unit
+            _flush_paragraph()
+            spans.extend(_coalesce_short_spans(_split_line_spans(content, start)))
+            continue
+        # Prose line — accumulate into the current paragraph so wrapped sentences reflow whole.
+        if para_start is None:
+            para_start = start
+        para_end = start + len(content)
+    _flush_paragraph()
 
     passages: list[SplitPassage] = []
     for n, (part_text, start, end) in enumerate(spans, start=1):

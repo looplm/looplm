@@ -33,6 +33,51 @@ def test_split_sentences_and_ids_are_stable():
     assert [p.passage_id for p in again] == ["c1#s1", "c1#s2"]
 
 
+def test_split_reflows_hard_wrapped_sentence():
+    # PDF extraction wraps one sentence across physical lines — it must stay ONE passage, not one
+    # per line, and the sentence after the period must be its own passage.
+    text = (
+        "Die erste Alternative ist hinreichend durch die Grundschutz-Vorgehensweise\n"
+        "und die BSI-Standards beschrieben und wird seit vielen Jahren in der Praxis\n"
+        "angewandt. Für die zweite Alternative gibt es mit der Normenreihe ISO27001\n"
+        "ebenfalls ausreichend Dokumentationen."
+    )
+    passages = split_chunk_into_passages("w1", text)
+    assert [p.passage_id for p in passages] == ["w1#s1", "w1#s2"]
+    assert passages[0].text == (
+        "Die erste Alternative ist hinreichend durch die Grundschutz-Vorgehensweise "
+        "und die BSI-Standards beschrieben und wird seit vielen Jahren in der Praxis "
+        "angewandt."
+    )
+    assert passages[1].text.startswith("Für die zweite Alternative")
+
+
+def test_split_reflow_keeps_paragraph_and_offsets_aligned():
+    # A blank line separates paragraphs; a wrapped sentence within one reflows. Offsets stay
+    # length-preserving so the anchored range bounds the passage in document coordinates.
+    text = "One sentence wrapped\nover two lines here.\n\nA second paragraph stands alone."
+    passages = split_chunk_into_passages("w2", text, chunk_char_start=500)
+    assert [p.text for p in passages] == [
+        "One sentence wrapped over two lines here.",
+        "A second paragraph stands alone.",
+    ]
+    for p in passages:
+        assert p.char_start is not None and p.char_end is not None
+        # Reflow swaps the internal newline for a space, so the slice matches the passage text once
+        # its own newlines are normalised — and the range is the right length.
+        assert p.char_end - p.char_start == len(p.text)
+        assert text[p.char_start - 500 : p.char_end - 500].replace("\n", " ") == p.text
+
+
+def test_split_heading_line_stays_separate_from_following_prose():
+    # An ATX heading must not be glued to the sentence that follows it under reflow.
+    text = "## Section Title\nThis is the body sentence that follows the heading."
+    passages = split_chunk_into_passages("w3", text)
+    texts = [p.text for p in passages]
+    assert "## Section Title" in texts
+    assert any(t.startswith("This is the body sentence") for t in texts)
+
+
 def test_split_keeps_list_items_and_table_rows_whole():
     text = "Steps:\n- do the first thing\n- do the second thing\n| a | b |"
     passages = split_chunk_into_passages("c2", text)
