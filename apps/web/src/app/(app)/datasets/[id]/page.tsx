@@ -249,7 +249,7 @@ export default function DatasetDetailPage() {
           sub={`of ${activeCases.length}`}
         />
         <StatCard
-          label="With Conditions"
+          label="With Metadata"
           value={activeCases.filter((c) => c.team_filter.length > 0 || Object.keys(c.context_filters).length > 0).length}
         />
         <StatCard
@@ -297,7 +297,7 @@ export default function DatasetDetailPage() {
               <tr className="border-b border-gray-100 dark:border-slate-800 text-left text-gray-500 dark:text-slate-400">
                 <th className="px-4 py-3 font-medium">Test ID</th>
                 <th className="px-4 py-3 font-medium">Prompt</th>
-                <th className="px-4 py-3 font-medium">Conditions</th>
+                <th className="px-4 py-3 font-medium">Metadata</th>
                 <th className="px-4 py-3 font-medium w-36"></th>
               </tr>
             </thead>
