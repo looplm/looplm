@@ -26,6 +26,7 @@ from .dataset_conversation import (
     _tc_to_item,
     build_contextualized_prompt,
     load_trace_conversation_messages,
+    resolve_validator_names,
     strip_personal_greeting,
     summarize_conversation,
 )
@@ -55,6 +56,7 @@ __all__ = [
     "generate_expected_answer",
     "load_trace_conversation_messages",
     "load_trace_source_urls",
+    "resolve_validator_names",
     "score_dataset_relevance",
     "strip_personal_greeting",
     "summarize_conversation",

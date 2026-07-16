@@ -5,11 +5,36 @@ from __future__ import annotations
 import logging
 import re
 from typing import Any
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Span, TestCase
+from app.models.user import User
 from app.schemas.datasets import TestCaseItem
 
 logger = logging.getLogger(__name__)
+
+
+def _display_name(email: str) -> str:
+    """Human-friendly label for a user: the local part of their email."""
+    return email.split("@", 1)[0] if email else email
+
+
+async def resolve_validator_names(
+    db: AsyncSession, cases: list[TestCase]
+) -> dict[UUID, str]:
+    """Map each case's ``validated_by`` user id to a display name (email local part).
+
+    Batch-loads the referenced users in one query. Ids with no matching user
+    (e.g. a deleted account after ``SET NULL`` on the row) are simply absent.
+    """
+    ids = {tc.validated_by for tc in cases if tc.validated_by is not None}
+    if not ids:
+        return {}
+    result = await db.execute(select(User).where(User.id.in_(ids)))
+    return {u.id: _display_name(u.email) for u in result.scalars().all()}
 
 
 # Strip leading personal salutations from assistant responses before they
@@ -59,7 +84,7 @@ def strip_personal_greeting(text: str | None, known_name: str | None = None) -> 
     return stripped
 
 
-def _tc_to_item(tc: TestCase) -> TestCaseItem:
+def _tc_to_item(tc: TestCase, validated_by_email: str | None = None) -> TestCaseItem:
     return TestCaseItem(
         id=tc.id,
         dataset_id=tc.dataset_id,
@@ -83,6 +108,9 @@ def _tc_to_item(tc: TestCase) -> TestCaseItem:
         metadata=tc.test_case_metadata or {},
         status=tc.status or "active",
         status_note=tc.status_note,
+        validated=tc.validated or False,
+        validated_at=tc.validated_at,
+        validated_by_email=validated_by_email,
         created_at=tc.created_at,
     )
 

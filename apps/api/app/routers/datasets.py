@@ -29,7 +29,12 @@ from app.schemas.evaluations import PaginationInfo
 
 from app.services.retrieval_config import get_retrieval_span_name
 
-from .dataset_helpers import _tc_to_item, build_suggestions, load_trace_source_urls
+from .dataset_helpers import (
+    _tc_to_item,
+    build_suggestions,
+    load_trace_source_urls,
+    resolve_validator_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +263,7 @@ async def get_dataset(
         select(TestCase).where(TestCase.dataset_id == ds.id).order_by(TestCase.test_id)
     )
     cases = cases_result.scalars().all()
+    names = await resolve_validator_names(db, list(cases))
 
     return TestDatasetDetail(
         id=ds.id,
@@ -266,9 +272,10 @@ async def get_dataset(
         tags=ds.tags or [],
         test_count=len(cases),
         needs_work_count=sum(1 for tc in cases if tc.status == "needs_work"),
+        validated_count=sum(1 for tc in cases if tc.validated),
         created_at=ds.created_at,
         updated_at=ds.updated_at,
-        test_cases=[_tc_to_item(tc) for tc in cases],
+        test_cases=[_tc_to_item(tc, names.get(tc.validated_by)) for tc in cases],
     )
 
 

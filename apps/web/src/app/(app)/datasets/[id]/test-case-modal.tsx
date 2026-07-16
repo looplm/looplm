@@ -11,6 +11,7 @@ export interface TestCaseFormData {
   expected_answer: string;
   config_json: string;
   no_retrieval: boolean;
+  validated: boolean;
   reactivate?: boolean;
 }
 
@@ -34,6 +35,7 @@ export function emptyForm(): TestCaseFormData {
     expected_answer: "",
     config_json: "",
     no_retrieval: false,
+    validated: false,
   };
 }
 
@@ -55,6 +57,7 @@ export function formFromTestCase(tc: TestCaseItem): TestCaseFormData {
       ? JSON.stringify(config, null, 2)
       : "",
     no_retrieval: isNoRetrievalExpected(tc.tags),
+    validated: tc.validated,
   };
 }
 
@@ -170,6 +173,27 @@ export function TestCaseModal({
                     The query intentionally has no relevant documents, e.g. a UI command.
                     Excluded from retrieval metrics; the expected-URL sync and the AI judge
                     skip it. Expected page URLs are cleared on save.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            {/* Validation sign-off */}
+            <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-3">
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.validated}
+                  onChange={(e) => setForm({ ...form, validated: e.target.checked })}
+                  className="mt-0.5 rounded border-gray-300 dark:border-slate-600 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span>
+                  <span className="block font-medium">Validated</span>
+                  <span className="block text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+                    Reviewer sign-off that this test case is correct.
+                    {editingCase?.validated && editingCase.validated_by_email && (
+                      <span className="italic"> Validated by {editingCase.validated_by_email}.</span>
+                    )}
                   </span>
                 </span>
               </label>

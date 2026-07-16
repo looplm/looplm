@@ -44,6 +44,18 @@ function TrashIcon() {
   );
 }
 
+function CheckCircleIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg className="w-4 h-4" fill={filled ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      {filled ? (
+        <path fillRule="evenodd" clipRule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 6.97a.75.75 0 010 1.06l-5.25 5.25a.75.75 0 01-1.06 0l-2.25-2.25a.75.75 0 111.06-1.06l1.72 1.72 4.72-4.72a.75.75 0 011.06 0z" />
+      ) : (
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      )}
+    </svg>
+  );
+}
+
 export default function DatasetDetailPage() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -110,7 +122,7 @@ export default function DatasetDetailPage() {
 
       // The reserved no-retrieval-expected tag is the only tag the UI edits; keep any others.
       const otherTags = (editingCase?.tags ?? []).filter((t) => t !== NO_RETRIEVAL_TAG);
-      const body: Partial<TestCaseCreateBody> & { status?: string; status_note?: string | null } = {
+      const body: Partial<TestCaseCreateBody> & { status?: string; status_note?: string | null; validated?: boolean } = {
         test_id: form.test_id,
         prompt: form.prompt,
         expected_answer: form.expected_answer || undefined,
@@ -130,6 +142,9 @@ export default function DatasetDetailPage() {
         if (editingCase.status === "needs_work" && form.reactivate) {
           body.status = "active";
           body.status_note = null;
+        }
+        if (form.validated !== editingCase.validated) {
+          body.validated = form.validated;
         }
         await updateTestCase(id, editingCase.id, body);
       } else {
@@ -183,6 +198,15 @@ export default function DatasetDetailPage() {
     }
   }
 
+  async function handleToggleValidated(tc: TestCaseItem) {
+    try {
+      await updateTestCase(id, tc.id, { validated: !tc.validated });
+      await load();
+    } catch {
+      // ignore
+    }
+  }
+
   if (loading) return <p className="text-gray-500 dark:text-slate-400">Loading...</p>;
   if (!dataset) return <p className="text-gray-500 dark:text-slate-400">Dataset not found.</p>;
 
@@ -208,7 +232,7 @@ export default function DatasetDetailPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <StatCard
           label="Test Cases"
           value={activeCases.length}
@@ -222,6 +246,12 @@ export default function DatasetDetailPage() {
         <StatCard
           label="With Conditions"
           value={activeCases.filter((c) => c.team_filter.length > 0 || Object.keys(c.context_filters).length > 0).length}
+        />
+        <StatCard
+          label="Validated"
+          value={dataset.validated_count}
+          accent={dataset.validated_count > 0 ? "green" : undefined}
+          sub={`of ${cases.length}`}
         />
         <StatCard
           label="Needs Work"
@@ -280,6 +310,17 @@ export default function DatasetDetailPage() {
                   <td className="px-4 py-3 max-w-xs truncate">{tc.prompt}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-1">
+                      {tc.validated && (
+                        <span
+                          title={`Validated${tc.validated_by_email ? ` by ${tc.validated_by_email}` : ""}`}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                        >
+                          validated
+                          {tc.validated_by_email && (
+                            <span className="font-normal italic opacity-80">by {tc.validated_by_email}</span>
+                          )}
+                        </span>
+                      )}
                       {isNoRetrievalExpected(tc.tags) && (
                         <span
                           title="Negative case: intentionally retrieves nothing; excluded from retrieval metrics"
@@ -293,6 +334,21 @@ export default function DatasetDetailPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleToggleValidated(tc); }}
+                        title={tc.validated
+                          ? `Validated${tc.validated_by_email ? ` by ${tc.validated_by_email}` : ""} — click to un-validate`
+                          : "Mark as validated (reviewer sign-off)"}
+                        aria-label={tc.validated ? "Un-validate test case" : "Mark test case as validated"}
+                        aria-pressed={tc.validated}
+                        className={`p-1.5 rounded-md transition-colors ${
+                          tc.validated
+                            ? "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                            : "text-gray-400 dark:text-slate-500 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-gray-100 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        <CheckCircleIcon filled={tc.validated} />
+                      </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); setNeedsWorkCase(tc); }}
                         title="Mark as needs work (exclude from eval runs)"

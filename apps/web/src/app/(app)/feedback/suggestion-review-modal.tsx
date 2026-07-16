@@ -29,6 +29,7 @@ function formFromSuggestion(sug: TestCaseSuggestion): TestCaseFormData {
       ? JSON.stringify(config, null, 2)
       : "",
     no_retrieval: false,
+    validated: false,
   };
 }
 

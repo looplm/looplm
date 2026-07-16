@@ -87,6 +87,7 @@ class TestCaseUpdate(BaseModel):
     metadata: Optional[dict[str, Any]] = None
     status: Optional[str] = Field(default=None, pattern="^(active|needs_work)$")
     status_note: Optional[str] = None
+    validated: Optional[bool] = None
 
 
 class ExpectedUrlsAdd(BaseModel):
@@ -199,6 +200,9 @@ class TestCaseItem(BaseModel):
     metadata: dict[str, Any]
     status: str = "active"
     status_note: Optional[str] = None
+    validated: bool = False
+    validated_at: Optional[datetime] = None
+    validated_by_email: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -211,6 +215,7 @@ class TestDatasetDetail(BaseModel):
     tags: list[str]
     test_count: int
     needs_work_count: int = 0
+    validated_count: int = 0
     created_at: datetime
     updated_at: datetime
     test_cases: list[TestCaseItem]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,11 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_project, require_write
+from app.auth import get_current_project, get_current_user, require_write
 from app.db import get_db
 from app.models.datasets import is_no_retrieval_expected
 from app.models.models import Integration, TestCase, TestDataset, Trace
 from app.models.project import Project
+from app.models.user import User
 from app.schemas.datasets import (
     ExpectedUrlsAdd,
     ExpectedUrlsResponse,
@@ -32,7 +34,7 @@ from app.services.failure_pattern import normalize_result_test_id
 from app.services.rag_pipeline import build_rag_pipeline, rag_pipeline_summary
 from app.services.retrieval_config import get_rag_span_names, normalize_source_url
 
-from .dataset_helpers import _tc_to_item
+from .dataset_helpers import _tc_to_item, resolve_validator_names
 
 router = APIRouter(tags=["datasets"])
 
@@ -135,6 +137,7 @@ async def update_test_case(
     body: TestCaseUpdate,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
+    user: User = Depends(get_current_user),
 ):
     # Verify dataset belongs to project
     ds_result = await db.execute(
@@ -154,12 +157,22 @@ async def update_test_case(
     for field, value in update_data.items():
         if field == "metadata":
             tc.test_case_metadata = value
+        elif field == "validated":
+            # Stamp the validating user server-side; never trust a client-supplied identity.
+            tc.validated = bool(value)
+            if value:
+                tc.validated_by = user.id
+                tc.validated_at = datetime.now(timezone.utc)
+            else:
+                tc.validated_by = None
+                tc.validated_at = None
         else:
             setattr(tc, field, value)
 
     await db.flush()
     await db.refresh(tc)
-    return _tc_to_item(tc)
+    names = await resolve_validator_names(db, [tc])
+    return _tc_to_item(tc, names.get(tc.validated_by))
 
 
 @router.get(

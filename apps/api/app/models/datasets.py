@@ -87,6 +87,13 @@ class TestCase(Base):
     test_case_metadata = Column("metadata", JSONB, nullable=False, server_default=text("'{}'"))
     status = Column(String(32), nullable=False, server_default=text("'active'"))  # active | needs_work
     status_note = Column(Text, nullable=True)
+    # Human sign-off: a reviewer confirmed this case is correct. Orthogonal to status;
+    # validated_by is stamped server-side from the session, never client-supplied.
+    validated = Column(Boolean, nullable=False, server_default=text("false"))
+    validated_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    validated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 

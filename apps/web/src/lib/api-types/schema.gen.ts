@@ -3172,6 +3172,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipeline/passage-offset-backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Passage Offset Backfill
+         * @description Launch a backfill of document offsets for this project's passage labels.
+         *
+         *     Refuses (409) if a run is already pending/running so two launches can't race. The work happens
+         *     in a background task; poll ``/passage-offset-backfill/latest`` for progress and tallies.
+         */
+        post: operations["start_passage_offset_backfill_api_pipeline_passage_offset_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline/passage-offset-backfill/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latest Passage Offset Backfill
+         * @description The project's most recent backfill run (for the trigger button's status), or None.
+         */
+        get: operations["get_latest_passage_offset_backfill_api_pipeline_passage_offset_backfill_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipeline/retrieval-metrics": {
         parameters: {
             query?: never;
@@ -9133,6 +9176,10 @@ export interface components {
          *     0 = unchecked, ``None`` = never touched — treated as still-relevant until they uncheck it).
          */
         PassageForLabeling: {
+            /** Char End */
+            char_end?: number | null;
+            /** Char Start */
+            char_start?: number | null;
             /** Labeled By */
             labeled_by?: string | null;
             /** Passage Id */
@@ -9147,10 +9194,64 @@ export interface components {
             text: string;
         };
         /**
+         * PassageOffsetBackfillLatest
+         * @description The project's most recent backfill run, or ``None`` if it has never been run.
+         */
+        PassageOffsetBackfillLatest: {
+            run?: components["schemas"]["PassageOffsetBackfillRunResponse"] | null;
+        };
+        /**
+         * PassageOffsetBackfillRunResponse
+         * @description One passage document-offset backfill run's status + per-outcome tallies.
+         *
+         *     ``anchored`` is rows given fresh document offsets; the rest are skips explaining why a label
+         *     couldn't be anchored: ``no_offset`` (chunk's index doc still lacks ``chunk_char_start``),
+         *     ``chunk_missing`` (chunk id gone from the index — likely re-chunked), ``no_split_match``
+         *     (passage id not produced by the current split), ``drifted`` (text changed since labeling).
+         */
+        PassageOffsetBackfillRunResponse: {
+            /** Anchored */
+            anchored: number;
+            /** Chunk Missing */
+            chunk_missing: number;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Drifted */
+            drifted: number;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** No Offset */
+            no_offset: number;
+            /** No Split Match */
+            no_split_match: number;
+            /** Processed Chunks */
+            processed_chunks: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /** Total Chunks */
+            total_chunks: number;
+        };
+        /**
          * PassageSelectionItem
          * @description One passage's selection state in an upsert batch.
          */
         PassageSelectionItem: {
+            /** Char End */
+            char_end?: number | null;
+            /** Char Start */
+            char_start?: number | null;
             /** Passage Id */
             passage_id: string;
             /** Passage Source */
@@ -11426,6 +11527,15 @@ export interface components {
             team_filter: string[];
             /** Test Id */
             test_id: string;
+            /**
+             * Validated
+             * @default false
+             */
+            validated: boolean;
+            /** Validated At */
+            validated_at?: string | null;
+            /** Validated By Email */
+            validated_by_email?: string | null;
         };
         /** TestCaseSuggestion */
         TestCaseSuggestion: {
@@ -11537,6 +11647,8 @@ export interface components {
             team_filter?: string[] | null;
             /** Test Id */
             test_id?: string | null;
+            /** Validated */
+            validated?: boolean | null;
         };
         /** TestConnectionResponse */
         TestConnectionResponse: {
@@ -11588,6 +11700,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Validated Count
+             * @default 0
+             */
+            validated_count: number;
         };
         /** TestDatasetItem */
         TestDatasetItem: {
@@ -18316,6 +18433,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_passage_offset_backfill_api_pipeline_passage_offset_backfill_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PassageOffsetBackfillRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latest_passage_offset_backfill_api_pipeline_passage_offset_backfill_latest_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PassageOffsetBackfillLatest"];
                 };
             };
             /** @description Validation Error */
