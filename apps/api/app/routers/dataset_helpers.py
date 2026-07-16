@@ -21,6 +21,7 @@ from app.services.retrieval_config import extract_retrieval_source_urls
 
 from .dataset_conversation import (
     _GREETING_WITH_PREFIX,
+    _display_name,
     _extract_conversation_history,
     _extract_user_prompt,
     _tc_to_item,
@@ -43,6 +44,7 @@ from .dataset_suggestions import (
 
 __all__ = [
     "_GREETING_WITH_PREFIX",
+    "_display_name",
     "_extract_answer",
     "_extract_conversation_history",
     "_extract_user_prompt",

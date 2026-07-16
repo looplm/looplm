@@ -34,7 +34,7 @@ from app.services.failure_pattern import normalize_result_test_id
 from app.services.rag_pipeline import build_rag_pipeline, rag_pipeline_summary
 from app.services.retrieval_config import get_rag_span_names, normalize_source_url
 
-from .dataset_helpers import _tc_to_item, resolve_validator_names
+from .dataset_helpers import _display_name, _tc_to_item, resolve_validator_names
 
 router = APIRouter(tags=["datasets"])
 
@@ -171,8 +171,16 @@ async def update_test_case(
 
     await db.flush()
     await db.refresh(tc)
-    names = await resolve_validator_names(db, [tc])
-    return _tc_to_item(tc, names.get(tc.validated_by))
+    # The validator is usually the current request user, whose email we already
+    # hold; only hit the DB when someone else validated the case earlier.
+    if tc.validated_by is None:
+        validated_email = None
+    elif tc.validated_by == user.id:
+        validated_email = _display_name(user.email)
+    else:
+        names = await resolve_validator_names(db, [tc])
+        validated_email = names.get(tc.validated_by)
+    return _tc_to_item(tc, validated_email)
 
 
 @router.get(

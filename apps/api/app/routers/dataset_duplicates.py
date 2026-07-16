@@ -32,7 +32,7 @@ from app.services.duplicate_detection import (
     merge_case_labeling,
 )
 
-from .dataset_helpers import _tc_to_item
+from .dataset_helpers import _tc_to_item, resolve_validator_names
 
 router = APIRouter(tags=["datasets"])
 
@@ -160,7 +160,8 @@ async def merge_duplicates(
 
     await db.flush()
     await db.refresh(keep)
-    return _tc_to_item(keep)
+    names = await resolve_validator_names(db, [keep])
+    return _tc_to_item(keep, names.get(keep.validated_by))
 
 
 @router.post(

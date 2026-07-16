@@ -148,7 +148,12 @@ export default function DatasetDetailPage() {
         }
         await updateTestCase(id, editingCase.id, body);
       } else {
-        await createTestCase(id, body as TestCaseCreateBody);
+        // `validated` isn't a create field (the validator is stamped server-side),
+        // so honor a checked box with a follow-up PATCH on the new case.
+        const created = await createTestCase(id, body as TestCaseCreateBody);
+        if (form.validated) {
+          await updateTestCase(id, created.id, { validated: true });
+        }
       }
       setShowModal(false);
       setEditingCase(null);
