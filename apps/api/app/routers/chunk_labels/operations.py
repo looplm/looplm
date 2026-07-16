@@ -36,6 +36,7 @@ from app.schemas.retrieval import (
     PassageSelectionUpsert,
 )
 from app.services.chunk_agreement import Vote, build_agreement_report
+from app.services.passage_split import match_passage_anchors
 
 from ._helpers import _display_name
 
@@ -236,11 +237,18 @@ async def upsert_passage_labels(
             )
         )
     ).scalars().all()
-    by_pid = {lbl.passage_id: lbl for lbl in existing}
+    # Match each incoming selection to its stored row by offset / text (not the positional id), so a
+    # re-save after the splitter changed updates the existing row in place instead of duplicating it.
+    stored = list(existing)
+    incoming = list(body.passages)
+    matches = match_passage_anchors(
+        [(it.passage_id, it.char_start, it.char_end, it.text_preview) for it in incoming],
+        [(r.passage_id, r.char_start, r.char_end, r.text_preview) for r in stored],
+    )
 
     saved = 0
-    for item in body.passages:
-        current = by_pid.get(item.passage_id)
+    for idx, item in enumerate(incoming):
+        current = stored[matches[idx]] if idx in matches else None
         if current is None:
             db.add(
                 PassageRelevanceLabel(

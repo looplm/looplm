@@ -32,7 +32,7 @@ from app.services.chunk_labeling import (
     build_pool_view,
     merge_labeling_view,
 )
-from app.services.passage_split import split_chunk_into_passages
+from app.services.passage_split import match_passage_anchors, split_chunk_into_passages
 from app.services.query_planner import DEFAULT_QUERY_PLANNER_INSTRUCTIONS
 
 from ._helpers import (
@@ -242,7 +242,13 @@ async def get_chunk_passages(
             )
         )
     ).scalars().all()
-    relevant_by_pid = {row.passage_id: row.relevant for row in existing}
+    # Re-attach prior selections to the fresh split by document offset / text, not by the positional
+    # {chunk_id}#s{n} id, so a labeler's choices survive a splitter change (reflow, re-chunk).
+    stored = list(existing)
+    matches = match_passage_anchors(
+        [(p.passage_id, p.char_start, p.char_end, p.text) for p in split],
+        [(r.passage_id, r.char_start, r.char_end, r.text_preview) for r in stored],
+    )
     viewer_name = _display_name(user.email)
 
     passages = [
@@ -251,12 +257,12 @@ async def get_chunk_passages(
             text=p.text,
             section_path=p.section_path,
             passage_source=p.passage_source,
-            relevant=relevant_by_pid.get(p.passage_id),
-            labeled_by=viewer_name if p.passage_id in relevant_by_pid else None,
+            relevant=stored[matches[i]].relevant if i in matches else None,
+            labeled_by=viewer_name if i in matches else None,
             char_start=p.char_start,
             char_end=p.char_end,
         )
-        for p in split
+        for i, p in enumerate(split)
     ]
     return ChunkPassagesResponse(
         test_id=test_id,

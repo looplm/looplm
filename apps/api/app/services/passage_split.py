@@ -41,6 +41,15 @@ _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+")
 _LIST_MARKER = re.compile(r"^([-*+]\s|\d+[.)]\s)")
 _HEADING = re.compile(r"^#{1,6}\s")
 
+# A key/value or definition line ("Name: John", "partition_value: bundesnetzagentur"): a short
+# label, then ": ", then a value. Line-oriented data (form fields, metadata rows) should stay one
+# judgeable unit per line rather than being reflowed into one un-splittable block, so such a line
+# is a whole-line unit too. The label is capped and the colon must be followed by whitespace, so
+# URLs ("http://…"), clock times ("12:30"), and code stay out. Trade-off: a wrapped prose line
+# whose first physical line ends a short phrase with a colon ("Er erklärte Folgendes: …") is also
+# treated as standalone rather than reflowed — acceptable for a display/labeling aid.
+_KEY_VALUE = re.compile(r"^[^\s:][^:]{0,39}:\s+\S")
+
 # Every newline char, replaced 1:1 with a space when reflowing so the reflowed paragraph is
 # length-preserving — offsets into it map straight back to the original chunk text.
 _NEWLINE_CHAR = re.compile(r"[\r\n]")
@@ -55,6 +64,7 @@ def _is_whole_line_unit(stripped: str) -> bool:
         bool(_LIST_MARKER.match(stripped))
         or stripped.startswith("|")
         or bool(_HEADING.match(stripped))
+        or bool(_KEY_VALUE.match(stripped))
     )
 
 
@@ -204,3 +214,54 @@ def split_chunk_into_passages(
             )
         )
     return passages
+
+
+# (passage_id, char_start, char_end, text) — the minimal fields needed to re-match a passage.
+PassageAnchor = tuple[str, int | None, int | None, str | None]
+
+
+def match_passage_anchors(
+    fresh: list[PassageAnchor], stored: list[PassageAnchor]
+) -> dict[int, int]:
+    """Re-match stored passage labels to freshly-split passages, durably across splitter changes.
+
+    A stored label is keyed on disk by its positional ``{chunk_id}#s{n}`` id, which is *not* stable
+    when the splitter changes (reflow, heading/key-value handling): the same chunk text can renumber
+    every passage, so matching by id alone silently attaches a labeler's selection to the wrong
+    sentence — or loses it. Instead we re-match by **document offsets** and **text**, using the
+    positional id only as a last resort.
+
+    Matching runs in priority tiers; each tier claims stored rows the earlier tiers left unmatched,
+    and every stored row is assigned to at most one fresh passage:
+
+      1. exact ``[char_start, char_end)`` equality (both anchored) — the steady-state case, where a
+         label re-resolves to the identical passage on the next visit;
+      2. offset overlap (both anchored) — a boundary shifted by a re-split still re-anchors;
+      3. exact text equality — recovers rows with no offsets (legacy, pre-offset pages);
+      4. positional ``passage_id`` equality — last-resort legacy behavior.
+
+    Returns ``{fresh_index: stored_index}`` (absent fresh indices had no match).
+    """
+    result: dict[int, int] = {}
+    claimed: set[int] = set()
+
+    def _assign(pred) -> None:
+        for fi, f in enumerate(fresh):
+            if fi in result:
+                continue
+            for si, s in enumerate(stored):
+                if si in claimed:
+                    continue
+                if pred(f, s):
+                    result[fi] = si
+                    claimed.add(si)
+                    break
+
+    def _both_anchored(f: PassageAnchor, s: PassageAnchor) -> bool:
+        return f[1] is not None and f[2] is not None and s[1] is not None and s[2] is not None
+
+    _assign(lambda f, s: _both_anchored(f, s) and f[1] == s[1] and f[2] == s[2])
+    _assign(lambda f, s: _both_anchored(f, s) and max(f[1], s[1]) < min(f[2], s[2]))
+    _assign(lambda f, s: bool(f[3]) and f[3] == s[3])
+    _assign(lambda f, s: f[0] == s[0])
+    return result

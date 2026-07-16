@@ -36,7 +36,7 @@ from app.services.index_fields import (
     first_int_field,
     first_str_field,
 )
-from app.services.passage_split import split_chunk_into_passages
+from app.services.passage_split import match_passage_anchors, split_chunk_into_passages
 
 logger = logging.getLogger(__name__)
 
@@ -148,15 +148,19 @@ async def backfill_project_offsets(
             else:
                 text = first_str_field(fields, INDEX_TEXT_FIELDS)
                 heading = first_str_field(fields, INDEX_HEADING_FIELDS)
-                by_pid = {
-                    p.passage_id: p
-                    for p in split_chunk_into_passages(
-                        chunk_id, text, section_path=heading, chunk_char_start=chunk_char_start
-                    )
-                }
+                fresh = split_chunk_into_passages(
+                    chunk_id, text, section_path=heading, chunk_char_start=chunk_char_start
+                )
+                # These rows have no offset yet, so match them to the fresh split by text (then by
+                # positional id) rather than the id alone — recovers labels the splitter renumbered.
+                matches = match_passage_anchors(
+                    [(p.passage_id, p.char_start, p.char_end, p.text) for p in fresh],
+                    [(r.passage_id, r.char_start, r.char_end, r.text_preview) for r in chunk_rows],
+                )
+                fresh_for_row = {si: fresh[fi] for fi, si in matches.items()}
                 anchored_here = 0
-                for r in chunk_rows:
-                    p = by_pid.get(r.passage_id)
+                for ri, r in enumerate(chunk_rows):
+                    p = fresh_for_row.get(ri)
                     if p is None:
                         outcome.no_split_match += 1
                     elif r.text_preview is not None and p.text != r.text_preview:

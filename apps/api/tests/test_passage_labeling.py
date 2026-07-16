@@ -14,7 +14,7 @@ from app.models.passage_labels import (
     PassageRelevanceLabel,
     is_valid_passage_relevance,
 )
-from app.services.passage_split import split_chunk_into_passages
+from app.services.passage_split import match_passage_anchors, split_chunk_into_passages
 
 
 # --- Splitter (the A source) -----------------------------------------------------
@@ -111,6 +111,65 @@ def test_split_offsets_are_document_anchored_when_chunk_offset_known():
     # Passages are non-overlapping and in reading order.
     bounds = [(p.char_start, p.char_end) for p in passages]
     assert all(a[1] <= b[0] for a, b in zip(bounds, bounds[1:]))
+
+
+def test_split_keeps_key_value_lines_separate():
+    # Line-oriented data (form fields / metadata rows) must stay one judgeable unit per line, not
+    # reflow into a single un-splittable block.
+    text = "Name: John Doe\nRole: Administrator\nDepartment: Information Technology"
+    passages = split_chunk_into_passages("kv1", text)
+    texts = [p.text for p in passages]
+    assert texts == [
+        "Name: John Doe",
+        "Role: Administrator",
+        "Department: Information Technology",
+    ]
+
+
+def test_split_key_value_does_not_catch_urls_or_times():
+    # A colon without a following space (URLs, clock times) is NOT a key/value line, so ordinary
+    # prose that merely contains such tokens still reflows normally.
+    text = "See https://example.com/path for details\nand the 12:30 slot is booked."
+    passages = split_chunk_into_passages("kv2", text)
+    # Reflowed into one prose passage (no structural boundary), ending at the sentence period.
+    assert len(passages) == 1
+    assert passages[0].text == "See https://example.com/path for details and the 12:30 slot is booked."
+
+
+# --- Durable re-matching across splitter changes ---------------------------------
+
+
+def test_match_reanchors_by_offset_across_renumber():
+    # A label stored under the OLD split lived at #s3 with offsets [100, 140). A splitter change
+    # renumbered the same sentence to #s1 — matching by offset re-attaches it despite the id change.
+    stored = [("c#s3", 100, 140, "The relevant sentence.")]
+    fresh = [("c#s1", 100, 140, "The relevant sentence."), ("c#s2", 141, 160, "Another one.")]
+    assert match_passage_anchors(fresh, stored) == {0: 0}
+
+
+def test_match_offset_overlap_then_text_then_id_fallback():
+    # overlap: an old sub-range [100, 120) re-anchors onto the merged passage [100, 140).
+    assert match_passage_anchors([("x", 100, 140, "merged")], [("y", 100, 120, "old")]) == {0: 0}
+    # text: no offsets on either side (legacy page) — match by exact text.
+    assert match_passage_anchors([("a#s1", None, None, "hi")], [("a#s9", None, None, "hi")]) == {0: 0}
+    # id fallback: no offsets, text differs, positional ids coincide.
+    assert match_passage_anchors([("a#s1", None, None, "new")], [("a#s1", None, None, "old")]) == {0: 0}
+    # nothing matches.
+    assert match_passage_anchors([("a#s1", None, None, "new")], [("z#s1", None, None, "old")]) == {}
+
+
+def test_match_assigns_each_stored_row_at_most_once():
+    # Two fresh passages with identical anchors, one stored row: only the first claims it.
+    fresh = [("c#s1", 0, 10, "a"), ("c#s2", 0, 10, "a")]
+    assert match_passage_anchors(fresh, [("c#s1", 0, 10, "a")]) == {0: 0}
+
+
+def test_match_prefers_exact_offset_over_id_collision():
+    # A stale row keeps an id that now belongs to a different passage; exact-offset wins so the
+    # label lands on the right sentence, not the id-colliding one.
+    fresh = [("c#s1", 200, 210, "second"), ("c#s2", 100, 110, "first")]
+    stored = [("c#s1", 100, 110, "first")]  # id says s1, offsets say the "first" passage
+    assert match_passage_anchors(fresh, stored) == {1: 0}
 
 
 def test_is_valid_passage_relevance():
