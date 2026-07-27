@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.index_providers.registry import build_index_provider
 from app.services.agent_retrieval import (
+    AGENT_PROBE_DEPTH,
     AGENT_STAGE,
     get_agent_retrieval_config,
     probe_agent_chunk_ids,
@@ -27,14 +28,12 @@ from app.models.chunk_labels import TestCaseLabelingStatus
 from app.models.datasets import TestCase, TestDataset
 from app.models.index_providers import IndexProvider
 from app.models.project import Project
-from app.routers.chunk_labels._helpers import (
-    _dataset_case_agentic_queries,
-    assemble_case_pool,
-)
+from app.routers.chunk_labels._helpers import _dataset_case_agentic_queries
 from app.schemas.retrieval import ByStageMetricsResponse, RetrievalRunMetrics
 from app.services.analysis_llm import merge_llm_settings
 from app.services.chunk_pool import AGENTIC_RERANK_DEPTH
 from app.services.chunk_gold import resolve_project_gold
+from app.services.labeling_pool import assemble_case_pool
 from app.services.query_embedding import build_query_embedder
 from app.services.retrieval_metrics_aggregate import (
     AGG_KS,
@@ -333,7 +332,9 @@ async def compute_by_stage_metrics(
     stage_labels = STAGE_LABELS
     agent_config = get_agent_retrieval_config(project.settings) if include_agent else None
     if agent_config is not None:
-        k = max(AGG_KS)
+        # Probe at the shared depth, not max(AGG_KS), so this run and the labeling pool hit the
+        # same cache entry instead of calling the customer's agent twice per case.
+        k = AGENT_PROBE_DEPTH
         agent_sem = asyncio.Semaphore(PROBE_CONCURRENCY)
 
         async def _agent_case(

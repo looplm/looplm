@@ -104,7 +104,7 @@ async def test_case_diagnosis_classifies_missed_chunks(
     }
     fake = _FakeProvider(ranking, docs)
     monkeypatch.setattr(
-        "app.routers.chunk_labels._helpers.build_index_provider", lambda row: fake
+        "app.services.labeling_pool.build_index_provider", lambda row: fake
     )
     monkeypatch.setattr(
         "app.routers.chunk_labels.diagnosis.build_index_provider", lambda row: fake
@@ -113,7 +113,7 @@ async def test_case_diagnosis_classifies_missed_chunks(
     async def _no_embed(settings, text):
         return None
 
-    monkeypatch.setattr("app.routers.chunk_labels._helpers.embed_query", _no_embed)
+    monkeypatch.setattr("app.services.labeling_pool.embed_query", _no_embed)
 
     resp = await client.get(
         "/api/pipeline/case-diagnosis",
@@ -223,13 +223,13 @@ async def test_case_diagnosis_does_not_false_flag_missing_embedding(
         "c_absent": {"chunk_text": CLEAN},   # never retrieved, vectors unobservable → "unretrievable"
     }
     fake = _FakeProvider(ranking, docs)
-    monkeypatch.setattr("app.routers.chunk_labels._helpers.build_index_provider", lambda row: fake)
+    monkeypatch.setattr("app.services.labeling_pool.build_index_provider", lambda row: fake)
     monkeypatch.setattr("app.routers.chunk_labels.diagnosis.build_index_provider", lambda row: fake)
 
     async def _no_embed(settings, text):
         return None
 
-    monkeypatch.setattr("app.routers.chunk_labels._helpers.embed_query", _no_embed)
+    monkeypatch.setattr("app.services.labeling_pool.embed_query", _no_embed)
 
     resp = await client.get(
         "/api/pipeline/case-diagnosis",

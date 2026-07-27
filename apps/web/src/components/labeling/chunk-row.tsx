@@ -41,6 +41,9 @@ export const PROVENANCE_BADGES: Record<string, { label: string; cls: string }> =
   hybrid: { label: "Hybrid", cls: "bg-teal-500/10 text-teal-600 dark:text-teal-300" },
   semantic: { label: "Reranked", cls: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300" },
   agentic: { label: "Agentic", cls: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-300" },
+  // The project's own retrieval agent returned this chunk. Judging these is what keeps the
+  // agent's stage comparable: unjudged chunks it alone finds would score as misses.
+  agent: { label: "Agent", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300" },
 };
 
 // Each badge shows the head and, when known, the rank the chunk held in that head — so the

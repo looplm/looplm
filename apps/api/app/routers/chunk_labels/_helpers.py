@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
-from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.cache import cache_get_json, cache_set_json
 from app.index_providers.registry import build_index_provider
-from app.models.chunk_labels import ChunkRelevanceLabel, TestCaseLabelingStatus
+from app.models.chunk_labels import ChunkRelevanceLabel
 from app.models.datasets import TestCase, TestDataset
 from app.models.index_providers import IndexProvider
 from app.models.project import Project
@@ -22,18 +19,8 @@ from app.schemas.retrieval import LabelingDatasetOption
 from app.services.analysis_llm import (
     AnalysisLlmConfigError,
     AnalysisLlmService,
-    merge_llm_settings,
-)
-from app.services.chunk_pool import (
-    DEFAULT_POOL_DEPTH,
-    SLICE_POOL_DEPTH,
-    AgenticQuery,
-    PooledChunk,
-    PoolResult,
-    assemble_pool,
 )
 from app.services.llm_usage_tracker import record_llm_usage
-from app.services.query_embedding import embed_query
 from app.services.query_planner import DEFAULT_PLANNER_MAX_QUERIES, plan_queries
 
 logger = logging.getLogger(__name__)
@@ -411,171 +398,9 @@ async def _project_labels(
     return labels_by_key, labeler_by_key, labelers_by_test, ai_labels_by_key
 
 
-# Hard cap on per-head pool depth so a "load deeper pool" request can't hammer the index.
-_MAX_POOL_DEPTH = 50
-
-# The auto-pool (a case's own input against the index heads) is user-independent and stable
-# until the index is re-indexed, so we cache the assembled pool in Redis. This is what lets the
-# labeling view eager-load per-method ranks for every case without re-hitting Azure on every
-# page open — mirroring the reference design, which persists the pool on first visit. Manual
-# searches (an explicit ``q``) always run fresh and are never cached. TTL is a freshness bound;
-# changing a case's slice changes its depth, which changes the key, so it re-pools immediately.
-_POOL_CACHE_TTL = 21_600  # 6 hours
-
-
-def _agentic_signature(queries: list[str]) -> str:
-    """Stable short signature of the agentic query set, for the pool cache key.
-
-    Folding agentic queries changes the pool, so the cache must distinguish a base-only pool
-    ("0") from one built with a given set of sub-queries. Re-planning yields a different set →
-    a different key → a natural cache miss, so no explicit invalidation is needed.
-    """
-    if not queries:
-        return "0"
-    joined = "\n".join(sorted(queries))
-    return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:12]
-
-
-def _pool_cache_key(
-    project_id: UUID, test_id: str, per_head: int, agentic_sig: str, rerank_depth: int | None = None
-) -> str:
-    base = f"labeling:pool:{project_id}:{test_id}:{per_head}:{agentic_sig}"
-    # A rerank pool carries extra scored candidates, so it must not collide with the labeling pool
-    # (which never sets rerank_depth); only the rerank variant gets the ``:r{depth}`` suffix.
-    return f"{base}:r{rerank_depth}" if rerank_depth else base
-
-
-def _serialize_pool(pool: PoolResult, computed_at: str) -> dict:
-    return {
-        "computed_at": computed_at,
-        "heads_ran": pool.heads_ran,
-        "heads_failed": pool.heads_failed,
-        "chunks": [
-            {
-                "chunk_id": c.chunk_id,
-                "title": c.title,
-                "url": c.url,
-                "content_preview": c.content_preview,
-                "score": c.score,
-                "provenance": c.provenance,
-                "ranks": c.ranks,
-                "agentic_queries": c.agentic_queries,
-                "agentic_rerank_score": c.agentic_rerank_score,
-            }
-            for c in pool.chunks
-        ],
-    }
-
-
-def _deserialize_pool(data: dict) -> PoolResult:
-    return PoolResult(
-        chunks=[
-            PooledChunk(
-                chunk_id=c["chunk_id"],
-                title=c.get("title"),
-                url=c.get("url"),
-                content_preview=c.get("content_preview"),
-                score=c.get("score"),
-                provenance=list(c.get("provenance") or []),
-                ranks={k: int(v) for k, v in (c.get("ranks") or {}).items()},
-                agentic_queries=list(c.get("agentic_queries") or []),
-                agentic_rerank_score=c.get("agentic_rerank_score"),
-            )
-            for c in data.get("chunks", [])
-        ],
-        heads_ran=list(data.get("heads_ran") or []),
-        heads_failed=dict(data.get("heads_failed") or {}),
-    )
-
-
-async def _case_pool_depth(
-    db: AsyncSession, project: Project, test_id: str, depth: int | None
-) -> int:
-    """Per-head pool depth for a case: explicit ``depth`` wins, else the case's slice depth."""
-    if depth:
-        return max(1, min(depth, _MAX_POOL_DEPTH))
-    slice_value = (
-        await db.execute(
-            select(TestCaseLabelingStatus.slice).where(
-                TestCaseLabelingStatus.project_id == project.id,
-                TestCaseLabelingStatus.test_id == test_id,
-            )
-        )
-    ).scalar_one_or_none()
-    return SLICE_POOL_DEPTH.get(slice_value or "", DEFAULT_POOL_DEPTH)
-
-
-async def assemble_case_pool(
-    db: AsyncSession,
-    project: Project,
-    test_id: str,
-    query: str,
-    *,
-    depth: int | None = None,
-    manual: bool = False,
-    refresh: bool = False,
-    agentic_queries: list[str] | None = None,
-    rerank_depth: int | None = None,
-) -> tuple[PoolResult, str | None, bool]:
-    """Assemble (or load from cache) the candidate pool for a case's query.
-
-    Shared by the labeling-pool view and the AI judge so both judge the *same* chunks. Resolves
-    the per-head depth from the case's slice, runs the connected index's heads via
-    :func:`assemble_pool`, and caches the auto-pool in Redis (a manual ``q`` is always fresh and
-    never cached; ``refresh`` bypasses the cache). When ``agentic_queries`` are given, each is
-    embedded and folded into the pool, and the cache key carries their signature so a base-only
-    pool and an agentic pool never collide. When ``rerank_depth`` is set, the agentic sub-queries
-    are also scored through the semantic reranker at that depth (a separate cache entry, so the
-    labeling pool is untouched). Returns ``(pool, computed_at, provider_connected)``.
-    """
-    per_head = await _case_pool_depth(db, project, test_id, depth)
-    agentic_queries = [q for q in (agentic_queries or []) if q and q.strip()]
-
-    provider_row = (
-        await db.execute(
-            select(IndexProvider)
-            .where(IndexProvider.project_id == project.id)
-            .order_by(IndexProvider.created_at.asc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-
-    cache_key = (
-        None
-        if manual
-        else _pool_cache_key(
-            project.id, test_id, per_head, _agentic_signature(agentic_queries), rerank_depth
-        )
-    )
-    if cache_key and not refresh:
-        cached = await cache_get_json(cache_key)
-        if cached is not None:
-            return _deserialize_pool(cached), cached.get("computed_at"), provider_row is not None
-
-    # Embed each query ourselves so vector/hybrid heads work even when the index has no
-    # server-side vectorizer. None (unconfigured or failed) → text-based vector search fallback.
-    llm_settings = merge_llm_settings(project.settings, None)
-    query_vector = await embed_query(llm_settings, query)
-    agentic_specs = [
-        AgenticQuery(text=q, vector=await embed_query(llm_settings, q)) for q in agentic_queries
-    ]
-
-    provider = build_index_provider(provider_row) if provider_row is not None else None
-    try:
-        pool = await assemble_pool(
-            provider,
-            query,
-            per_head_depth=per_head,
-            query_vector=query_vector,
-            agentic_queries=agentic_specs or None,
-            agentic_rerank_depth=rerank_depth,
-        )
-    finally:
-        if provider is not None:
-            await provider.aclose()
-    computed_at = datetime.now(timezone.utc).isoformat()
-    if cache_key:
-        await cache_set_json(
-            cache_key, _serialize_pool(pool, computed_at), ttl_seconds=_POOL_CACHE_TTL
-        )
-    return pool, computed_at, provider_row is not None
+# Pool assembly lives in the service layer (app.services.labeling_pool) so the by-stage metrics
+# service can reuse it without importing a router. Re-exported here under the name this
+# package's routers already import.
+from app.services.labeling_pool import (  # noqa: E402,F401 — re-exported for this package
+    assemble_case_pool,
+)

@@ -62,9 +62,10 @@ class PooledChunk:
     content_preview: str | None = None
     # Best-effort backend score (not comparable across heads — informational only).
     score: float | None = None
-    # Subset of {"trace", "keyword", "vector", "hybrid", "agentic"} — why this chunk is in the
-    # pool, in the order the heads first surfaced it. "agentic" means an LLM-planned sub-query
-    # found it (in addition to whichever index heads, if any, ran on the base question).
+    # Subset of {"trace", "keyword", "vector", "hybrid", "agentic", "agent"} — why this chunk is
+    # in the pool, in the order the heads first surfaced it. "agentic" means an LLM-planned
+    # sub-query found it (in addition to whichever index heads, if any, ran on the base
+    # question); "agent" means the project's own retrieval agent returned it.
     provenance: list[str] = field(default_factory=list)
     # head -> 1-indexed rank this chunk held in that head's results (e.g. {"vector": 3,
     # "hybrid": 2}). Lets the labeler see *where* each method ranked the chunk, not just that
@@ -166,6 +167,42 @@ def _seed_from_trace(
     return seeded
 
 
+def _merge_agent_chunks(
+    pool: dict[str, PooledChunk], agent_chunks: Iterable[dict[str, Any]]
+) -> bool:
+    """Fold the project's own retrieval agent's ranking into the pool; True if any were added.
+
+    Without this the agent is judged on a pool it never contributed to: chunks only it returns
+    stay unjudged and score as misses (TREC pool bias). Its list arrives in the agent's final
+    ranking order, so position is the ``agent`` head's rank.
+    """
+    merged = False
+    rank = 0
+    for c in agent_chunks:
+        if not isinstance(c, dict):
+            continue
+        chunk_id = c.get("chunk_id")
+        if not isinstance(chunk_id, str) or not chunk_id:
+            continue
+        merged = True
+        rank += 1
+        score = c.get("score")
+        existing = pool.get(chunk_id)
+        if existing is None:
+            existing = PooledChunk(chunk_id=chunk_id)
+            pool[chunk_id] = existing
+        existing._seen("agent", rank)
+        # Backfill display fields: index heads win when they already resolved them.
+        existing.title = existing.title or _coalesce(c.get("title"))
+        existing.url = existing.url or _coalesce(c.get("url"))
+        existing.content_preview = existing.content_preview or _coalesce(
+            c.get("content_preview"), c.get("content")
+        )
+        if existing.score is None and isinstance(score, (int, float)):
+            existing.score = float(score)
+    return merged
+
+
 def _merge_hit(
     pool: dict[str, PooledChunk], d: Any, *, mode: str | None, rank: int, agentic_query: str | None
 ) -> None:
@@ -239,6 +276,7 @@ async def assemble_pool(
     query_vector: list[float] | None = None,
     agentic_queries: Iterable[AgenticQuery] | None = None,
     agentic_rerank_depth: int | None = None,
+    agent_chunks: Iterable[dict[str, Any]] | None = None,
 ) -> PoolResult:
     """Build the deduped candidate pool for one query.
 
@@ -259,6 +297,10 @@ async def assemble_pool(
     ``agentic_rerank_score`` (provenance ``agentic_rerank``). This models "agentic retrieve →
     rerank" without disturbing the positional-union ``agentic`` stage: reranked-only chunks get a
     score but no positional rank. Skipped silently when the index has no semantic configuration.
+
+    ``agent_chunks`` (the project's own retrieval agent's ranking, see
+    :mod:`app.services.agent_retrieval`) are folded in last under provenance ``agent``, so the
+    system being compared also contributes candidates to the pool it is judged against.
 
     ``provider`` may be ``None`` (no index connected), in which case the pool is just the
     trace chunks — still useful, just not augmented.
@@ -329,6 +371,10 @@ async def assemble_pool(
                     _merge_rerank_hit(pool, d, score=float(d.score))
     if agentic_rerank_ran:
         heads_ran.append("agentic_rerank")
+
+    # Last, so index heads keep their ranks/metadata and the agent's own finds append after them.
+    if agent_chunks is not None and _merge_agent_chunks(pool, agent_chunks):
+        heads_ran.append("agent")
 
     return PoolResult(
         chunks=list(pool.values()), heads_ran=heads_ran, heads_failed=heads_failed

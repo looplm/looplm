@@ -91,6 +91,20 @@ export function WorkbenchView({
     });
 
   const chunks = useMemo(() => pool?.chunks ?? [], [pool]);
+  // Chunks only the project's own retrieval agent surfaced: the candidates that decide whether
+  // its stage is scored fairly, and the ones no index head would have put in front of a labeler.
+  const [agentOnly, setAgentOnly] = useState(false);
+  const agentOnlyCount = useMemo(
+    () => chunks.filter((ch) => ch.provenance.length === 1 && ch.provenance[0] === "agent").length,
+    [chunks],
+  );
+  const visibleChunks = useMemo(
+    () =>
+      agentOnly
+        ? chunks.filter((ch) => ch.provenance.length === 1 && ch.provenance[0] === "agent")
+        : chunks,
+    [chunks, agentOnly],
+  );
   const counts = useMemo(() => {
     if (!pool) return { labeled: c.labeled_count, relevant: c.relevant_count, total: null as number | null };
     return {
@@ -154,6 +168,19 @@ export function WorkbenchView({
               className="px-2 py-1 rounded-lg text-[11px] font-medium border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-indigo-400 disabled:opacity-40"
             >
               {recomputing ? "Recomputing…" : "Recompute"}
+            </button>
+          )}
+          {agentOnlyCount > 0 && (
+            <button
+              onClick={() => setAgentOnly((v) => !v)}
+              title="Show only the chunks the project's retrieval agent found and no index head did"
+              className={`px-2 py-1 rounded-lg text-[11px] font-medium border disabled:opacity-40 ${
+                agentOnly
+                  ? "border-emerald-400 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                  : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-emerald-400"
+              }`}
+            >
+              Agent only · {agentOnlyCount}
             </button>
           )}
           <button
@@ -252,7 +279,7 @@ export function WorkbenchView({
             . Use the search box below to try a different query.
           </p>
         ) : (
-          chunks.map((chunk) => (
+          visibleChunks.map((chunk) => (
             <PoolChunkRow
               key={chunk.chunk_id}
               chunk={chunk}

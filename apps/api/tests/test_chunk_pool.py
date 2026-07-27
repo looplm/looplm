@@ -207,3 +207,49 @@ async def test_agentic_does_not_overwrite_base_head_ranks():
     shared = {c.chunk_id: c for c in res.chunks}["shared"]
     assert shared.ranks == {"keyword": 2, "agentic": 1}
     assert shared.provenance == ["keyword", "agentic"]
+
+
+@pytest.mark.asyncio
+async def test_agent_chunks_pool_under_their_own_head():
+    # The project's own retrieval agent contributes candidates: chunks only it returns enter the
+    # pool (so they get judged instead of counting as misses), and its ranking is preserved.
+    provider = FakeProvider({"keyword": [_doc("shared"), _doc("kw_only")]})
+    res = await assemble_pool(
+        provider,
+        "q",
+        modes=["keyword"],
+        agent_chunks=[
+            {"chunk_id": "agent_only", "title": "A", "url": "http://a", "content_preview": "p"},
+            {"chunk_id": "shared"},
+        ],
+    )
+    by_id = {c.chunk_id: c for c in res.chunks}
+    assert set(by_id) == {"shared", "kw_only", "agent_only"}
+    assert by_id["agent_only"].ranks == {"agent": 1}
+    assert by_id["agent_only"].provenance == ["agent"]
+    assert by_id["agent_only"].title == "A"
+    # A chunk both found keeps the index head's rank and gains the agent's.
+    assert by_id["shared"].ranks == {"keyword": 1, "agent": 2}
+    assert res.heads_ran == ["keyword", "agent"]
+
+
+@pytest.mark.asyncio
+async def test_agent_head_absent_when_agent_returns_nothing():
+    provider = FakeProvider({"keyword": [_doc("k1")]})
+    res = await assemble_pool(provider, "q", modes=["keyword"], agent_chunks=[])
+    assert res.heads_ran == ["keyword"]
+    assert [c.chunk_id for c in res.chunks] == ["k1"]
+
+
+@pytest.mark.asyncio
+async def test_index_head_metadata_wins_over_agent_metadata():
+    provider = FakeProvider({"keyword": [_doc("c1", title="Index title", snippet="index snip")]})
+    res = await assemble_pool(
+        provider,
+        "q",
+        modes=["keyword"],
+        agent_chunks=[{"chunk_id": "c1", "title": "Agent title", "url": "http://a"}],
+    )
+    c1 = res.chunks[0]
+    assert c1.title == "Index title" and c1.content_preview == "index snip"
+    assert c1.url == "http://a"  # the index head had none, so the agent's fills in

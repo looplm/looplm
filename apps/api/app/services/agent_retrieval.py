@@ -41,6 +41,7 @@ ENDPOINT_KEY = "agent_retrieval_endpoint"
 TOKEN_KEY = "agent_retrieval_token"
 LABEL_KEY = "agent_retrieval_label"
 TEMPLATE_KEY = "agent_retrieval_request_template"
+POOL_KEY = "agent_retrieval_pool"
 
 # The shared-secret header rde-gpt's retrieval endpoint expects (EVAL_PROBE_TOKEN).
 TOKEN_HEADER = "X-Eval-Token"
@@ -48,6 +49,14 @@ _DEFAULT_REQUEST_TEMPLATE = {"messages": [{"role": "user", "content": "{prompt}"
 # Agent rankings are stable until the index/agent changes; cache for the same window as
 # the index probe so the Retrieval page doesn't re-hit the agent on every compute.
 _AGENT_CACHE_TTL = 21_600  # 6 hours
+
+# Depth every caller probes at, so the by-stage metrics run and the labeling pool share ONE
+# cached ranking per case (the cache key carries the depth). 50 is the deepest reported cutoff;
+# shallower consumers (the labeling pool, which pools ~10/head) slice this list.
+AGENT_PROBE_DEPTH = 50
+
+# Keep the cached ranking small: the labeling UI shows a preview and fetches full text on demand.
+_PREVIEW_CHARS = 1200
 
 
 @dataclass
@@ -58,6 +67,9 @@ class AgentRetrievalConfig:
     token: str | None
     label: str
     request_template: dict
+    # Fold the agent's top chunks into the labeling pool as their own head, so its candidates
+    # get judged instead of counting as misses (see :mod:`app.services.labeling_pool`).
+    pool_candidates: bool = False
 
 
 def get_agent_retrieval_config(settings: dict[str, Any] | None) -> AgentRetrievalConfig | None:
@@ -77,11 +89,31 @@ def get_agent_retrieval_config(settings: dict[str, Any] | None) -> AgentRetrieva
         token=token.strip() if isinstance(token, str) and token.strip() else None,
         label=label.strip() if isinstance(label, str) and label.strip() else DEFAULT_AGENT_LABEL,
         request_template=template if isinstance(template, dict) and template else dict(_DEFAULT_REQUEST_TEMPLATE),
+        pool_candidates=bool(s.get(POOL_KEY)),
     )
 
 
 def _agent_cache_key(project_id: UUID, test_id: str, n: int) -> str:
     return f"labeling:agentprobe:{project_id}:{test_id}:{n}"
+
+
+def _slim_chunk(c: dict[str, Any]) -> dict[str, Any]:
+    """The subset of a retrieved chunk worth caching: identity + what the labeler needs to read."""
+    preview = c.get("content_preview")
+    return {
+        "chunk_id": c["chunk_id"],
+        "title": c.get("title"),
+        "url": c.get("url"),
+        "content_preview": preview[:_PREVIEW_CHARS] if isinstance(preview, str) else None,
+        "score": c.get("score") if isinstance(c.get("score"), (int, float)) else None,
+    }
+
+
+def _cached_chunks(cached: Any) -> list[dict[str, Any]] | None:
+    """Full chunk records from a cache entry, or None when it holds only the legacy id list."""
+    if not isinstance(cached, dict) or not isinstance(cached.get("chunks"), list):
+        return None
+    return [c for c in cached["chunks"] if isinstance(c, dict) and isinstance(c.get("chunk_id"), str)]
 
 
 async def probe_agent_chunk_ids(
@@ -96,18 +128,51 @@ async def probe_agent_chunk_ids(
 ) -> list[str]:
     """Ranked chunk ids the customer's agent retrieves for ``query`` (top-n), Redis-cached.
 
-    Returns ``[]`` (agent stage contributes nothing for this case) when the query is empty,
-    the endpoint is unreachable/errors, or the run degraded to keyword-only retrieval — none
-    of which should be scored as the agent's real ranking. A hard failure is logged, not
-    cached, so a transient outage doesn't stick for the whole TTL.
+    Thin projection of :func:`probe_agent_chunks` for the metrics path, which scores positions
+    and needs nothing else. Reads id-only cache entries written before the pooling head existed.
+    """
+    if not refresh:
+        cached = await cache_get_json(_agent_cache_key(project_id, test_id, n))
+        chunks = _cached_chunks(cached)
+        if chunks is not None:
+            return [c["chunk_id"] for c in chunks]
+        if isinstance(cached, dict) and isinstance(cached.get("chunk_ids"), list):
+            return [c for c in cached["chunk_ids"] if isinstance(c, str)]
+    return [
+        c["chunk_id"]
+        for c in await probe_agent_chunks(
+            client, config, project_id, test_id, query, n, refresh=refresh
+        )
+    ]
+
+
+async def probe_agent_chunks(
+    client: httpx.AsyncClient,
+    config: AgentRetrievalConfig,
+    project_id: UUID,
+    test_id: str,
+    query: str,
+    n: int,
+    *,
+    refresh: bool = False,
+) -> list[dict[str, Any]]:
+    """Ranked chunks the customer's agent retrieves for ``query`` (top-n), Redis-cached.
+
+    Each record carries the chunk id plus the title/url/preview the labeling pool needs to
+    render a judgeable candidate, in the agent's own ranking order.
+
+    Returns ``[]`` (the agent contributes nothing for this case) when the query is empty, the
+    endpoint is unreachable/errors, or the run degraded to keyword-only retrieval — none of
+    which should be scored as the agent's real ranking. A hard failure is logged, not cached,
+    so a transient outage doesn't stick for the whole TTL.
     """
     if not query.strip():
         return []
     cache_key = _agent_cache_key(project_id, test_id, n)
     if not refresh:
-        cached = await cache_get_json(cache_key)
-        if cached is not None and isinstance(cached.get("chunk_ids"), list):
-            return [c for c in cached["chunk_ids"] if isinstance(c, str)]
+        chunks = _cached_chunks(await cache_get_json(cache_key))
+        if chunks is not None:
+            return chunks
 
     headers = {TOKEN_HEADER: config.token} if config.token else {}
     try:
@@ -135,7 +200,7 @@ async def probe_agent_chunk_ids(
         logger.info("Agent retrieval probe degraded (keyword-fallback) for test %s; skipped", test_id)
         return []
 
-    chunks = extract_retrieved_chunks(parsed)  # reads rankedChunks (chunk-level) first
-    chunk_ids = [c["chunk_id"] for c in chunks if c.get("chunk_id")][:n]
-    await cache_set_json(cache_key, {"chunk_ids": chunk_ids}, ttl_seconds=_AGENT_CACHE_TTL)
-    return chunk_ids
+    extracted = extract_retrieved_chunks(parsed)  # reads rankedChunks (chunk-level) first
+    chunks = [_slim_chunk(c) for c in extracted if c.get("chunk_id")][:n]
+    await cache_set_json(cache_key, {"chunks": chunks}, ttl_seconds=_AGENT_CACHE_TTL)
+    return chunks

@@ -131,3 +131,62 @@ async def test_probe_empty_query_short_circuits(monkeypatch):
 
 async def _none():
     return None
+
+
+def test_get_config_pool_flag_defaults_off():
+    cfg = get_agent_retrieval_config({"agent_retrieval_endpoint": "https://x"})
+    assert cfg is not None and cfg.pool_candidates is False
+    on = get_agent_retrieval_config(
+        {"agent_retrieval_endpoint": "https://x", "agent_retrieval_pool": True}
+    )
+    assert on is not None and on.pool_candidates is True
+
+
+@pytest.mark.asyncio
+async def test_probe_chunks_returns_records_for_pooling(monkeypatch):
+    """The pooling path needs title/url/preview, not just ids, to render a judgeable candidate."""
+    cfg = get_agent_retrieval_config({"agent_retrieval_endpoint": "https://x"})
+    raw = json.dumps(
+        {
+            "rankedChunks": [
+                {"id": "page_1_chunk_0", "title": "A", "url": "u1", "content": "body", "score": 3.0}
+            ],
+            "retrievalDiagnostics": {"retrievalMode": "hybrid"},
+        }
+    )
+    stored: dict = {}
+
+    async def fake_call(*args, **kwargs):
+        return ("", raw, 12)
+
+    async def fake_set(key, value, ttl_seconds=None):
+        stored[key] = value
+
+    monkeypatch.setattr(agent_retrieval, "_call_target_api", fake_call)
+    monkeypatch.setattr(agent_retrieval, "cache_get_json", lambda *a, **k: _none())
+    monkeypatch.setattr(agent_retrieval, "cache_set_json", fake_set)
+
+    chunks = await agent_retrieval.probe_agent_chunks(
+        None, cfg, uuid4(), "t1", "q", 50, refresh=True
+    )
+    assert [c["chunk_id"] for c in chunks] == ["page_1_chunk_0"]
+    assert chunks[0]["title"] == "A" and chunks[0]["url"] == "u1"
+    # Cached in the record shape so the labeling pool can reuse the metrics run's probe.
+    assert list(stored.values())[0] == {"chunks": chunks}
+
+
+@pytest.mark.asyncio
+async def test_probe_ids_read_legacy_id_only_cache(monkeypatch):
+    """Entries written before pooling existed hold only chunk_ids; the ids path still uses them."""
+    cfg = get_agent_retrieval_config({"agent_retrieval_endpoint": "https://x"})
+
+    async def cached(*args, **kwargs):
+        return {"chunk_ids": ["a", "b"]}
+
+    async def should_not_call(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("must not re-probe when a legacy cache entry exists")
+
+    monkeypatch.setattr(agent_retrieval, "cache_get_json", cached)
+    monkeypatch.setattr(agent_retrieval, "_call_target_api", should_not_call)
+
+    assert await probe_agent_chunk_ids(None, cfg, uuid4(), "t1", "q", 50) == ["a", "b"]
