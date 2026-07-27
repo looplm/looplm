@@ -9,7 +9,14 @@ from app.index_providers.coverage import (
     coverage_fields_for,
     detect_partition_issues,
 )
-from app.routers.rag_coverage_worker import _build_user_prompt, _sources_from_refs
+import pytest
+
+from app.index_providers.azure_search_sampling import spread_offsets, spread_sample
+from app.routers.rag_coverage_worker import (
+    _build_user_prompt,
+    _fit_budget,
+    _sources_from_refs,
+)
 
 
 def _pv(value: str, count: int) -> PartitionValue:
@@ -216,3 +223,106 @@ def test_user_prompt_numbers_excerpts_for_citation():
 
 def test_user_prompt_without_excerpts_is_explicit():
     assert "(no text excerpts available)" in _build_user_prompt("tags", "uebersicht", [])
+
+
+# ── even-spaced sampling across a slice ────────────────────────
+
+def test_spread_offsets_cover_the_whole_slice():
+    assert spread_offsets(800, 8) == [0, 100, 200, 300, 400, 500, 600, 700]
+
+
+def test_spread_offsets_never_repeat_or_overrun():
+    offsets = spread_offsets(5, 8)
+    assert offsets == [0, 1, 2, 3, 4]
+    assert spread_offsets(1, 8) == [0]
+    assert spread_offsets(0, 8) == [0]
+    assert max(spread_offsets(9, 4)) < 9
+
+
+def test_spread_offsets_clamped_to_azure_skip_ceiling():
+    offsets = spread_offsets(5_000_000, 8, max_skip=100)
+    assert offsets[0] == 0
+    assert max(offsets) <= 100
+
+
+# ── grounding budget ───────────────────────────────────────────
+
+def _snippet_doc(chars: int):
+    return CorpusDoc(id="c", title=None, url=None, snippet="x" * chars)
+
+
+def test_budget_drops_whole_excerpts_never_slices():
+    docs = [_snippet_doc(400), _snippet_doc(400), _snippet_doc(400)]
+    kept = _fit_budget(docs, budget=900)
+    assert len(kept) == 2
+    assert all(len(d.snippet) == 400 for d in kept)  # nothing was cut
+
+
+def test_budget_always_keeps_the_first_excerpt():
+    kept = _fit_budget([_snippet_doc(5_000)], budget=100)
+    assert len(kept) == 1
+    assert len(kept[0].snippet) == 5_000
+
+
+def test_budget_keeps_everything_that_fits():
+    docs = [_snippet_doc(100) for _ in range(5)]
+    assert len(_fit_budget(docs, budget=10_000)) == 5
+
+
+# ── spread_sample against a fake Azure client ──────────────────
+
+class _FakeResults:
+    """Mimics the SDK's async paged iterator (async iteration + awaitable count)."""
+
+    def __init__(self, docs: list[dict], total: int):
+        self._docs = docs
+        self._total = total
+
+    def __aiter__(self):
+        self._it = iter(self._docs)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._it)
+        except StopIteration:
+            raise StopAsyncIteration
+
+    async def get_count(self):
+        return self._total
+
+
+class _FakeSearchClient:
+    def __init__(self, corpus: list[dict], fail_at: set[int] | None = None):
+        self._corpus = corpus
+        self._fail_at = fail_at or set()
+        self.skips: list[int] = []
+
+    async def search(self, *, top: int, skip: int = 0, **kwargs):
+        self.skips.append(skip)
+        if skip in self._fail_at:
+            raise RuntimeError("backend hiccup")
+        return _FakeResults(self._corpus[skip : skip + top], len(self._corpus))
+
+
+@pytest.mark.asyncio
+async def test_spread_sample_walks_the_slice_not_its_head():
+    corpus = [{"chunk_text": f"chunk {i}"} for i in range(100)]
+    client = _FakeSearchClient(corpus)
+    docs = await spread_sample(client, "tags/any(t: t eq 'x')", ["chunk_text"], 5)
+    assert client.skips == [0, 20, 40, 60, 80]
+    assert [d["chunk_text"] for d in docs] == [
+        "chunk 0", "chunk 20", "chunk 40", "chunk 60", "chunk 80",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_spread_sample_survives_a_failed_offset():
+    corpus = [{"chunk_text": f"chunk {i}"} for i in range(100)]
+    docs = await spread_sample(_FakeSearchClient(corpus, fail_at={40}), None, None, 5)
+    assert [d["chunk_text"] for d in docs] == ["chunk 0", "chunk 20", "chunk 60", "chunk 80"]
+
+
+@pytest.mark.asyncio
+async def test_spread_sample_on_empty_slice_returns_nothing():
+    assert await spread_sample(_FakeSearchClient([]), "team eq 'ghost'", None, 5) == []

@@ -234,45 +234,17 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         return out
 
     async def sample_documents(
-        self, key: str, value: str, n: int, filters: dict[str, str] | None = None
+        self,
+        key: str,
+        value: str,
+        n: int,
+        filters: dict[str, str] | None = None,
+        *,
+        spread: bool = False,
     ) -> list[CorpusDoc]:
-        info = await self._field(key)
-        fields = await self._get_fields()
-        esc = _odata_escape(value)
-        if info.is_collection:
-            filter_expr = f"{key}/any(t: t eq '{esc}')"
-        else:
-            filter_expr = f"{key} eq '{esc}'"
+        from app.index_providers.azure_search_sampling import sample_documents
 
-        ancestor_expr = await self._build_filter(filters)
-        if ancestor_expr:
-            filter_expr = f"({filter_expr}) and ({ancestor_expr})"
-
-        select = [f for f in _PREFERRED_SAMPLE_FIELDS if f in fields]
-        key_field = next((f.name for f in fields.values() if f.is_key), None)
-        if key_field and key_field not in select:
-            select.append(key_field)
-
-        results = await self._search_client.search(
-            search_text="*",
-            filter=filter_expr,
-            select=select or None,
-            top=max(1, n),
-        )
-        docs: list[CorpusDoc] = []
-        async for doc in results:
-            snippet = doc.get("chunk_text")
-            if isinstance(snippet, str) and len(snippet) > 600:
-                snippet = snippet[:600] + "…"
-            docs.append(
-                CorpusDoc(
-                    id=str(doc.get(key_field) or doc.get("page_id") or doc.get("id") or ""),
-                    title=doc.get("attachment_filename") or doc.get("page_title"),
-                    url=doc.get("page_url") or doc.get("attachment_url"),
-                    snippet=snippet,
-                )
-            )
-        return docs
+        return await sample_documents(self, key, value, n, filters, spread=spread)
 
     _LOOKUP_BATCH = 200  # keep the search.in literal well under filter size limits
 
@@ -383,9 +355,8 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         results = await self._search_client.search(**kwargs)
         docs: list[CorpusDoc] = []
         async for doc in results:
+            # Full chunk body, never truncated — see the note in ``sample_documents``.
             snippet = doc.get("chunk_text")
-            if isinstance(snippet, str) and len(snippet) > 600:
-                snippet = snippet[:600] + "…"
             # On the semantic head the reranker score is the meaningful one; fall back otherwise.
             score = doc.get("@search.reranker_score")
             if score is None:

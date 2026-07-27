@@ -280,10 +280,11 @@ async def fetch_full_chunk_texts(
 ) -> dict[str, str]:
     """Full index body text for each chunk id, fetched live from the project's index provider.
 
-    The pool's ``content_preview`` is a display snippet the provider caps (e.g. 600 chars); the AI
-    judge must grade the whole chunk, so it resolves the complete text from the index. Ids the index
-    can't resolve (chunk gone, no index, no text field) are omitted, so the caller falls back to the
-    preview.
+    The pool's ``content_preview`` is a snapshot taken when the pool was built, so it can be
+    stale (re-indexed or edited chunk) and, for pools built before the provider stopped
+    truncating, cut off at 600 characters. The AI judge must grade the whole current chunk, so it
+    resolves the text live from the index. Ids the index can't resolve (chunk gone, no index, no
+    text field) are omitted, so the caller falls back to the snapshot.
     """
     ids = [c for c in dict.fromkeys(chunk_ids) if c]
     if not ids:
@@ -327,7 +328,7 @@ async def fetch_chunk_fields(
     Returns ``(fields, provider_connected)``: ``fields`` is the ``{field: value}`` document, or
     ``None`` when there's no provider or the chunk isn't found; ``provider_connected`` distinguishes
     "no index" from "index has no such chunk" so the passage panel can be honest. Powers the local
-    (A) passage split, which needs the chunk's full body + heading — not the truncated pool preview.
+    (A) passage split, which needs the chunk's current full body + heading, not the pool snapshot.
     """
     provider_row = (
         await db.execute(

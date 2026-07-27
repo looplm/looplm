@@ -157,13 +157,25 @@ class BaseIndexProvider(ABC):
 
     @abstractmethod
     async def sample_documents(
-        self, key: str, value: str, n: int, filters: dict[str, str] | None = None
+        self,
+        key: str,
+        value: str,
+        n: int,
+        filters: dict[str, str] | None = None,
+        *,
+        spread: bool = False,
     ) -> list[CorpusDoc]:
         """Return up to ``n`` representative documents where ``key == value``.
 
         ``filters`` is an optional ``{field: value}`` map of additional ancestor
         constraints AND-ed with the ``key == value`` clause (used to scope a
         sample to a full drill-down path). ``None`` means no extra constraints.
+
+        ``spread`` asks for the sample to be drawn across the whole slice instead of
+        from its head, so that a slice containing one large document doesn't return
+        ``n`` chunks of that single document. It buys representativeness with extra
+        backend round trips, so callers feeding an LLM set it while interactive
+        drill-down does not. Backends that can't spread may ignore it.
         """
         ...
 

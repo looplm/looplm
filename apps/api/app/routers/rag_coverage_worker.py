@@ -33,6 +33,11 @@ from app.services.llm_usage_tracker import record_llm_usage
 
 logger = logging.getLogger(__name__)
 
+# Character budget for one gap's grounding excerpts (~15k tokens). Chunks are no longer
+# truncated by the provider, so a slice of very large chunks could otherwise build a
+# request that is needlessly expensive or exceeds the model's context.
+_GROUNDING_CHAR_BUDGET = 60_000
+
 _SUGGESTION_SYSTEM_PROMPT = (
     "You are a QA specialist authoring RAG evaluation test cases for a knowledge "
     "assistant. You are given a slice of the knowledge base that currently has NO "
@@ -173,9 +178,34 @@ def _sources_from_refs(docs: list, refs: object) -> list[CoverageSuggestionSourc
     return sources
 
 
+def _fit_budget(docs: list, budget: int = _GROUNDING_CHAR_BUDGET) -> list:
+    """Drop trailing excerpts that don't fit the prompt budget, keeping each one whole.
+
+    Chunks reach us untruncated on purpose: a chunk cut mid-sentence makes the model
+    draft criteria for content it can't see. So the budget is spent in whole excerpts
+    and the surplus is dropped, never sliced. The first excerpt is always kept, even
+    if it exceeds the budget on its own.
+    """
+    kept: list = []
+    spent = 0
+    for doc in docs:
+        size = len(doc.snippet or "")
+        if kept and spent + size > budget:
+            continue
+        kept.append(doc)
+        spent += size
+    if len(kept) < len(docs):
+        logger.info(
+            "Grounding budget kept %d of %d excerpts (%d chars)", len(kept), len(docs), spent
+        )
+    return kept
+
+
 async def _draft_questions(
     llm: AnalysisLlmService, partition_key: str, value: str, docs: list, max_questions: int
 ) -> tuple[list[dict], object | None]:
+    # Trim first so the numbering the model cites matches the excerpts it was shown.
+    docs = _fit_budget(docs)
     content, usage = await llm.tracked_chat_completion(
         messages=[
             {"role": "system", "content": _SUGGESTION_SYSTEM_PROMPT},
@@ -286,8 +316,11 @@ async def run_coverage_analysis(
                 ]
                 for i, gap in enumerate(gaps):
                     try:
+                        # spread=True: draw the excerpts across the whole slice instead of
+                        # its head, so a gap containing one large document doesn't yield
+                        # sample_n chunks of that single page.
                         docs = await provider_obj.sample_documents(
-                            partition_key, gap.value, sample_n
+                            partition_key, gap.value, sample_n, spread=True
                         )
                         grounding = [d for d in docs if d.snippet]
                         questions, usage = await _draft_questions(
