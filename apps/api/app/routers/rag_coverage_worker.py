@@ -9,7 +9,8 @@ Steps:
   2. build the provider, pull the partition distribution
   3. load the project's test cases, compute coverage (pure helper)
   4. (optional) sample docs for the biggest gaps and ask the LLM to draft eval
-     questions + acceptance criteria for each
+     questions + acceptance criteria for each, citing the numbered excerpts it
+     used so every suggestion carries the source documents to verify it against
   5. persist results + suggestions, mark ``completed`` / ``failed``
 """
 
@@ -26,7 +27,7 @@ from app.index_providers.coverage import compute_coverage, coverage_fields_for
 from app.index_providers.registry import build_index_provider
 from app.models.datasets import TestCase, TestDataset
 from app.models.index_providers import CoverageRun, IndexProvider
-from app.schemas.index_providers import CoverageEvalSuggestion
+from app.schemas.index_providers import CoverageEvalSuggestion, CoverageSuggestionSource
 from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService
 from app.services.llm_usage_tracker import record_llm_usage
 
@@ -47,8 +48,10 @@ _SUGGESTION_SYSTEM_PROMPT = (
     "3. Always include this fallback as a criterion: if the assistant cannot find the "
     "information in its sources it must say so plainly and not guess.\n"
     "4. Write questions and criteria in the same language as the excerpts.\n"
-    "5. Return STRICT JSON: {\"questions\": [{\"prompt\": \"...\", "
-    "\"acceptance_criteria\": \"...\"}]}. No prose outside the JSON."
+    "5. Each excerpt is numbered. For every question list the numbers of the excerpts "
+    "the question and its criteria are based on, so a reviewer can verify them.\n"
+    "6. Return STRICT JSON: {\"questions\": [{\"prompt\": \"...\", "
+    "\"acceptance_criteria\": \"...\", \"source_refs\": [1, 2]}]}. No prose outside the JSON."
 )
 
 
@@ -120,8 +123,17 @@ async def _attach_dataset_suggestions(
             sug.suggested_dataset_name = _propose_dataset_name(sug.partition_value)
 
 
-def _build_user_prompt(partition_key: str, value: str, snippets: list[str]) -> str:
-    joined = "\n\n".join(f"- {s}" for s in snippets if s) or "(no text excerpts available)"
+def _build_user_prompt(partition_key: str, value: str, docs: list) -> str:
+    """Render the grounding excerpts as a numbered list the model can cite by index.
+
+    ``docs`` are the sampled ``CorpusDoc``s that have a snippet; the 1-based
+    position of each is the reference number returned in ``source_refs``.
+    """
+    lines = []
+    for i, doc in enumerate(docs, start=1):
+        title = f" ({doc.title})" if doc.title else ""
+        lines.append(f"[{i}]{title} {doc.snippet}")
+    joined = "\n\n".join(lines) or "(no text excerpts available)"
     return (
         f"Category: {partition_key} = {value}\n\n"
         f"Indexed content excerpts from this slice:\n{joined}\n\n"
@@ -129,13 +141,45 @@ def _build_user_prompt(partition_key: str, value: str, snippets: list[str]) -> s
     )
 
 
+def _sources_from_refs(docs: list, refs: object) -> list[CoverageSuggestionSource]:
+    """Map the model's 1-based ``source_refs`` back onto the sampled documents.
+
+    Unusable or missing refs fall back to every excerpt the model was shown —
+    the question came out of that sample either way, so the reviewer still gets
+    the right set of pages to check, just a wider one.
+    """
+    picked: list = []
+    if isinstance(refs, list):
+        for ref in refs:
+            try:
+                idx = int(ref)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= idx <= len(docs) and docs[idx - 1] not in picked:
+                picked.append(docs[idx - 1])
+    if not picked:
+        picked = list(docs)
+
+    sources: list[CoverageSuggestionSource] = []
+    seen: set[tuple] = set()
+    for doc in picked:
+        dedupe_key = (doc.url or "", doc.title or "", "" if doc.url else doc.id or "")
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        sources.append(
+            CoverageSuggestionSource(doc_id=doc.id or None, title=doc.title, url=doc.url)
+        )
+    return sources
+
+
 async def _draft_questions(
-    llm: AnalysisLlmService, partition_key: str, value: str, snippets: list[str], max_questions: int
+    llm: AnalysisLlmService, partition_key: str, value: str, docs: list, max_questions: int
 ) -> tuple[list[dict], object | None]:
     content, usage = await llm.tracked_chat_completion(
         messages=[
             {"role": "system", "content": _SUGGESTION_SYSTEM_PROMPT},
-            {"role": "user", "content": _build_user_prompt(partition_key, value, snippets)},
+            {"role": "user", "content": _build_user_prompt(partition_key, value, docs)},
         ],
         temperature=0.3,
         response_format={"type": "json_object"},
@@ -150,6 +194,7 @@ async def _draft_questions(
                     {
                         "prompt": str(q["prompt"]).strip(),
                         "acceptance_criteria": str(q.get("acceptance_criteria", "")).strip(),
+                        "sources": _sources_from_refs(docs, q.get("source_refs")),
                     }
                 )
     except (json.JSONDecodeError, ValueError, TypeError):
@@ -244,9 +289,9 @@ async def run_coverage_analysis(
                         docs = await provider_obj.sample_documents(
                             partition_key, gap.value, sample_n
                         )
-                        snippets = [d.snippet for d in docs if d.snippet]
+                        grounding = [d for d in docs if d.snippet]
                         questions, usage = await _draft_questions(
-                            llm, partition_key, gap.value, snippets, max_questions_per_gap
+                            llm, partition_key, gap.value, grounding, max_questions_per_gap
                         )
                         if usage is not None:
                             await record_llm_usage(
@@ -269,6 +314,7 @@ async def run_coverage_analysis(
                                     partition_value=gap.value,
                                     prompt=q["prompt"],
                                     acceptance_criteria=q["acceptance_criteria"],
+                                    sources=q["sources"],
                                     **scope,
                                 )
                             )

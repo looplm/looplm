@@ -184,6 +184,7 @@ export type {
   CoverageRow,
   CoverageResults,
   CoverageSuggestion,
+  CoverageSuggestionSource,
   CoverageRun,
   CoverageRunStatus,
   StartAnalysisBody,

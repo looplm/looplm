@@ -11,6 +11,7 @@ import {
   type TestCaseCreateBody,
   type TestDatasetItem,
 } from "@/lib/api";
+import { SuggestionSources } from "@/components/coverage/suggestion-sources";
 
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "value";
@@ -30,7 +31,16 @@ function formFromSuggestion(s: CoverageSuggestion, index: number): SuggestionFor
   };
 }
 
-function suggestionToBody(s: CoverageSuggestion, form: SuggestionForm): TestCaseCreateBody {
+function sourceUrls(s: CoverageSuggestion): string[] {
+  return (s.sources || []).map((src) => src.url).filter((u): u is string => Boolean(u));
+}
+
+function suggestionToBody(
+  s: CoverageSuggestion,
+  form: SuggestionForm,
+  setExpectedUrls: boolean,
+): TestCaseCreateBody {
+  const urls = sourceUrls(s);
   return {
     test_id: form.test_id.trim() || `coverage-${slugify(s.partition_value)}`,
     prompt: form.prompt.trim(),
@@ -39,8 +49,16 @@ function suggestionToBody(s: CoverageSuggestion, form: SuggestionForm): TestCase
     team_filter: s.team_filter || [],
     expected_source_types: s.expected_source_types || [],
     context_filters: s.context_filters || {},
+    // Only promote the drafting sources to retrieval ground truth when the user
+    // opts in — they are what the question was drafted from, not a verified
+    // relevance judgement.
+    expected_page_urls: setExpectedUrls ? urls : [],
     has_summary: false,
-    metadata: { source: "rag-coverage", partition_value: s.partition_value },
+    metadata: {
+      source: "rag-coverage",
+      partition_value: s.partition_value,
+      ...(urls.length > 0 ? { source_urls: urls } : {}),
+    },
   };
 }
 
@@ -143,6 +161,7 @@ export function SuggestionList({
                     {s.acceptance_criteria}
                   </p>
                 )}
+                <SuggestionSources sources={s.sources} />
                 <div className="mt-2 flex items-center flex-wrap gap-y-1">
                   <Chips label="tags" values={s.tag_filter} />
                   <Chips label="team" values={s.team_filter} />
@@ -222,6 +241,7 @@ function AcceptModal({
   const [newName, setNewName] = useState(suggestion.suggested_dataset_name || "Eval coverage");
   const [form, setForm] = useState<SuggestionForm>(() => formFromSuggestion(suggestion, index));
   const [saving, setSaving] = useState(false);
+  const [setExpectedUrls, setSetExpectedUrls] = useState(false);
   // When the user selects an existing dataset because the name they typed
   // already exists, keep a note so we can explain why the dropdown changed.
   const [autoSelectedName, setAutoSelectedName] = useState<string | null>(null);
@@ -262,7 +282,10 @@ function AcceptModal({
           targetId = ds.id;
         }
       }
-      const created = await createTestCase(targetId, suggestionToBody(suggestion, form));
+      const created = await createTestCase(
+        targetId,
+        suggestionToBody(suggestion, form, setExpectedUrls),
+      );
       onAccepted(index, { datasetId: targetId, caseId: created.id });
     } catch (err) {
       toast.error("Failed to add", { description: String(err) });
@@ -273,6 +296,8 @@ function AcceptModal({
 
   const inputCls =
     "w-full px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm";
+  const sources = suggestion.sources || [];
+  const urlCount = sourceUrls(suggestion).length;
   const hasScope =
     suggestion.tag_filter.length > 0 ||
     suggestion.team_filter.length > 0 ||
@@ -324,6 +349,30 @@ function AcceptModal({
                 placeholder="(optional)"
               />
             </div>
+            {sources.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium mb-1">Sources</label>
+                <p className="text-xs text-gray-500 dark:text-slate-400">
+                  Indexed documents this question and its criteria were drafted from. Open them to
+                  check the criteria against the real content.
+                </p>
+                <SuggestionSources sources={sources} label="" />
+                {urlCount > 0 && (
+                  <label className="mt-2 flex items-start gap-2 text-xs text-gray-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={setExpectedUrls}
+                      onChange={(e) => setSetExpectedUrls(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      Also set {urlCount === 1 ? "this URL" : `these ${urlCount} URLs`} as expected
+                      page URLs (retrieval ground truth). Leave off until you have verified them.
+                    </span>
+                  </label>
+                )}
+              </div>
+            )}
             {hasScope && (
               <div>
                 <label className="block text-sm font-medium mb-1">Scope</label>

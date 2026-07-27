@@ -55,10 +55,17 @@ export interface CoverageResults {
   issues?: PartitionIssue[];
 }
 
+export interface CoverageSuggestionSource {
+  doc_id?: string | null;
+  title?: string | null;
+  url?: string | null;
+}
+
 export interface CoverageSuggestion {
   partition_value: string;
   prompt: string;
   acceptance_criteria: string;
+  sources?: CoverageSuggestionSource[];
   tag_filter: string[];
   team_filter: string[];
   expected_source_types: string[];

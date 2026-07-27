@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from app.index_providers.base import PartitionValue
+from app.index_providers.base import CorpusDoc, PartitionValue
 from app.index_providers.coverage import (
     CoverageRow,
     compute_coverage,
     coverage_fields_for,
     detect_partition_issues,
 )
+from app.routers.rag_coverage_worker import _build_user_prompt, _sources_from_refs
 
 
 def _pv(value: str, count: int) -> PartitionValue:
@@ -168,3 +169,50 @@ def test_compute_coverage_includes_detected_issues():
     report = compute_coverage("team", dist, [])
     kinds = {i.value: i.kind for i in report.issues}
     assert kinds.get("FiBu (Finanzbuchhaltung)") == "near_duplicate"
+
+
+# ── suggestion source attribution ──────────────────────────────
+
+def _doc(doc_id: str, title: str | None, url: str | None, snippet: str = "text"):
+    return CorpusDoc(id=doc_id, title=title, url=url, snippet=snippet)
+
+
+def test_source_refs_map_to_cited_documents_only():
+    docs = [
+        _doc("1", "Vertragsmanagement", "https://wiki/x/1"),
+        _doc("2", "kVASy", "https://wiki/x/2"),
+        _doc("3", "winEV", "https://wiki/x/3"),
+    ]
+    sources = _sources_from_refs(docs, [1, "3"])
+    assert [s.url for s in sources] == ["https://wiki/x/1", "https://wiki/x/3"]
+
+
+def test_source_refs_out_of_range_or_missing_fall_back_to_all_docs():
+    docs = [_doc("1", "A", "https://wiki/a"), _doc("2", "B", "https://wiki/b")]
+    assert len(_sources_from_refs(docs, None)) == 2
+    assert len(_sources_from_refs(docs, [9, "nope"])) == 2
+    assert len(_sources_from_refs(docs, [])) == 2
+
+
+def test_sources_dedupe_chunks_of_the_same_page():
+    docs = [
+        _doc("chunk-1", "Page", "https://wiki/page"),
+        _doc("chunk-2", "Page", "https://wiki/page"),
+        _doc("chunk-3", "Other", None),
+    ]
+    sources = _sources_from_refs(docs, [1, 2, 3])
+    assert [(s.title, s.url) for s in sources] == [
+        ("Page", "https://wiki/page"),
+        ("Other", None),
+    ]
+
+
+def test_user_prompt_numbers_excerpts_for_citation():
+    docs = [_doc("1", "Titel", "https://wiki/a", "Inhalt A"), _doc("2", None, None, "Inhalt B")]
+    prompt = _build_user_prompt("tags", "uebersicht", docs)
+    assert "[1] (Titel) Inhalt A" in prompt
+    assert "[2] Inhalt B" in prompt
+
+
+def test_user_prompt_without_excerpts_is_explicit():
+    assert "(no text excerpts available)" in _build_user_prompt("tags", "uebersicht", [])

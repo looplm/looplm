@@ -71,12 +71,27 @@ class AnalyzeRequest(BaseModel):
     max_gaps_to_suggest: int = Field(15, ge=1, le=100)
 
 
+class CoverageSuggestionSource(BaseModel):
+    """An indexed document a suggested question was drafted from.
+
+    Lets a reviewer open the underlying page and check the drafted acceptance
+    criteria against the real content instead of trusting the LLM.
+    """
+
+    doc_id: Optional[str] = None
+    title: Optional[str] = None
+    url: Optional[str] = None
+
+
 class CoverageEvalSuggestion(BaseModel):
     """An LLM-drafted eval question targeting one uncovered partition value."""
 
     partition_value: str
     prompt: str
     acceptance_criteria: str
+    # The sampled documents this question was grounded in. When the model cites
+    # specific excerpts, only those; otherwise every excerpt shown to it.
+    sources: list[CoverageSuggestionSource] = Field(default_factory=list)
     tag_filter: list[str] = Field(default_factory=list)
     team_filter: list[str] = Field(default_factory=list)
     expected_source_types: list[str] = Field(default_factory=list)
