@@ -3,7 +3,8 @@
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import type { Root, Element, ElementContent } from "hast";
 
 // Chunks come out of the index as whatever the ingester produced: plain prose, Markdown, or raw
 // HTML fragments (tables from scraped pages and Confluence exports are the common case). Reading
@@ -11,12 +12,12 @@ import rehypeSanitize from "rehype-sanitize";
 // markup instead — Markdown + GFM tables, with raw HTML passed through a sanitizer.
 
 // Chunk text is untrusted (it is whatever got indexed), so raw HTML goes through rehype-sanitize's
-// default GitHub schema: script tags, event handlers and javascript: URLs are dropped, while table
+// GitHub schema: script tags, event handlers and javascript: URLs are dropped, while table
 // structure (including colspan/rowspan) survives.
 
 // Block-level HTML, or Markdown structure worth rendering (table pipes, headings, list bullets,
 // bold). Plain prose fails this test and stays plain text — rendering it would only add noise.
-const HTML_BLOCK = /<\/?(table|thead|tbody|tr|t[dh]|ul|ol|li|p|div|h[1-6]|pre|code|br|strong|em|b|i|a|span|img)\b[^>]*>/i;
+const HTML_BLOCK = /<\/?(table|caption|thead|tbody|tr|t[dh]|figure|figcaption|ul|ol|li|p|div|h[1-6]|pre|code|br|strong|em|b|i|a|span|img)\b[^>]*>/i;
 const MD_TABLE = /^\s*\|.*\|\s*$/m;
 const MD_STRUCTURE = /^\s{0,3}#{1,6}\s|^\s{0,3}[-*+]\s|^\s{0,3}\d+\.\s|\*\*[^*\n]+\*\*|^\s{0,3}>\s/m;
 
@@ -25,6 +26,85 @@ export function isRenderable(text: string | null | undefined): boolean {
   if (!text) return false;
   return HTML_BLOCK.test(text) || MD_TABLE.test(text) || MD_STRUCTURE.test(text);
 }
+
+// The GitHub schema drops the structural tags Azure Document Intelligence emits around tables and
+// images (`<caption>`, `<figure>`, `<figcaption>`, `<colgroup>`). Dropping an element keeps its
+// children, so a stripped `<caption>` leaves bare text sitting directly inside `<table>`, invalid
+// nesting that React reports as a hydration error. These five carry no behaviour, so allowing them
+// both fixes the nesting and renders the caption as a caption.
+const SCHEMA = {
+  ...defaultSchema,
+  tagNames: [
+    ...(defaultSchema.tagNames ?? []),
+    "caption",
+    "figure",
+    "figcaption",
+    "colgroup",
+    "col",
+  ],
+  attributes: {
+    ...defaultSchema.attributes,
+    colgroup: ["span"],
+    col: ["span"],
+  },
+};
+
+// What each table-structural element is allowed to contain, and the wrapper to put anything else
+// in. A chunk is an arbitrary slice of a document, so it can still hand us a half-open table or
+// markup the sanitizer unwrapped into the wrong place; without this, React logs an invalid-nesting
+// error and the browser hoists the stray content out of the table on hydration.
+const TABLE_SLOTS: Record<string, { allow: string[]; wrap: string[] }> = {
+  table: { allow: ["caption", "colgroup", "thead", "tbody", "tfoot", "tr"], wrap: ["caption"] },
+  thead: { allow: ["tr"], wrap: ["tr", "td"] },
+  tbody: { allow: ["tr"], wrap: ["tr", "td"] },
+  tfoot: { allow: ["tr"], wrap: ["tr", "td"] },
+  tr: { allow: ["td", "th"], wrap: ["td"] },
+};
+
+/** Nest ``children`` inside ``tags`` outermost-first, e.g. ``["tr","td"]`` -> ``<tr><td>…``. */
+function nest(tags: string[], children: ElementContent[]): Element {
+  const [tag, ...rest] = tags;
+  return {
+    type: "element",
+    tagName: tag,
+    properties: {},
+    children: rest.length ? [nest(rest, children)] : children,
+  };
+}
+
+function repair(node: Root | Element) {
+  for (const child of node.children) {
+    if (child.type === "element") repair(child);
+  }
+  if (node.type !== "element") return;
+  const slot = TABLE_SLOTS[node.tagName];
+  if (!slot) return;
+  const out: ElementContent[] = [];
+  // Consecutive strays share one wrapper, so a caption split across text and inline markup stays a
+  // single caption. Whitespace-only text is left alone: React ignores it inside a table.
+  let stray: ElementContent[] = [];
+  const flush = () => {
+    if (stray.length) out.push(nest(slot.wrap, stray));
+    stray = [];
+  };
+  for (const child of node.children) {
+    const ok =
+      (child.type === "element" && slot.allow.includes(child.tagName)) ||
+      (child.type === "text" && !child.value.trim()) ||
+      child.type === "comment";
+    if (ok) {
+      flush();
+      out.push(child);
+    } else {
+      stray.push(child);
+    }
+  }
+  flush();
+  node.children = out;
+}
+
+/** Rehype plugin: make table markup valid so React never sees invalid nesting. */
+const rehypeRepairTables = () => repair;
 
 // Typography classes tuned for chunk-sized content: tight vertical rhythm, bordered table cells
 // (prose leaves table borders very faint), and horizontal scroll so a wide table can't stretch
@@ -37,7 +117,10 @@ const PROSE =
   "prose-th:px-2 prose-th:py-1 prose-th:align-top prose-th:border prose-th:border-gray-200 dark:prose-th:border-slate-700 " +
   "prose-th:bg-gray-50 dark:prose-th:bg-slate-800/60 " +
   "prose-td:px-2 prose-td:py-1 prose-td:align-top prose-td:border prose-td:border-gray-200 dark:prose-td:border-slate-700 " +
-  "prose-a:text-indigo-600 dark:prose-a:text-indigo-400 prose-img:my-1.5";
+  "prose-a:text-indigo-600 dark:prose-a:text-indigo-400 prose-img:my-1.5 " +
+  // Captions read as metadata, not as a table row.
+  "[&_caption]:text-left [&_caption]:text-[11px] [&_caption]:pb-1 [&_caption]:text-gray-500 " +
+  "dark:[&_caption]:text-slate-400 prose-figcaption:text-[11px] prose-figcaption:mt-1";
 
 /**
  * Render chunk text for a human reviewer. ``rendered`` off (or content with no markup) falls back
@@ -74,7 +157,10 @@ export function ChunkText({
         clamp ? "max-h-24 overflow-y-hidden" : ""
       } ${className}`}
     >
-      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, SCHEMA], rehypeRepairTables]}
+      >
         {text}
       </Markdown>
     </div>
