@@ -6,6 +6,7 @@ import { gradeTint } from "./types";
 import { GradeSelector } from "./grade-selector";
 import { AiGradeBadge, ProvenanceBadges, pickIndexText } from "./chunk-row";
 import { PassagePanel } from "./passage-panel";
+import { ChunkText, isRenderable } from "@/components/chunk-text";
 
 // A pooled candidate chunk (from an index search head). Lighter than ChunkRow — no rank or
 // document locators — but judgeable the same way, with provenance badges and full-text fetch.
@@ -16,6 +17,7 @@ export function PoolChunkRow({
   disabled,
   indexConnected,
   showAiLabels,
+  renderMarkup,
   onGrade,
   onClear,
 }: {
@@ -28,18 +30,26 @@ export function PoolChunkRow({
   // Whether to show the LLM "AI judge" grade badge — hidden by default so it doesn't anchor
   // the human labeler.
   showAiLabels: boolean;
+  // Workbench-wide default for rendering HTML/Markdown chunks as formatted content; each row can
+  // still flip itself back to the raw text.
+  renderMarkup: boolean;
   onGrade: (grade: number) => void;
   onClear: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [doc, setDoc] = useState<Record<string, unknown> | null>(null);
   const [docState, setDocState] = useState<"idle" | "loading" | "loaded">("idle");
+  // Per-row override of the workbench-wide render toggle (null = follow it).
+  const [renderOverride, setRenderOverride] = useState<boolean | null>(null);
 
   const previewText = chunk.content_preview || "";
   const indexText = pickIndexText(doc);
   const fullText = indexText ?? previewText;
   const canFetchIndex = indexConnected && !!chunk.chunk_id;
   const isLong = previewText.length > 240 || previewText.includes("\n") || canFetchIndex;
+  const shownText = expanded ? fullText : previewText;
+  const rendered = renderOverride ?? renderMarkup;
+  const hasMarkup = isRenderable(shownText);
 
   const loadDoc = () => {
     if (docState !== "idle" || !canFetchIndex) return;
@@ -68,14 +78,8 @@ export function PoolChunkRow({
           <p className="text-sm italic text-gray-400 dark:text-slate-500">
             Loading full chunk from index...
           </p>
-        ) : (expanded ? fullText : previewText) ? (
-          <p
-            className={`text-sm text-gray-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap ${
-              expanded ? "" : "line-clamp-3"
-            }`}
-          >
-            {expanded ? fullText : previewText}
-          </p>
+        ) : shownText ? (
+          <ChunkText text={shownText} rendered={rendered} clamp={!expanded} />
         ) : (
           <p className="text-sm italic text-gray-400 dark:text-slate-500">No chunk text.</p>
         )}
@@ -91,6 +95,19 @@ export function PoolChunkRow({
               className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
             >
               {expanded ? "Show less" : "Show full chunk"}
+            </button>
+          )}
+          {hasMarkup && (
+            <button
+              onClick={() => setRenderOverride(!rendered)}
+              title={
+                rendered
+                  ? "Show the raw chunk text exactly as it is stored in the index"
+                  : "Render this chunk's HTML/Markdown as formatted text and tables"
+              }
+              className="font-medium text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200 hover:underline"
+            >
+              {rendered ? "Raw text" : "Render markup"}
             </button>
           )}
           {chunk.url && (

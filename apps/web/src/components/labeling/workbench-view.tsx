@@ -90,6 +90,20 @@ export function WorkbenchView({
       return next;
     });
 
+  // Chunks that are HTML or Markdown (scraped tables, Confluence exports) are rendered as
+  // formatted content by default — reading raw `<td>` markup is what a reviewer would otherwise
+  // have to do. Also remembered across cases; individual rows can still flip back to raw.
+  const [renderMarkup, setRenderMarkup] = useState(true);
+  useEffect(() => {
+    setRenderMarkup(localStorage.getItem("labeling:renderMarkup") !== "0");
+  }, []);
+  const toggleRenderMarkup = () =>
+    setRenderMarkup((v) => {
+      const next = !v;
+      localStorage.setItem("labeling:renderMarkup", next ? "1" : "0");
+      return next;
+    });
+
   const chunks = useMemo(() => pool?.chunks ?? [], [pool]);
   // Chunks only the project's own retrieval agent surfaced: the candidates that decide whether
   // its stage is scored fairly, and the ones no index head would have put in front of a labeler.
@@ -183,6 +197,21 @@ export function WorkbenchView({
               Agent only · {agentOnlyCount}
             </button>
           )}
+          <button
+            onClick={toggleRenderMarkup}
+            title={
+              renderMarkup
+                ? "Show chunks as raw text, exactly as stored in the index"
+                : "Render chunks that contain HTML or Markdown as formatted text and tables"
+            }
+            className={`px-2 py-1 rounded-lg text-[11px] font-medium border ${
+              renderMarkup
+                ? "border-indigo-400 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300"
+                : "border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300 hover:border-indigo-400"
+            }`}
+          >
+            {renderMarkup ? "Rendered" : "Raw text"}
+          </button>
           <button
             onClick={toggleAiLabels}
             title={
@@ -288,6 +317,7 @@ export function WorkbenchView({
               disabled={!canEdit}
               indexConnected={indexConnected}
               showAiLabels={showAiLabels}
+              renderMarkup={renderMarkup}
               onGrade={(grade) => onGrade(c.test_id, chunk, grade)}
               onClear={() => onClearGrade(c.test_id, chunk)}
             />
@@ -299,6 +329,7 @@ export function WorkbenchView({
           canEdit={canEdit}
           indexConnected={indexConnected}
           showAiLabels={showAiLabels}
+          renderMarkup={renderMarkup}
           alreadyShownIds={shownIds}
         />
         {pool?.computed_at && (

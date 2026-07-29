@@ -20,6 +20,7 @@ export function PoolSection({
   canEdit,
   indexConnected,
   showAiLabels,
+  renderMarkup,
   alreadyShownIds,
 }: {
   testId: string;
@@ -28,6 +29,8 @@ export function PoolSection({
   indexConnected: boolean;
   // Whether to show the AI judge grade badge on candidate rows (see WorkbenchView).
   showAiLabels: boolean;
+  // Whether HTML/Markdown chunks are rendered as formatted content (see WorkbenchView).
+  renderMarkup: boolean;
   // Chunk ids already rendered in the case's auto-pool, filtered out of search results so this
   // section only surfaces genuinely new candidates.
   alreadyShownIds: Set<string>;
@@ -151,6 +154,7 @@ export function PoolSection({
                   disabled={!canEdit}
                   indexConnected={indexConnected}
                   showAiLabels={showAiLabels}
+                  renderMarkup={renderMarkup}
                   onGrade={(grade) => onGrade(chunk, grade)}
                   onClear={() => onClear(chunk)}
                 />
