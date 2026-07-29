@@ -326,6 +326,19 @@ export interface EmbeddingTestResult {
 export const testEmbedding = (projectId: string) =>
   request<EmbeddingTestResult>(`/api/projects/${projectId}/test-embedding`, { method: "POST" });
 
+export interface CohereRerankTestResult {
+  ok: boolean;
+  configured: boolean;
+  model?: string | null;
+  error?: string | null;
+}
+
+/** Rerank a throwaway document with the project's saved Cohere config. Owner-only. */
+export const testCohereRerank = (projectId: string) =>
+  request<CohereRerankTestResult>(`/api/projects/${projectId}/test-cohere-rerank`, {
+    method: "POST",
+  });
+
 // --- User Settings ---
 
 export interface UserSettings {

@@ -32,14 +32,17 @@ from app.models.project import Project
 from app.schemas.retrieval import CaseDiagnosisResponse, DiagnosedChunk
 from app.services.chunk_gold import resolve_project_gold
 from app.services.chunk_pool import AGENTIC_RERANK_DEPTH
+from app.services.cohere_rerank import AGENTIC_COHERE_STAGE, COHERE_STAGE
 from app.services.retrieval_metrics_aggregate import STAGE_LABELS, ranked_chunks_for_head
 
 from ._helpers import _dataset_case_agentic_queries, assemble_case_pool
 
 router = APIRouter()
 
-# Retrievers the candidate pool ranks (keyword/vector/hybrid/semantic/agentic/agentic_rerank).
+# Retrievers the candidate pool ranks (keyword/vector/hybrid/semantic/cohere_rerank/agentic/
+# agentic_rerank/agentic_cohere).
 _POOL_HEADS = {head for head, _ in STAGE_LABELS}
+COHERE_HEADS = (COHERE_STAGE, AGENTIC_COHERE_STAGE)
 _DEFAULT_HEAD = "agentic_rerank"
 # Heads that can only return a chunk if it has an embedding — being found by one is positive proof
 # the chunk is embedded, regardless of whether the live fetch exposes the (usually non-retrievable)
@@ -89,8 +92,8 @@ async def diagnose_case(
 ):
     """Diagnose why a case's relevant chunks were missed at top-``k`` under ``retriever``.
 
-    ``retriever`` is one of the pool heads (keyword | vector | hybrid | semantic | agentic |
-    agentic_rerank); anything else falls back to ``agentic_rerank``. ``gold_source`` selects whose
+    ``retriever`` is one of the pool heads (keyword | vector | hybrid | semantic | cohere_rerank |
+    agentic | agentic_rerank | agentic_cohere); anything else falls back to ``agentic_rerank``. ``gold_source`` selects whose
     labels are ground truth (human | ai | both); ``min_grade`` is the binary-metrics strictness,
     so the miss list matches what the metrics counted as relevant. Returns ``available=False``
     when the project has no index provider, the case has no gold relevant chunks, or the case
@@ -149,6 +152,9 @@ async def diagnose_case(
         agentic_queries=agentic,
         rerank_depth=AGENTIC_RERANK_DEPTH,
         refresh=refresh,
+        # Diagnosing a Cohere stage needs its scores in the pool; otherwise its ranking is empty
+        # and every relevant chunk would look "missed" for the wrong reason.
+        with_cohere=head in COHERE_HEADS,
     )
     if not connected:
         return CaseDiagnosisResponse(
@@ -196,8 +202,10 @@ async def diagnose_case(
 
     def _dense_retrieved(cid: str) -> bool:
         c = pool_by_id.get(cid)
+        # Every rerank head reranks hybrid (dense-inclusive) candidates, so a score from any of
+        # them is the same proof of an embedding as a direct dense-head hit.
         return c is not None and (
-            c.agentic_rerank_score is not None or any(h in c.ranks for h in _DENSE_HEADS)
+            bool(c.rerank_scores) or any(h in c.ranks for h in _DENSE_HEADS)
         )
 
     diagnosed: list[DiagnosedChunk] = []

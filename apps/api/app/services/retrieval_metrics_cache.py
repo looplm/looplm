@@ -33,15 +33,17 @@ def result_cache_key(
     gold_source: str,
     min_grade: int,
     include_agent: bool = False,
+    include_cohere: bool = False,
 ) -> str:
     """Cache key for one computed metrics response, stable across dataset-id ordering.
 
     ``include_agent`` (by-stage only) probes the external custom-agent endpoint as an extra stage;
-    it changes the result, so it gets its own key. Kept as a suffix appended only when set, so the
-    common (no-agent) keys stay byte-identical to before.
+    ``include_cohere`` (by-stage only) adds the two Cohere cross-encoder stages. Both change which
+    stages the result carries, so each gets its own key. Kept as suffixes appended only when set,
+    so the common (index-only) keys stay byte-identical to before.
     """
     ids = ",".join(sorted(str(i) for i in dataset_ids))
-    suffix = ":agent" if include_agent else ""
+    suffix = f"{':agent' if include_agent else ''}{':cohere' if include_cohere else ''}"
     return f"retrieval:metrics:{_VERSION}:{project_id}:{view}:{gold_source}:g{min_grade}:{ids}{suffix}"
 
 

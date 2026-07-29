@@ -41,6 +41,10 @@ export const PROVENANCE_BADGES: Record<string, { label: string; cls: string }> =
   hybrid: { label: "Hybrid", cls: "bg-teal-500/10 text-teal-600 dark:text-teal-300" },
   semantic: { label: "Reranked", cls: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300" },
   agentic: { label: "Agentic", cls: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-300" },
+  // Cross-encoder heads: these carry a relevance score instead of a rank (see ProvenanceBadges).
+  cohere_rerank: { label: "Cohere", cls: "bg-rose-500/10 text-rose-600 dark:text-rose-300" },
+  agentic_cohere: { label: "Agentic Cohere", cls: "bg-rose-500/10 text-rose-600 dark:text-rose-300" },
+  agentic_rerank: { label: "Agentic rerank", cls: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300" },
   // The project's own retrieval agent returned this chunk. Judging these is what keeps the
   // agent's stage comparable: unjudged chunks it alone finds would score as misses.
   agent: { label: "Agent", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300" },
@@ -48,12 +52,16 @@ export const PROVENANCE_BADGES: Record<string, { label: string; cls: string }> =
 
 // Each badge shows the head and, when known, the rank the chunk held in that head — so the
 // labeler sees both *why* a chunk is pooled and *where* each method ranked it (e.g. "Vector #3").
+// Rerank heads have no rank: their signal is a relevance score, shown as the score itself (e.g.
+// "Cohere 0.94"), on that reranker's own scale — Cohere 0-1, the Azure semantic ranker 0-4.
 export function ProvenanceBadges({
   provenance,
   ranks,
+  rerankScores,
 }: {
   provenance: string[];
   ranks?: Record<string, number>;
+  rerankScores?: Record<string, number>;
 }) {
   return (
     <>
@@ -64,6 +72,7 @@ export function ProvenanceBadges({
             cls: "bg-gray-500/10 text-gray-600 dark:text-gray-300",
           };
         const rank = ranks?.[p];
+        const score = rerankScores?.[p];
         return (
           <span
             key={p}
@@ -71,6 +80,9 @@ export function ProvenanceBadges({
           >
             {b.label}
             {rank != null && <span className="ml-1 font-mono normal-case">#{rank}</span>}
+            {rank == null && score != null && (
+              <span className="ml-1 font-mono normal-case">{score.toFixed(2)}</span>
+            )}
           </span>
         );
       })}

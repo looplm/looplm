@@ -38,6 +38,8 @@ export const EXPLAIN = {
     "Like nDCG, but it only counts chunks that have actually been judged — so unlabeled chunks don't distort the ranking score during incomplete judging. Which chunks count as judged follows the Min grade selector, but the rank weights always use the full graded labels (1 to 3).",
   method:
     "Which retrieval method produced these numbers. The Overall view scores a single ranking; use By stage to compare each retrieval method (sparse, dense, RRF, reranked) side by side.",
+  cohereScale:
+    "Cohere scores relevance from 0 to 1, the Azure semantic reranker from 0 to 4. The cutoffs are not interchangeable, so pick each one against its own stage.",
 };
 
 export type Accent = "indigo" | "violet" | "sky" | "emerald" | "amber";
@@ -98,11 +100,17 @@ export const RETRIEVERS: { value: string; label: string }[] = [
   { value: "vector", label: "Dense" },
   { value: "hybrid", label: "RRF" },
   { value: "semantic", label: "Reranked" },
+  { value: "cohere_rerank", label: "Cohere rerank" },
   { value: "agentic", label: "Agentic" },
   { value: "agentic_rerank", label: "Agentic + rerank" },
+  { value: "agentic_cohere", label: "Agentic + Cohere" },
   { value: "agent", label: "Custom agent" },
   { value: "best", label: "Best available" },
 ];
+
+// Retrievers that only exist when the project configured a Cohere Rerank endpoint, so the selector
+// hides them rather than offering a stage that can never have numbers.
+export const COHERE_RETRIEVERS = ["cohere_rerank", "agentic_cohere"];
 
 export const DEFAULT_RETRIEVER = "agentic";
 
@@ -150,8 +158,12 @@ export const RETRIEVER_NOTES: Record<string, string> = {
   vector: "dense vector (embedding) similarity only.",
   hybrid: "reciprocal-rank fusion (RRF) of sparse + dense.",
   semantic: "the semantic reranker's final ranking.",
+  cohere_rerank:
+    "the same hybrid top-50 the semantic reranker sees, reordered by the Cohere cross-encoder instead. Compare it against Reranked to see which reranker suits your corpus.",
   agentic: "the agentic retrieval path (multi-query planning), ordered by best retrieval position.",
   agentic_rerank: "the agentic pool reordered by the semantic (L2) reranker score, top 50 per sub-query.",
+  agentic_cohere:
+    "the whole agentic pool scored by the Cohere cross-encoder against your original question in one pass, so candidates from different sub-queries compare on one scale (the positional merge cannot).",
   agent: "your real retrieval agent's own ranking, fetched live from its configured endpoint (not LoopLM re-querying the index). Configure it under Settings → Evaluations.",
   best: "your live index's best-available ranking. It prefers the semantic reranker, falling back to hybrid (RRF), vector, then keyword.",
 };

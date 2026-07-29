@@ -70,8 +70,13 @@ export function PoolChunkRow({
         <div className="flex items-center gap-2 flex-wrap mb-1.5">
           {/* Per-head rank badges are the honest signal; the raw backend score isn't shown
               because each head scores on a different, incomparable scale (BM25 unbounded vs
-              RRF ~1 vs reranker 0-4). */}
-          <ProvenanceBadges provenance={chunk.provenance} ranks={chunk.ranks} />
+              RRF ~1 vs reranker 0-4). The rerank heads are the exception: they have no rank, so
+              the badge carries their relevance score. */}
+          <ProvenanceBadges
+            provenance={chunk.provenance}
+            ranks={chunk.ranks}
+            rerankScores={chunk.rerank_scores}
+          />
         </div>
 
         {expanded && docState === "loading" ? (

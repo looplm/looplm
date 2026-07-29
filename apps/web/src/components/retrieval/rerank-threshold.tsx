@@ -5,11 +5,14 @@ import type { RerankThresholdPoint } from "@/lib/api";
 import { pct } from "./constants";
 import { Info } from "./metric-card";
 
-const INFO =
-  "The agentic pool feeds the LLM the chunks whose Azure rerankerScore (0-4) clears this cutoff, " +
-  "instead of a fixed top-k. Drag to trade precision (less noise) against recall (more coverage) " +
-  "and see how many chunks per query you'd send. Pick where precision meets your target while " +
-  "recall is still acceptable.";
+// The cutoff is per reranker, and the scales differ (Azure rerankerScore 0-4, Cohere 0-1), so the
+// explanation names the scale actually on screen instead of asserting one of them.
+const info = (stageLabel: string | undefined, scaleMax: number | null) =>
+  `The ${stageLabel ?? "reranked"} stage feeds the LLM the chunks whose relevance score` +
+  `${scaleMax ? ` (0-${scaleMax})` : ""} clears this cutoff, instead of a fixed top-k. Drag to ` +
+  "trade precision (less noise) against recall (more coverage) and see how many chunks per query " +
+  "you'd send. Pick where precision meets your target while recall is still acceptable. Scores " +
+  "are not comparable across rerankers, so each stage needs its own cutoff.";
 
 // Plot geometry (viewBox units); padding leaves room for the axis labels.
 const PAD = 6;
@@ -18,13 +21,23 @@ const span = (100 - 2 * PAD);
 export function RerankThreshold({
   sweep,
   precisionTarget,
+  scaleMax,
+  stageLabel,
 }: {
   sweep: RerankThresholdPoint[];
   precisionTarget: number | null;
+  // Top of this reranker's score scale (4 = Azure rerankerScore, 1 = Cohere); null = unknown.
+  scaleMax?: number | null;
+  stageLabel?: string;
 }) {
   const tMin = sweep[0].threshold;
   const tMax = sweep[sweep.length - 1].threshold;
   const range = Math.max(0.0001, tMax - tMin);
+  // Step and readout precision follow the computed grid, so a 0-1 scale gets fine steps and two
+  // decimals while the 0-4 scale keeps its familiar 0.1 / one-decimal feel.
+  const step = sweep.length > 1 ? Math.abs(sweep[1].threshold - tMin) || 0.1 : 0.1;
+  const digits = step < 0.05 ? 3 : step < 0.1 ? 2 : 1;
+  const fmtT = (v: number) => v.toFixed(digits);
 
   // Default to the cheapest cutoff that meets the precision target (most recall while still on
   // target), else the lowest threshold — a sensible starting point, not a hidden decision.
@@ -58,7 +71,7 @@ export function RerankThreshold({
     <div className="rounded-xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 mb-6">
       <div className="flex items-center text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-slate-500 mb-3">
         Score threshold
-        <Info text={INFO} />
+        <Info text={info(stageLabel, scaleMax ?? null)} />
       </div>
 
       <div className="grid gap-5 md:grid-cols-[1fr_260px] items-center">
@@ -106,18 +119,18 @@ export function RerankThreshold({
           <div className="flex items-baseline justify-between mb-2">
             <span className="text-[11px] uppercase tracking-wide text-gray-400 dark:text-slate-500">Cutoff</span>
             <span className="font-mono text-lg font-semibold tabular-nums text-gray-800 dark:text-slate-100">
-              {point.threshold.toFixed(1)}
+              {fmtT(point.threshold)}
             </span>
           </div>
           <input
             type="range"
             min={tMin}
             max={tMax}
-            step={0.1}
+            step={step}
             value={t}
             onChange={(e) => setT(Number(e.target.value))}
             className="w-full accent-indigo-600"
-            aria-label="rerankerScore cutoff"
+            aria-label="relevance score cutoff"
           />
           <div className="mt-3 grid grid-cols-3 gap-2 text-center">
             <Stat label="Precision" value={pct(point.precision)} accent={precisionOk ? "text-indigo-600 dark:text-indigo-400" : "text-amber-600 dark:text-amber-400"} />
@@ -127,7 +140,7 @@ export function RerankThreshold({
           {/* Reserve two lines so the row height (and the chart's vertical position) stays put
               whether or not the "Below your precision target." suffix wraps to a second line. */}
           <p className="mt-2 min-h-8 text-[11px] leading-4 text-gray-400 dark:text-slate-500">
-            Feed chunks scoring ≥ {point.threshold.toFixed(1)} to the model.
+            Feed chunks scoring ≥ {fmtT(point.threshold)} to the model.
             {precisionTarget != null && !precisionOk ? " Below your precision target." : ""}
           </p>
         </div>

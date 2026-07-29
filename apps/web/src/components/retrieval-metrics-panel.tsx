@@ -319,6 +319,7 @@ export default function RetrievalMetricsPanel({
     retrieverOptions,
     retrieverLabel,
     rerankSweep,
+    rerankScaleMax,
     availableKs,
     activeK,
     metCount,
@@ -471,6 +472,7 @@ export default function RetrievalMetricsPanel({
           activeK={activeK}
           displaySource={displaySource}
           rerankSweep={rerankSweep}
+          rerankScaleMax={rerankScaleMax}
           displayLoading={displayLoading}
           retrieverLabel={retrieverLabel}
           selectedRetriever={selectedRetriever}

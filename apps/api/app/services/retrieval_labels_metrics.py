@@ -33,15 +33,23 @@ from app.schemas.retrieval import ByStageMetricsResponse, RetrievalRunMetrics
 from app.services.analysis_llm import merge_llm_settings
 from app.services.chunk_pool import AGENTIC_RERANK_DEPTH
 from app.services.chunk_gold import resolve_project_gold
+from app.services.cohere_rerank import (
+    AGENTIC_COHERE_STAGE,
+    COHERE_STAGE,
+    get_cohere_rerank_config,
+)
 from app.services.labeling_pool import assemble_case_pool
 from app.services.query_embedding import build_query_embedder
 from app.services.retrieval_metrics_aggregate import (
     AGG_KS,
+    RERANK_SCALE_MAX,
     STAGE_LABELS,
     aggregate_retrieval_metrics_from_labels,
     build_by_stage_metrics,
     compute_rerank_threshold_sweep,
     negative_test_ids,
+    ranked_chunks_for_head,
+    rerank_thresholds_for,
 )
 from app.services.retrieval_metrics_cache import get_cached, result_cache_key, store
 from app.services.retrieval_probe import cached_probe_chunk_ids
@@ -49,6 +57,9 @@ from app.services.retrieval_probe import cached_probe_chunk_ids
 # Bound concurrent index probes so computing labels-metrics over a big dataset can't hammer the
 # index. Matches the labeling page's per-case pool concurrency.
 PROBE_CONCURRENCY = 4
+
+# The cross-encoder stages, dropped from the by-stage comparison when no reranker is configured.
+COHERE_HEADS = (COHERE_STAGE, AGENTIC_COHERE_STAGE)
 
 
 async def resolve_datasets(
@@ -257,8 +268,17 @@ async def compute_by_stage_metrics(
         )
 
     dataset_uuids = [d.id for d in datasets]
+    # The Cohere stages exist only when a reranker is configured; that changes which stages the
+    # result carries, so it has to key the cache alongside the agent toggle.
+    with_cohere = get_cohere_rerank_config(project.settings) is not None
     cache_key = result_cache_key(
-        project.id, "by-stage", dataset_uuids, gold_source, min_grade, include_agent
+        project.id,
+        "by-stage",
+        dataset_uuids,
+        gold_source,
+        min_grade,
+        include_agent,
+        with_cohere,
     )
     if not refresh:
         cached = await get_cached(cache_key, ByStageMetricsResponse)
@@ -280,10 +300,19 @@ async def compute_by_stage_metrics(
 
     # Only pool cases that have gold (others are dropped by the aggregator anyway).
     todo = [(tid, q) for tid, q in cases if relevant_by_test.get(tid)]
-    heads = [head for head, _ in STAGE_LABELS]
+    # Drop the Cohere stages entirely when no reranker is configured, rather than reporting two
+    # permanently empty rows the reader has to learn to ignore.
+    index_stage_labels = (
+        STAGE_LABELS
+        if with_cohere
+        else tuple((h, lb) for h, lb in STAGE_LABELS if h not in COHERE_HEADS)
+    )
+    heads = [head for head, _ in index_stage_labels]
     retrieved_by_stage: dict[str, dict[str, list[str]]] = {h: {} for h in heads}
-    # test_id -> [(chunk_id, rerankerScore)] for the agentic-rerank stage, feeding the threshold sweep.
-    rerank_scores_by_test: dict[str, list[tuple[str, float]]] = {}
+    # rerank head -> test_id -> [(chunk_id, relevance score)], feeding each head's threshold sweep.
+    rerank_scores_by_head: dict[str, dict[str, list[tuple[str, float]]]] = {
+        h: {} for h in heads if h in RERANK_SCALE_MAX
+    }
     sem = asyncio.Semaphore(PROBE_CONCURRENCY)
 
     async def _pool_case(test_id: str, query: str) -> None:
@@ -302,26 +331,20 @@ async def compute_by_stage_metrics(
                 agentic_queries=agentic,
                 rerank_depth=AGENTIC_RERANK_DEPTH,
                 refresh=refresh,
+                # Score the Cohere stages here regardless of the labeling-pool opt-in: this is the
+                # comparison view they exist for. No-op when no reranker is configured.
+                with_cohere=with_cohere,
             )
             if not connected:
                 return
             for head in heads:
-                if head == "agentic_rerank":
-                    # Ordered by semantic-reranker score (desc), not by a positional rank.
-                    ranked = sorted(
-                        (c for c in pool.chunks if c.agentic_rerank_score is not None),
-                        key=lambda c: c.agentic_rerank_score,
-                        reverse=True,
-                    )
-                else:
-                    ranked = sorted(
-                        (c for c in pool.chunks if head in c.ranks), key=lambda c: c.ranks[head]
-                    )
+                # Rerank heads order by relevance score (desc), the rest by positional rank.
+                ranked = ranked_chunks_for_head(pool.chunks, head)
                 if ranked:
                     retrieved_by_stage[head][test_id] = [c.chunk_id for c in ranked]
-                    if head == "agentic_rerank":
-                        rerank_scores_by_test[test_id] = [
-                            (c.chunk_id, c.agentic_rerank_score) for c in ranked
+                    if head in rerank_scores_by_head:
+                        rerank_scores_by_head[head][test_id] = [
+                            (c.chunk_id, c.rerank_scores[head]) for c in ranked
                         ]
 
     await asyncio.gather(*(_pool_case(tid, q) for tid, q in todo))
@@ -329,7 +352,7 @@ async def compute_by_stage_metrics(
     # Extra stage: the project's REAL retrieval agent (an external endpoint returning a ranked
     # chunk list), scored on the same gold beside the index-probe stages. Only when configured,
     # and only appended when at least one case returned a ranking (so the stage never shows empty).
-    stage_labels = STAGE_LABELS
+    stage_labels = index_stage_labels
     agent_config = get_agent_retrieval_config(project.settings) if include_agent else None
     if agent_config is not None:
         # Probe at the shared depth, not max(AGG_KS), so this run and the labeling pool hit the
@@ -353,7 +376,7 @@ async def compute_by_stage_metrics(
         agent_map = {tid: ids for tid, ids in agent_probed if ids}
         if agent_map:
             retrieved_by_stage[AGENT_STAGE] = agent_map
-            stage_labels = STAGE_LABELS + ((AGENT_STAGE, agent_config.label),)
+            stage_labels = index_stage_labels + ((AGENT_STAGE, agent_config.label),)
 
     stages, case_rows_out, evaluated = build_by_stage_metrics(
         cases,
@@ -365,13 +388,18 @@ async def compute_by_stage_metrics(
         dataset_by_test=await resolve_case_datasets(db, dataset_uuids),
         stage_labels=stage_labels,
     )
-    # Attach the score-threshold sweep to the agentic-rerank stage so the UI can offer a variable-k
-    # (rerankerScore) cutoff without another compute.
-    sweep = compute_rerank_threshold_sweep(rerank_scores_by_test, relevant_by_test)
+    # Attach each rerank stage's own score-threshold sweep (on that head's scale: 0-4 for Azure's
+    # rerankerScore, 0-1 for Cohere) so the UI can offer a variable-k cutoff without another compute.
     for stage in stages:
-        if stage.stage == "agentic_rerank":
-            stage.threshold_sweep = sweep
-            break
+        scale_max = RERANK_SCALE_MAX.get(stage.stage)
+        if scale_max is None:
+            continue
+        stage.threshold_scale_max = scale_max
+        stage.threshold_sweep = compute_rerank_threshold_sweep(
+            rerank_scores_by_head.get(stage.stage, {}),
+            relevant_by_test,
+            rerank_thresholds_for(scale_max),
+        )
     result = ByStageMetricsResponse(
         available=evaluated > 0,
         dataset_id=ds_id,
@@ -398,5 +426,13 @@ async def get_cached_by_stage(
     include_agent: bool = False,
 ) -> ByStageMetricsResponse | None:
     """Return a previously cached by-stage result for these settings, or None (no recompute)."""
-    key = result_cache_key(project.id, "by-stage", dataset_ids, gold_source, min_grade, include_agent)
+    key = result_cache_key(
+        project.id,
+        "by-stage",
+        dataset_ids,
+        gold_source,
+        min_grade,
+        include_agent,
+        get_cohere_rerank_config(project.settings) is not None,
+    )
     return await get_cached(key, ByStageMetricsResponse)

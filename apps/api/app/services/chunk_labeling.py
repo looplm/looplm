@@ -18,7 +18,8 @@ from app.schemas.retrieval import (
     LabelingRunResponse,
     PooledChunkForLabeling,
 )
-from app.services.chunk_pool import PoolResult
+from app.services.chunk_pool import PoolResult, PooledChunk
+from app.services.cohere_rerank import AGENTIC_COHERE_STAGE, COHERE_STAGE
 
 
 def build_labeling_cases(test_cases: Iterable[TestCase]) -> tuple[list[LabelingCase], int]:
@@ -137,12 +138,29 @@ def build_labeling_view(
 # order, and chunks only an agentic sub-query surfaced sort last (by their agentic rank).
 _POOL_ORDER_HEADS = ("semantic", "hybrid", "vector", "keyword", "agentic")
 
+# When the cross-encoder ran, its relevance score orders the pool instead: it is the only head
+# that scores *every* candidate on one scale (the positional heads each rank their own subset), so
+# it puts the likeliest-relevant chunks first no matter which head found them — which is exactly
+# what a labeler wants to see at the top. Its own base-question pass wins over the agentic one.
+_COHERE_ORDER_HEADS = (COHERE_STAGE, AGENTIC_COHERE_STAGE)
 
-def _pool_order_key(ranks: dict[str, int]) -> tuple[int, int]:
+
+def _pool_order_key(chunk: PooledChunk) -> tuple[int, float, int]:
+    """Sort key for one pooled chunk: Cohere score first when scored, else the head-priority rank.
+
+    Cohere-scored chunks sort ahead of unscored ones (tier 0, by descending score); the rest keep
+    the previous behaviour (tier 1, by the best head that returned them). So enabling the reranker
+    reorders the list without hiding anything the labeler used to see.
+    """
+    for head in _COHERE_ORDER_HEADS:
+        score = chunk.rerank_scores.get(head)
+        if score is not None:
+            return (0, -score, 0)
     for priority, head in enumerate(_POOL_ORDER_HEADS):
-        if head in ranks:
-            return (priority, ranks[head])
-    return (len(_POOL_ORDER_HEADS), 0)  # heads we don't rank on (e.g. trace) sort last
+        if head in chunk.ranks:
+            return (1, 0.0, (priority << 16) + chunk.ranks[head])
+    # Heads we don't rank on (e.g. trace) sort last.
+    return (1, 0.0, (len(_POOL_ORDER_HEADS) << 16))
 
 
 def build_pool_view(
@@ -160,16 +178,17 @@ def build_pool_view(
     """Shape an assembled :class:`PoolResult` into the labeling-pool API response.
 
     Overlays any existing human label (and labeler) onto each pooled chunk, keyed by
-    ``(test_id, chunk_id)``. Chunks are ordered reranked-first: by the rank the semantic reranker
-    gave them, falling back to hybrid → vector → keyword → agentic for chunks a higher-priority
-    head didn't return — so the list mirrors the system's true final ranking, with judged-relevant
-    candidates near the top. ``queries`` carries the base question and any agentic sub-queries that
-    were run, so the UI can show exactly what was sent to the index.
+    ``(test_id, chunk_id)``. Chunks are ordered by the cross-encoder's relevance score when it ran,
+    else reranked-first: by the rank the semantic reranker gave them, falling back to hybrid →
+    vector → keyword → agentic for chunks a higher-priority head didn't return — so the list
+    mirrors the system's true final ranking, with judged-relevant candidates near the top.
+    ``queries`` carries the base question and any agentic sub-queries that were run, so the UI can
+    show exactly what was sent to the index.
     """
     labeler_by_key = labeler_by_key or {}
     ai_labels_by_key = ai_labels_by_key or {}
     chunks: list[PooledChunkForLabeling] = []
-    for pc in sorted(pool.chunks, key=lambda c: _pool_order_key(c.ranks)):
+    for pc in sorted(pool.chunks, key=_pool_order_key):
         key = (test_id, pc.chunk_id)
         chunks.append(
             PooledChunkForLabeling(
@@ -181,6 +200,7 @@ def build_pool_view(
                 provenance=pc.provenance,
                 ranks=pc.ranks,
                 agentic_queries=pc.agentic_queries,
+                rerank_scores=pc.rerank_scores,
                 relevance=labels_by_key.get(key),
                 labeled_by=labeler_by_key.get(key),
                 ai_relevance=ai_labels_by_key.get(key),

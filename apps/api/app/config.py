@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-large"
     embedding_dimensions: int = 3072
 
+    # Cohere Rerank (cross-encoder reranking head — see services/cohere_rerank.py). Deployment-wide
+    # defaults; a project can override all three in its settings. Endpoint is an Azure AI Foundry
+    # serverless Cohere deployment (https://<name>.<region>.models.ai.azure.com) or Cohere's own
+    # API base (https://api.cohere.com); "/v2/rerank" is appended unless the URL already names it.
+    # Empty endpoint or key => the Cohere rerank stages are off.
+    cohere_rerank_endpoint: str = ""
+    cohere_rerank_api_key: str = ""
+    cohere_rerank_model: str = "rerank-v3.5"
+
     # Eval runner
     eval_target_endpoint: str = ""
     eval_default_concurrency: int = 2

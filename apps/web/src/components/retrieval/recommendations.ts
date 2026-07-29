@@ -41,8 +41,15 @@ export interface RecommendationInput {
   retriever: string;
 }
 
-// Retrievers that already apply the semantic reranker. "best" prefers it when available.
-const RERANKED = new Set(["semantic", "agentic_rerank", "best"]);
+// Retrievers that already apply a reranker (Azure's semantic ranker or the Cohere cross-encoder).
+// "best" prefers the semantic one when available.
+const RERANKED = new Set([
+  "semantic",
+  "agentic_rerank",
+  "cohere_rerank",
+  "agentic_cohere",
+  "best",
+]);
 // The reranked sibling of an un-reranked path: the By-stage stage that applies the reranker to the
 // same candidate pool, plus what to switch the Retriever selector to.
 const RERANK_SIBLING: Record<string, { stage: string; label: string }> = {
@@ -251,6 +258,34 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
       }
     }
 
+    // Two rerankers over the same candidates: say which one ranks better, at both positions
+    // (base question and agentic pool). Only fires when both stages actually scored.
+    for (const [azure, cohere, where] of [
+      ["semantic", "cohere_rerank", "the hybrid top-50"],
+      ["agentic_rerank", "agentic_cohere", "the agentic pool"],
+    ] as const) {
+      const azureNdcg = ndcgOf(azure);
+      const cohereNdcg = ndcgOf(cohere);
+      if (azureNdcg == null || cohereNdcg == null) continue;
+      const margin = cohereNdcg - azureNdcg;
+      if (Math.abs(margin) < 0.03) continue;
+      const winner = margin > 0 ? "Cohere" : "the Azure semantic reranker";
+      recs.push({
+        id: `reranker-choice-${cohere}`,
+        severity: "medium",
+        stage: "rerank",
+        title: `${winner} ranks ${where} better`,
+        detail:
+          `Over ${where}, ${RETRIEVER_LABEL[cohere] ?? cohere} scores nDCG@${k} ` +
+          `${pct(cohereNdcg)} against ${pct(azureNdcg)} for ${RETRIEVER_LABEL[azure] ?? azure} — ` +
+          `same candidates, different reranker. Worth switching the production reranker to ` +
+          `${winner} at this step, then re-picking the score cutoff (the scales differ: 0-1 for ` +
+          `Cohere, 0-4 for Azure).`,
+        action: { label: "Compare by stage", kind: "byStage" },
+        basis: [`nDCG@${k} (${RETRIEVER_LABEL[cohere] ?? cohere})`, `nDCG@${k} (${RETRIEVER_LABEL[azure] ?? azure})`],
+      });
+    }
+
     // Which retrieval arm carries the signal — where to invest and what to keep fresh.
     const vec = recallOf("vector");
     const kw = recallOf("keyword");
@@ -277,8 +312,12 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
     // Is the agentic (multi-query) path adding coverage over single-query retrieval? Only judged
     // when an agentic-family path is selected, and against that selected path's own recall — so it
     // reflects the view you're on (once Agentic + rerank edges past single-query, this clears).
-    if (retriever === "agentic" || retriever === "agentic_rerank") {
-      const single = [recallOf("semantic"), recallOf("hybrid")]
+    if (
+      retriever === "agentic" ||
+      retriever === "agentic_rerank" ||
+      retriever === "agentic_cohere"
+    ) {
+      const single = [recallOf("semantic"), recallOf("cohere_rerank"), recallOf("hybrid")]
         .filter((x): x is number => x != null)
         .reduce((m, x) => Math.max(m, x), Number.NEGATIVE_INFINITY);
       // Strict: any positive margin over single-query counts as adding coverage, so the card

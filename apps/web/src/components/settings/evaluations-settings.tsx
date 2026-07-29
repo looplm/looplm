@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { updateProject, type Project } from "@/lib/api";
 import AgentRetrievalCard from "./agent-retrieval-card";
+import CohereRerankCard from "./cohere-rerank-card";
 
 interface EvaluationsSettingsProps {
   currentProjectId: string | null;
@@ -309,6 +310,12 @@ export default function EvaluationsSettings({
       </div>
 
       <AgentRetrievalCard
+        currentProjectId={currentProjectId}
+        currentProject={currentProject}
+        reloadProjects={reloadProjects}
+      />
+
+      <CohereRerankCard
         currentProjectId={currentProjectId}
         currentProject={currentProject}
         reloadProjects={reloadProjects}

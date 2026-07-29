@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { type ByStageMetricsResponse, type RetrievalRunMetrics, type RetrievalTargets } from "@/lib/api";
-import { METRICS, RETRIEVERS, statusOf, type MetricDef } from "@/components/retrieval/constants";
+import { COHERE_RETRIEVERS, METRICS, RETRIEVERS, statusOf, type MetricDef } from "@/components/retrieval/constants";
 import { type GoldSource, type MinGrade } from "@/components/retrieval/gold-controls";
 
 type Source = "urls" | "labels";
@@ -19,6 +19,9 @@ export interface RetrievalDisplay {
   retrieverOptions: { value: string; label: string }[];
   retrieverLabel: string | undefined;
   rerankSweep: ByStageMetricsResponse["stages"][number]["threshold_sweep"] | undefined;
+  // Top of the selected reranker's score scale (4 = Azure rerankerScore, 1 = Cohere), null when
+  // no sweep is shown. The slider needs it: the two scales are not interchangeable.
+  rerankScaleMax: number | null;
   availableKs: number[];
   activeK: number;
   metCount: number;
@@ -56,20 +59,30 @@ export function useRetrievalDisplay(args: {
 
   // The custom-agent retriever only exists when a project configured an agent endpoint AND it
   // returned a ranking (backend appends the "agent" stage then), so hide the option otherwise.
+  // Same for the Cohere stages, which the backend omits unless a reranker is configured.
   const hasAgentStage = !!byStage?.stages.some((s) => s.stage === "agent");
+  const stageValues = byStage?.stages.map((s) => s.stage);
+  const hasCohereStages = !!stageValues?.some((s) => COHERE_RETRIEVERS.includes(s));
   const retrieverOptions = useMemo(
-    () => RETRIEVERS.filter((r) => r.value !== "agent" || hasAgentStage),
-    [hasAgentStage],
+    () =>
+      RETRIEVERS.filter(
+        (r) =>
+          (r.value !== "agent" || hasAgentStage) &&
+          (!COHERE_RETRIEVERS.includes(r.value) || hasCohereStages),
+      ),
+    [hasAgentStage, hasCohereStages],
   );
   // Prefer the stage's own (per-project) label from the response; fall back to the static one.
   const retrieverLabel =
     byStage?.stages.find((s) => s.stage === selectedRetriever)?.label ??
     RETRIEVERS.find((r) => r.value === selectedRetriever)?.label;
-  // The rerankerScore threshold sweep, present only when the Agentic + rerank stage is selected.
-  const rerankSweep =
-    selectedRetriever === "agentic_rerank"
-      ? byStage?.stages.find((s) => s.stage === "agentic_rerank")?.threshold_sweep
-      : undefined;
+  // The score-threshold sweep of whichever rerank stage is selected (Azure's agentic rerank or
+  // either Cohere pass). Positional stages have no sweep, so the slider stays hidden for them.
+  const selectedStage = byStage?.stages.find((s) => s.stage === selectedRetriever);
+  const rerankSweep = selectedStage?.threshold_sweep?.length
+    ? selectedStage.threshold_sweep
+    : undefined;
+  const rerankScaleMax = rerankSweep ? selectedStage?.threshold_scale_max ?? null : null;
 
   // Cutoffs for the displayed retriever; the selected k falls back to the deepest when unset or
   // absent. Default to @10 (the depth typically fed to the model): precision@50 is pool-capped noise.
@@ -101,6 +114,7 @@ export function useRetrievalDisplay(args: {
     retrieverOptions,
     retrieverLabel,
     rerankSweep,
+    rerankScaleMax,
     availableKs,
     activeK,
     metCount,

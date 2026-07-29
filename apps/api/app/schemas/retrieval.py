@@ -31,6 +31,9 @@ class RetrievalReadiness(BaseModel):
     index_connected: bool
     # The connected index declares a semantic configuration (required for the reranked / agentic+rerank stages).
     semantic_configured: bool
+    # A Cohere Rerank endpoint is configured (adds the two cross-encoder stages; absent = they're
+    # simply not offered, which is a choice rather than a gap — so this informs, it doesn't warn).
+    cohere_configured: bool = False
 
 
 class RetrievalMetric(BaseModel):
@@ -234,6 +237,10 @@ class PooledChunkForLabeling(BaseModel):
     ranks: dict[str, int] = Field(default_factory=dict)
     # Agentic sub-queries (from the LLM planner) that surfaced this chunk, when any did.
     agentic_queries: list[str] = Field(default_factory=list)
+    # rerank head -> relevance score, for the score-ordered heads (Azure's semantic rerankerScore
+    # on 0-4, Cohere's cross-encoder relevance on 0-1). Scales differ per head, so the UI shows
+    # each with its own head label rather than comparing the numbers.
+    rerank_scores: dict[str, float] = Field(default_factory=dict)
     # Current graded relevance label 0..3, or None when not yet judged.
     relevance: int | None = None
     labeled_by: str | None = None
@@ -614,7 +621,7 @@ class RetrievalRunMetrics(BaseModel):
 
 
 class RerankThresholdPoint(BaseModel):
-    """One point on the agentic-rerank score sweep: keep chunks with rerankerScore >= threshold.
+    """One point on a rerank stage's score sweep: keep chunks scoring >= threshold.
 
     Lets a variable-k (score) cutoff be chosen from the data instead of a fixed top-k. ``precision``
     is averaged only over cases that kept at least one chunk (an empty keep is precision-undefined);
@@ -632,8 +639,10 @@ class RerankThresholdPoint(BaseModel):
 class StageMetrics(BaseModel):
     """Deterministic retrieval metrics for one pipeline stage, macro-averaged across cases."""
 
-    stage: str  # keyword | vector | hybrid | semantic | agentic | agentic_rerank
-    label: str  # display label (Sparse / Dense / RRF / Reranked / Agentic / Agentic + rerank)
+    # keyword | vector | hybrid | semantic | cohere_rerank | agentic | agentic_rerank |
+    # agentic_cohere | agent
+    stage: str
+    label: str  # display label (Sparse / Dense / RRF / Reranked / Cohere rerank / Agentic / ...)
     evaluated_cases: int = 0
     recall_at_k: dict[str, float] = Field(default_factory=dict)
     precision_at_k: dict[str, float] = Field(default_factory=dict)
@@ -643,9 +652,13 @@ class StageMetrics(BaseModel):
     # Full per-stage metrics (per-case rows, bpref, condensed nDCG, slices, recall curve) so the
     # Overall block can render any one retriever in detail, not just the summary row above.
     metrics: RetrievalRunMetrics | None = None
-    # Only populated for the agentic_rerank stage: precision/recall/kept-count as the rerankerScore
-    # cutoff sweeps the 0-4 scale, so a score-threshold cutoff can be picked from the data.
+    # Only populated for the rerank stages (agentic_rerank / cohere_rerank / agentic_cohere):
+    # precision/recall/kept-count as the relevance-score cutoff sweeps that reranker's scale, so a
+    # score-threshold cutoff can be picked from the data. ``threshold_scale_max`` is the top of
+    # that scale (4 for Azure's rerankerScore, 1 for Cohere) — the two are not comparable, so the
+    # UI must label the slider with the stage's own scale.
     threshold_sweep: list[RerankThresholdPoint] = Field(default_factory=list)
+    threshold_scale_max: float | None = None
 
 
 class ByStageCaseMetrics(BaseModel):

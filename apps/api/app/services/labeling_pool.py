@@ -43,6 +43,7 @@ from app.services.chunk_pool import (
     PoolResult,
     assemble_pool,
 )
+from app.services.cohere_rerank import CohereRerankConfig, get_cohere_rerank_config
 from app.services.query_embedding import embed_query
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ def _pool_cache_key(
     agentic_sig: str,
     rerank_depth: int | None = None,
     with_agent: bool = False,
+    cohere_model: str | None = None,
 ) -> str:
     base = f"labeling:pool:{project_id}:{test_id}:{per_head}:{agentic_sig}"
     # A rerank pool carries extra scored candidates, so it must not collide with the labeling pool
@@ -90,7 +92,13 @@ def _pool_cache_key(
         base = f"{base}:r{rerank_depth}"
     # Same reason for the agent head: turning it on adds candidates, so the two pools are
     # different sets and must not share a key. Off → the key is byte-identical to before.
-    return f"{base}:a" if with_agent else base
+    if with_agent:
+        base = f"{base}:a"
+    # And for the cross-encoder heads — keyed by model so switching reranker model re-pools
+    # instead of serving scores from the previous one for the rest of the TTL.
+    if cohere_model:
+        base = f"{base}:c{hashlib.sha1(cohere_model.encode('utf-8')).hexdigest()[:8]}"
+    return base
 
 
 def _serialize_pool(pool: PoolResult, computed_at: str) -> dict:
@@ -108,11 +116,24 @@ def _serialize_pool(pool: PoolResult, computed_at: str) -> dict:
                 "provenance": c.provenance,
                 "ranks": c.ranks,
                 "agentic_queries": c.agentic_queries,
-                "agentic_rerank_score": c.agentic_rerank_score,
+                "rerank_scores": c.rerank_scores,
             }
             for c in pool.chunks
         ],
     }
+
+
+def _rerank_scores(c: dict) -> dict[str, float]:
+    """Rerank scores from a cached chunk, honoring entries written before the map existed.
+
+    Cache entries live for hours, so a deploy lands mid-TTL: older ones carry a single
+    ``agentic_rerank_score`` float instead of the per-head ``rerank_scores`` map.
+    """
+    raw = c.get("rerank_scores")
+    if isinstance(raw, dict):
+        return {k: float(v) for k, v in raw.items() if isinstance(v, (int, float))}
+    legacy = c.get("agentic_rerank_score")
+    return {"agentic_rerank": float(legacy)} if isinstance(legacy, (int, float)) else {}
 
 
 def _deserialize_pool(data: dict) -> PoolResult:
@@ -127,7 +148,7 @@ def _deserialize_pool(data: dict) -> PoolResult:
                 provenance=list(c.get("provenance") or []),
                 ranks={k: int(v) for k, v in (c.get("ranks") or {}).items()},
                 agentic_queries=list(c.get("agentic_queries") or []),
-                agentic_rerank_score=c.get("agentic_rerank_score"),
+                rerank_scores=_rerank_scores(c),
             )
             for c in data.get("chunks", [])
         ],
@@ -211,6 +232,7 @@ async def assemble_case_pool(
     refresh: bool = False,
     agentic_queries: list[str] | None = None,
     rerank_depth: int | None = None,
+    with_cohere: bool | None = None,
 ) -> tuple[PoolResult, str | None, bool]:
     """Assemble (or load from cache) the candidate pool for a case's query.
 
@@ -223,7 +245,11 @@ async def assemble_case_pool(
     are also scored through the semantic reranker at that depth (a separate cache entry, so the
     labeling pool is untouched). When the project opts into agent pooling, the configured
     retrieval agent contributes its own top chunks as the ``agent`` head — an unreachable agent
-    is reported in ``heads_failed`` rather than failing the pool. Returns
+    is reported in ``heads_failed`` rather than failing the pool.
+
+    ``with_cohere`` forces the Cohere cross-encoder heads on (the metrics path, which scores them
+    as stages) or off; ``None`` defers to the project's ``cohere_rerank_pool`` opt-in, so a
+    labeling view only pays for the reranker when the project asked to see its ordering. Returns
     ``(pool, computed_at, provider_connected)``.
     """
     per_head = await _case_pool_depth(db, project, test_id, depth)
@@ -231,6 +257,11 @@ async def assemble_case_pool(
     agent_config = get_agent_retrieval_config(project.settings)
     if agent_config is not None and not agent_config.pool_candidates:
         agent_config = None
+    cohere_config: CohereRerankConfig | None = get_cohere_rerank_config(project.settings)
+    if cohere_config is not None and not (
+        cohere_config.pool_candidates if with_cohere is None else with_cohere
+    ):
+        cohere_config = None
 
     provider_row = (
         await db.execute(
@@ -251,6 +282,7 @@ async def assemble_case_pool(
             _agentic_signature(agentic_queries),
             rerank_depth,
             with_agent=agent_config is not None,
+            cohere_model=cohere_config.model if cohere_config is not None else None,
         )
     )
     if cache_key and not refresh:
@@ -291,6 +323,7 @@ async def assemble_case_pool(
             agentic_queries=agentic_specs or None,
             agentic_rerank_depth=rerank_depth,
             agent_chunks=agent_chunks,
+            cohere=cohere_config,
         )
         if agent_chunks:
             await _hydrate_from_index(provider, pool.chunks)

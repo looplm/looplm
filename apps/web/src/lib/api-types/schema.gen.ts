@@ -2797,8 +2797,8 @@ export interface paths {
          * Diagnose Case
          * @description Diagnose why a case's relevant chunks were missed at top-``k`` under ``retriever``.
          *
-         *     ``retriever`` is one of the pool heads (keyword | vector | hybrid | semantic | agentic |
-         *     agentic_rerank); anything else falls back to ``agentic_rerank``. ``gold_source`` selects whose
+         *     ``retriever`` is one of the pool heads (keyword | vector | hybrid | semantic | cohere_rerank |
+         *     agentic | agentic_rerank | agentic_cohere); anything else falls back to ``agentic_rerank``. ``gold_source`` selects whose
          *     labels are ground truth (human | ai | both); ``min_grade`` is the binary-metrics strictness,
          *     so the miss list matches what the metrics counted as relevant. Returns ``available=False``
          *     when the project has no index provider, the case has no gold relevant chunks, or the case
@@ -3537,6 +3537,30 @@ export interface paths {
         head?: never;
         /** Update Member */
         patch: operations["update_member_api_projects__project_id__members__member_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/test-cohere-rerank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Cohere Rerank Endpoint
+         * @description Rerank one throwaway document with the project's saved Cohere config.
+         *
+         *     Owner-only. Confirms the endpoint, key and model actually work before the reranker is scored
+         *     as a retrieval stage — a misconfigured reranker otherwise surfaces as a per-case head failure
+         *     buried in a metrics run. Save settings before testing: this reads the persisted settings.
+         */
+        post: operations["test_cohere_rerank_endpoint_api_projects__project_id__test_cohere_rerank_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/projects/{project_id}/test-embedding": {
@@ -5803,6 +5827,20 @@ export interface components {
              * @description applied or dismissed
              */
             status: string;
+        };
+        /**
+         * CohereRerankTestResult
+         * @description Result of a live Cohere Rerank test (does the reranker endpoint work?).
+         */
+        CohereRerankTestResult: {
+            /** Configured */
+            configured: boolean;
+            /** Error */
+            error?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Ok */
+            ok: boolean;
         };
         /**
          * CohesionPassConfig
@@ -9370,6 +9408,10 @@ export interface components {
             };
             /** Relevance */
             relevance?: number | null;
+            /** Rerank Scores */
+            rerank_scores?: {
+                [key: string]: number;
+            };
             /** Score */
             score?: number | null;
             /** Title */
@@ -10053,7 +10095,7 @@ export interface components {
         };
         /**
          * RerankThresholdPoint
-         * @description One point on the agentic-rerank score sweep: keep chunks with rerankerScore >= threshold.
+         * @description One point on a rerank stage's score sweep: keep chunks scoring >= threshold.
          *
          *     Lets a variable-k (score) cutoff be chosen from the data instead of a fixed top-k. ``precision``
          *     is averaged only over cases that kept at least one chunk (an empty keep is precision-undefined);
@@ -10413,6 +10455,11 @@ export interface components {
          *     semantic configuration surfaces as an explanation rather than a silently empty per-stage chart.
          */
         RetrievalReadiness: {
+            /**
+             * Cohere Configured
+             * @default false
+             */
+            cohere_configured: boolean;
             embedding: components["schemas"]["EmbeddingTestResult"];
             /** Index Connected */
             index_connected: boolean;
@@ -11231,6 +11278,8 @@ export interface components {
             };
             /** Stage */
             stage: string;
+            /** Threshold Scale Max */
+            threshold_scale_max?: number | null;
             /** Threshold Sweep */
             threshold_sweep?: components["schemas"]["RerankThresholdPoint"][];
         };
@@ -19263,6 +19312,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_cohere_rerank_endpoint_api_projects__project_id__test_cohere_rerank_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CohereRerankTestResult"];
                 };
             };
             /** @description Validation Error */

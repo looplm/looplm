@@ -14,6 +14,7 @@ from app.models.project import Project
 from app.models.project_member import ALL_SECTIONS, ProjectMember
 from app.models.user import User
 from app.schemas.projects import (
+    CohereRerankTestResult,
     EmbeddingTestResult,
     ProjectCreate,
     ProjectListResponse,
@@ -23,6 +24,7 @@ from app.schemas.projects import (
     TransferOwnership,
 )
 from app.services.analysis_llm import AnalysisLlmConfigError, AnalysisLlmService, merge_llm_settings
+from app.services.cohere_rerank import get_cohere_rerank_config, test_cohere_rerank
 from app.services.llm_usage_tracker import record_llm_usage
 from app.services.retrieval_readiness import probe_embedding_status
 from app.services.retrieval_detection import detect_retrieval_source
@@ -37,6 +39,7 @@ _SECRET_SETTINGS_KEYS = {
     "openai_api_key",
     "azure_openai_api_key",
     "agent_retrieval_token",
+    "cohere_rerank_key",
 }
 
 
@@ -237,6 +240,36 @@ async def test_embedding(
         raise HTTPException(status_code=404, detail="Project not found")
 
     return await probe_embedding_status(merge_llm_settings(project.settings, _user.settings))
+
+
+@router.post("/{project_id}/test-cohere-rerank", response_model=CohereRerankTestResult)
+async def test_cohere_rerank_endpoint(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> CohereRerankTestResult:
+    """Rerank one throwaway document with the project's saved Cohere config.
+
+    Owner-only. Confirms the endpoint, key and model actually work before the reranker is scored
+    as a retrieval stage — a misconfigured reranker otherwise surfaces as a per-case head failure
+    buried in a metrics run. Save settings before testing: this reads the persisted settings.
+    """
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.owner_id == _user.id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    config = get_cohere_rerank_config(project.settings)
+    if config is None:
+        return CohereRerankTestResult(
+            ok=False,
+            configured=False,
+            error="No Cohere Rerank endpoint/key configured for this project.",
+        )
+    ok, error = await test_cohere_rerank(config)
+    return CohereRerankTestResult(ok=ok, configured=True, model=config.model, error=error)
 
 
 @router.post("/{project_id}/transfer-ownership", response_model=ProjectResponse)

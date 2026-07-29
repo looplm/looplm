@@ -7,7 +7,10 @@ Two config gaps silently produce empty per-stage metrics on the Retrieval/Labeli
 - The connected index has no semantic configuration → the semantic (rerank) head raises, so the
   Reranked and Agentic+rerank stages are empty.
 
-This module surfaces both as a readiness snapshot so the UI can warn instead of showing a blank
+It also reports whether a Cohere Rerank endpoint is configured — not a gap (the cross-encoder
+stages are optional), just which stages the by-stage comparison will contain.
+
+This module surfaces both gaps as a readiness snapshot so the UI can warn instead of showing a blank
 chart. The embedding probe is a live one-token embed (the same check as the owner-only
 ``test-embedding`` action), cached briefly in Redis so it isn't an API call on every page load.
 """
@@ -25,6 +28,7 @@ from app.models.project import Project
 from app.schemas.projects import EmbeddingTestResult
 from app.schemas.retrieval import RetrievalReadiness
 from app.services.analysis_llm import merge_llm_settings
+from app.services.cohere_rerank import get_cohere_rerank_config
 from app.services.query_embedding import build_query_embedder
 
 logger = logging.getLogger(__name__)
@@ -95,4 +99,5 @@ async def compute_retrieval_readiness(
         embedding=embedding,
         index_connected=index_connected,
         semantic_configured=semantic_configured,
+        cohere_configured=get_cohere_rerank_config(project.settings) is not None,
     )

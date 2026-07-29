@@ -65,3 +65,12 @@ class EmbeddingTestResult(BaseModel):
     model: str | None = None
     dimensions: int | None = None
     error: str | None = None
+
+
+class CohereRerankTestResult(BaseModel):
+    """Result of a live Cohere Rerank test (does the reranker endpoint work?)."""
+
+    ok: bool
+    configured: bool
+    model: str | None = None
+    error: str | None = None

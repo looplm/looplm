@@ -30,6 +30,13 @@ from app.schemas.retrieval import (
     SliceMetrics,
     StageMetrics,
 )
+from app.services.cohere_rerank import (
+    AGENTIC_COHERE_STAGE,
+    AGENTIC_COHERE_STAGE_LABEL,
+    COHERE_SCORE_MAX,
+    COHERE_STAGE,
+    COHERE_STAGE_LABEL,
+)
 from app.services.failure_pattern import normalize_result_test_id
 from app.services.model_resilience import DEGRADED_RETRIEVAL_MODE
 from app.services.retrieval_metrics import (
@@ -47,34 +54,56 @@ logger = logging.getLogger(__name__)
 # (recall@10 is hard-capped at min(10, #relevant) / #relevant).
 AGG_KS: tuple[int, ...] = (1, 3, 5, 10, 20, 50)
 
-# Retrieval pipeline stages, in pipeline order, mapping each pool head to a display label.
+# Retrieval pipeline stages, in pipeline order, mapping each pool head to a display label. The
+# two Cohere stages sit next to the Azure reranker stage whose candidates they share, so the
+# By-stage table reads as "same input, two rerankers".
 STAGE_LABELS: tuple[tuple[str, str], ...] = (
     ("keyword", "Sparse"),
     ("vector", "Dense"),
     ("hybrid", "RRF"),
     ("semantic", "Reranked"),
+    (COHERE_STAGE, COHERE_STAGE_LABEL),
     ("agentic", "Agentic"),
     ("agentic_rerank", "Agentic + rerank"),
+    (AGENTIC_COHERE_STAGE, AGENTIC_COHERE_STAGE_LABEL),
 )
 
+# Score scale per rerank head, for the threshold sweep: Azure's semantic rerankerScore runs 0-4,
+# Cohere's cross-encoder relevance 0-1. Everything else has no score scale (positional heads).
+RERANK_SCALE_MAX: dict[str, float] = {
+    "agentic_rerank": 4.0,
+    COHERE_STAGE: COHERE_SCORE_MAX,
+    AGENTIC_COHERE_STAGE: COHERE_SCORE_MAX,
+}
 
-# Azure's semantic rerankerScore is a 0-4 scale; sweep it in 0.1 steps so the UI slider can pick a
-# score-threshold cutoff from the data. Cheap (set ops over the cases) so a fine grid is fine.
-RERANK_THRESHOLDS: tuple[float, ...] = tuple(round(i * 0.1, 1) for i in range(0, 41))
+# Sweep each scale in 40 steps so the UI slider can pick a score-threshold cutoff from the data
+# (0.1 on Azure's 0-4, 0.025 on Cohere's 0-1). Cheap (set ops over the cases), so a fine grid is
+# fine; step size is derived so both scales get the same resolution in slider terms.
+_SWEEP_STEPS = 40
+
+# Azure's 0-4 grid, kept as the module default for callers that don't pass a scale.
+RERANK_THRESHOLDS: tuple[float, ...] = tuple(round(i * 0.1, 1) for i in range(0, _SWEEP_STEPS + 1))
+
+
+def rerank_thresholds_for(scale_max: float) -> tuple[float, ...]:
+    """The threshold grid for a 0..``scale_max`` relevance scale."""
+    step = scale_max / _SWEEP_STEPS
+    return tuple(round(i * step, 4) for i in range(0, _SWEEP_STEPS + 1))
 
 
 def ranked_chunks_for_head(chunks, head: str):
     """Pool chunks in one retriever head's rank order.
 
-    Every head but ``agentic_rerank`` orders by its positional rank (``ranks[head]``, ascending);
-    ``agentic_rerank`` has no positional rank and orders by the semantic reranker score
-    (descending). Mirrors how :func:`build_by_stage_metrics` ranks each stage, so a per-case
-    diagnosis sees the same ordering the metrics scored.
+    Positional heads order by their rank (``ranks[head]``, ascending); the rerank heads
+    (:data:`RERANK_SCALE_MAX` — Azure's semantic pass and the two Cohere passes) have no positional
+    rank and order by their relevance score (descending). Mirrors how
+    :func:`build_by_stage_metrics` ranks each stage, so a per-case diagnosis sees the same ordering
+    the metrics scored.
     """
-    if head == "agentic_rerank":
+    if head in RERANK_SCALE_MAX:
         return sorted(
-            (c for c in chunks if c.agentic_rerank_score is not None),
-            key=lambda c: c.agentic_rerank_score,
+            (c for c in chunks if c.rerank_scores.get(head) is not None),
+            key=lambda c: c.rerank_scores[head],
             reverse=True,
         )
     return sorted((c for c in chunks if head in c.ranks), key=lambda c: c.ranks[head])
@@ -85,7 +114,10 @@ def compute_rerank_threshold_sweep(
     relevant_by_test: dict[str, set[str]],
     thresholds: tuple[float, ...] = RERANK_THRESHOLDS,
 ) -> list[RerankThresholdPoint]:
-    """Macro precision/recall/kept-count as the rerankerScore cutoff sweeps the 0-4 scale.
+    """Macro precision/recall/kept-count as the relevance-score cutoff sweeps a head's scale.
+
+    ``thresholds`` is the head's grid (see :func:`rerank_thresholds_for`) — 0-4 for Azure's
+    rerankerScore, 0-1 for Cohere's cross-encoder relevance.
 
     For each threshold a case keeps the chunks scoring >= it. Recall and kept-count average over
     every case with gold (an empty keep contributes recall 0); precision averages only over cases

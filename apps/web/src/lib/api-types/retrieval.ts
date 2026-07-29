@@ -192,6 +192,9 @@ export interface PooledChunkForLabeling {
   ranks: Record<string, number>;
   // Agentic sub-queries (from the LLM planner) that surfaced this chunk, when any did.
   agentic_queries?: string[];
+  // Rerank head -> relevance score, for the score-ordered heads ("agentic_rerank" on Azure's 0-4
+  // rerankerScore, "cohere_rerank"/"agentic_cohere" on Cohere's 0-1). Scales differ per head.
+  rerank_scores?: Record<string, number>;
   // Graded relevance 0..3, or null when not yet judged.
   relevance?: number | null;
   labeled_by?: string | null;
@@ -315,8 +318,11 @@ export interface StageMetrics {
   mrr?: number | null;
   // Full per-stage metrics so the Overall block can render one retriever in detail.
   metrics?: RetrievalRunMetrics | null;
-  // Only set on the agentic_rerank stage: the rerankerScore-cutoff sweep for the threshold slider.
+  // Only set on the rerank stages (agentic_rerank / cohere_rerank / agentic_cohere): the
+  // score-cutoff sweep for the threshold slider, plus the top of that reranker's own scale
+  // (4 for Azure's rerankerScore, 1 for Cohere) — the two are not comparable.
   threshold_sweep?: RerankThresholdPoint[];
+  threshold_scale_max?: number | null;
 }
 
 export interface ByStageCaseMetrics {
@@ -529,4 +535,6 @@ export interface RetrievalReadiness {
   embedding: EmbeddingStatus;
   index_connected: boolean;
   semantic_configured: boolean;
+  // A Cohere Rerank endpoint is configured, so the two cross-encoder stages are offered.
+  cohere_configured?: boolean;
 }

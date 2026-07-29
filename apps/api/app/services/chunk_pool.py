@@ -12,14 +12,39 @@ trace chunks, runs the requested search heads, and returns a deduped pool where 
 carries the set of *provenances* that surfaced it (``trace``, ``keyword``, ``vector``,
 ``hybrid``). Heads a backend can't serve (e.g. vector search on an index with no embedding
 field) are skipped and reported, not fatal.
+
+Two kinds of head land in the pool: **positional** heads (a ranked result list, so the chunk's
+rank in that list is the signal) and **score-ordered** rerank heads, which produce a relevance
+score per chunk and no meaningful position — the reranker's own ordering *is* the score order.
+
+The pool data model and the per-source merge rules live in :mod:`app.services.chunk_pool_merge`;
+this module decides which heads run, in what order, and how their failures are reported.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+import httpx
+
 from app.index_providers.base import SEARCH_MODES, BaseIndexProvider
+from app.services.cohere_rerank import (
+    AGENTIC_COHERE_STAGE,
+    COHERE_RERANK_DEPTH,
+    COHERE_STAGE,
+    CohereRerankConfig,
+    CohereRerankError,
+    rerank_documents,
+)
+from app.services.chunk_pool_merge import (
+    AgenticQuery,
+    PoolResult,
+    PooledChunk,
+    _merge_agent_chunks,
+    _merge_hit,
+    _merge_rerank_hit,
+    _seed_from_trace,
+)
 
 # Per-head retrieval depth for the broad set. Kept shallow (~10/head): the broad slice feeds
 # aggregate metrics, so pooling deep there just multiplies judging effort for little signal.
@@ -38,231 +63,66 @@ SLICE_POOL_DEPTH = {"safety": 35, "adversarial": 35}
 # window (it reranks at most the top 50 L1 candidates of a query), so we ask for exactly that.
 AGENTIC_RERANK_DEPTH = 50
 
-
-@dataclass
-class AgenticQuery:
-    """A planner-produced sub-query plus its embedding (``None`` → provider text fallback).
-
-    The agentic path (see :mod:`app.services.query_planner`) decomposes a case's question into
-    several focused sub-queries; each carries its own embedding so the vector/hybrid heads can run
-    on it even when the index has no server-side vectorizer.
-    """
-
-    text: str
-    vector: list[float] | None = None
+# Heads whose ranking comes from a relevance score rather than a result position. They order by
+# ``PooledChunk.rerank_scores[head]`` descending; every other head orders by ``ranks[head]``.
+RERANK_HEADS = ("agentic_rerank", COHERE_STAGE, AGENTIC_COHERE_STAGE)
 
 
-@dataclass
-class PooledChunk:
-    """One candidate in the labeling pool, with the heads that surfaced it."""
-
-    chunk_id: str
-    title: str | None = None
-    url: str | None = None
-    content_preview: str | None = None
-    # Best-effort backend score (not comparable across heads — informational only).
-    score: float | None = None
-    # Subset of {"trace", "keyword", "vector", "hybrid", "agentic", "agent"} — why this chunk is
-    # in the pool, in the order the heads first surfaced it. "agentic" means an LLM-planned
-    # sub-query found it (in addition to whichever index heads, if any, ran on the base
-    # question); "agent" means the project's own retrieval agent returned it.
-    provenance: list[str] = field(default_factory=list)
-    # head -> 1-indexed rank this chunk held in that head's results (e.g. {"vector": 3,
-    # "hybrid": 2}). Lets the labeler see *where* each method ranked the chunk, not just that
-    # it surfaced it. A head missing from the map didn't surface this chunk. The pseudo-head
-    # "agentic" holds the best rank any planned sub-query gave the chunk.
-    ranks: dict[str, int] = field(default_factory=dict)
-    # The agentic sub-queries that surfaced this chunk, in the order they first did. Empty unless
-    # agentic pooling ran. Drives the per-chunk "found by query X" display.
-    agentic_queries: list[str] = field(default_factory=list)
-    # Best Azure semantic-reranker score (0-4) this chunk earned across the agentic sub-queries,
-    # or None if the agentic-rerank pass didn't score it. Orders the "agentic_rerank" stage — a
-    # relevance reordering of the agentic candidates, as opposed to the positional-rank union.
-    agentic_rerank_score: float | None = None
-
-    def _seen(self, head: str, rank: int) -> None:
-        """Record that ``head`` surfaced this chunk at ``rank`` (keeping the best/first)."""
-        if head not in self.provenance:
-            self.provenance.append(head)
-        # Heads don't repeat a chunk, but guard anyway: keep the strongest (lowest) rank.
-        existing = self.ranks.get(head)
-        if existing is None or rank < existing:
-            self.ranks[head] = rank
-
-    def _seen_agentic(self, query: str, rank: int) -> None:
-        """Record that an agentic sub-query surfaced this chunk at ``rank``.
-
-        Agentic hits don't write into the per-head ranks (those stay authoritative for the base
-        question's badges); they land under the "agentic" pseudo-head, keeping the best rank.
-        """
-        if "agentic" not in self.provenance:
-            self.provenance.append("agentic")
-        existing = self.ranks.get("agentic")
-        if existing is None or rank < existing:
-            self.ranks["agentic"] = rank
-        if query and query not in self.agentic_queries:
-            self.agentic_queries.append(query)
-
-    def _seen_agentic_rerank(self, score: float) -> None:
-        """Record a semantic-reranker score from the agentic-rerank pass (keeping the best).
-
-        This is a relevance score, not a rank position, so it doesn't touch ``ranks``; it lands in
-        ``agentic_rerank_score`` and orders the ``agentic_rerank`` stage on its own.
-        """
-        if "agentic_rerank" not in self.provenance:
-            self.provenance.append("agentic_rerank")
-        if self.agentic_rerank_score is None or score > self.agentic_rerank_score:
-            self.agentic_rerank_score = score
-
-
-@dataclass
-class PoolResult:
-    """The assembled pool plus which heads contributed or failed."""
-
-    chunks: list[PooledChunk]
-    heads_ran: list[str] = field(default_factory=list)
-    # head -> reason it produced nothing (capability gap, vectorizer missing, error).
-    heads_failed: dict[str, str] = field(default_factory=dict)
-
-
-def _coalesce(*values: Any) -> str | None:
-    for v in values:
-        if isinstance(v, str) and v.strip():
-            return v
-    return None
-
-
-def _seed_from_trace(
-    pool: dict[str, PooledChunk], trace_chunks: Iterable[dict[str, Any]]
+async def _cohere_base_pass(
+    pool: dict[str, PooledChunk],
+    provider: BaseIndexProvider,
+    config: CohereRerankConfig,
+    client: httpx.AsyncClient,
+    query: str,
+    depth: int,
+    filters: dict[str, str] | None,
+    query_vector: list[float] | None,
 ) -> bool:
-    """Seed the pool with the trace-captured chunks; returns True if any were added.
+    """Rescore the base question's hybrid top-``depth`` candidates with Cohere. True if it scored.
 
-    Trace chunks arrive in the order the system under test ranked them, so their position is
-    the ``trace`` head's rank.
+    Deliberately re-queries the hybrid head at the rerank window instead of reusing the shallow
+    pool hybrid head: Azure's semantic head reranks the top 50 L1 candidates, so Cohere must see
+    the same set for the two rerank stages to be comparable. Raises so the caller can report the
+    head as failed (a silent empty stage reads as "Cohere is bad", which would be a lie).
     """
-    seeded = False
-    rank = 0
-    for c in trace_chunks:
-        if not isinstance(c, dict):
-            continue
-        chunk_id = c.get("chunk_id")
-        if not isinstance(chunk_id, str) or not chunk_id:
-            continue
-        seeded = True
-        rank += 1
-        existing = pool.get(chunk_id)
-        if existing is None:
-            score = c.get("score")
-            chunk = PooledChunk(
-                chunk_id=chunk_id,
-                title=_coalesce(c.get("title")),
-                url=_coalesce(c.get("url")),
-                content_preview=_coalesce(c.get("content_preview"), c.get("content")),
-                score=float(score) if isinstance(score, (int, float)) else None,
-            )
-            chunk._seen("trace", rank)
-            pool[chunk_id] = chunk
-        else:
-            existing._seen("trace", rank)
-    return seeded
+    docs = await provider.search_documents(
+        query, depth, filters, mode="hybrid", query_vector=query_vector
+    )
+    by_id = {d.id: d for d in docs if d.id}
+    scores = await rerank_documents(
+        client, config, query, [(d.id, d.snippet or "") for d in by_id.values()]
+    )
+    for cid, score in scores.items():
+        _merge_rerank_hit(pool, by_id[cid], head=COHERE_STAGE, score=score)
+    return bool(scores)
 
 
-def _merge_agent_chunks(
-    pool: dict[str, PooledChunk], agent_chunks: Iterable[dict[str, Any]]
+async def _agentic_cohere_pass(
+    pool: dict[str, PooledChunk],
+    config: CohereRerankConfig,
+    client: httpx.AsyncClient,
+    query: str,
 ) -> bool:
-    """Fold the project's own retrieval agent's ranking into the pool; True if any were added.
+    """Rescore the pooled agentic candidates against the ORIGINAL question. True if it scored.
 
-    Without this the agent is judged on a pool it never contributed to: chunks only it returns
-    stay unjudged and score as misses (TREC pool bias). Its list arrives in the agent's final
-    ranking order, so position is the ``agent`` head's rank.
+    The agentic path merges its sub-queries positionally (first sub-query wins a tie), so a weak
+    chunk from an early sub-query can outrank a later sub-query's best one. A single cross-encoder
+    pass over the union against the user's actual question puts every candidate on one comparable
+    scale, which is what a production "multi-query retrieve then rerank" step does. Only pooled
+    chunks are scored (no new candidates enter here) and only those carrying text — a cross-encoder
+    has nothing to judge without a body.
     """
-    merged = False
-    rank = 0
-    for c in agent_chunks:
-        if not isinstance(c, dict):
-            continue
-        chunk_id = c.get("chunk_id")
-        if not isinstance(chunk_id, str) or not chunk_id:
-            continue
-        merged = True
-        rank += 1
-        score = c.get("score")
-        existing = pool.get(chunk_id)
-        if existing is None:
-            existing = PooledChunk(chunk_id=chunk_id)
-            pool[chunk_id] = existing
-        existing._seen("agent", rank)
-        # Backfill display fields: index heads win when they already resolved them.
-        existing.title = existing.title or _coalesce(c.get("title"))
-        existing.url = existing.url or _coalesce(c.get("url"))
-        existing.content_preview = existing.content_preview or _coalesce(
-            c.get("content_preview"), c.get("content")
-        )
-        if existing.score is None and isinstance(score, (int, float)):
-            existing.score = float(score)
-    return merged
-
-
-def _merge_hit(
-    pool: dict[str, PooledChunk], d: Any, *, mode: str | None, rank: int, agentic_query: str | None
-) -> None:
-    """Merge one index hit into the pool, recording its head/agentic provenance + rank.
-
-    ``mode`` records a base-question head (keyword/vector/hybrid); ``agentic_query`` records the
-    planned sub-query that surfaced it. Exactly one is set per call.
-    """
-    existing = pool.get(d.id)
-    if existing is None:
-        chunk = PooledChunk(
-            chunk_id=d.id,
-            title=_coalesce(d.title),
-            url=_coalesce(d.url),
-            content_preview=_coalesce(d.snippet),
-            score=d.score,
-        )
-        if agentic_query is not None:
-            chunk._seen_agentic(agentic_query, rank)
-        else:
-            chunk._seen(mode, rank)
-        pool[d.id] = chunk
-        return
-    if agentic_query is not None:
-        existing._seen_agentic(agentic_query, rank)
-    else:
-        existing._seen(mode, rank)
-    # Backfill anything an earlier (e.g. trace) capture lacked.
-    existing.title = existing.title or _coalesce(d.title)
-    existing.url = existing.url or _coalesce(d.url)
-    existing.content_preview = existing.content_preview or _coalesce(d.snippet)
-    if existing.score is None:
-        existing.score = d.score
-
-
-def _merge_rerank_hit(pool: dict[str, PooledChunk], d: Any, *, score: float) -> None:
-    """Fold one agentic-rerank hit into the pool, recording its semantic-reranker score.
-
-    Unlike :func:`_merge_hit`, this never assigns a positional rank — the reranked list is ordered
-    by score, and it must not inflate the positional-union "agentic" stage. A chunk the rerank pass
-    surfaces that no other head found still enters the pool (a legitimate reranked candidate).
-    """
-    existing = pool.get(d.id)
-    if existing is None:
-        chunk = PooledChunk(
-            chunk_id=d.id,
-            title=_coalesce(d.title),
-            url=_coalesce(d.url),
-            content_preview=_coalesce(d.snippet),
-            score=d.score,
-        )
-        chunk._seen_agentic_rerank(score)
-        pool[d.id] = chunk
-        return
-    existing._seen_agentic_rerank(score)
-    existing.title = existing.title or _coalesce(d.title)
-    existing.url = existing.url or _coalesce(d.url)
-    existing.content_preview = existing.content_preview or _coalesce(d.snippet)
-    if existing.score is None:
-        existing.score = d.score
+    candidates = [
+        (c.chunk_id, c.content_preview or "")
+        for c in pool.values()
+        if "agentic" in c.ranks and c.content_preview
+    ]
+    scores = await rerank_documents(client, config, query, candidates)
+    for cid, score in scores.items():
+        chunk = pool.get(cid)
+        if chunk is not None:
+            chunk._seen_rerank(AGENTIC_COHERE_STAGE, score)
+    return bool(scores)
 
 
 async def assemble_pool(
@@ -277,6 +137,9 @@ async def assemble_pool(
     agentic_queries: Iterable[AgenticQuery] | None = None,
     agentic_rerank_depth: int | None = None,
     agent_chunks: Iterable[dict[str, Any]] | None = None,
+    cohere: CohereRerankConfig | None = None,
+    cohere_depth: int = COHERE_RERANK_DEPTH,
+    http_client: httpx.AsyncClient | None = None,
 ) -> PoolResult:
     """Build the deduped candidate pool for one query.
 
@@ -294,9 +157,16 @@ async def assemble_pool(
 
     When ``agentic_rerank_depth`` is also set, each sub-query is additionally re-run through the
     semantic (L2) reranker at that depth, and the best reranker score per chunk is recorded in
-    ``agentic_rerank_score`` (provenance ``agentic_rerank``). This models "agentic retrieve →
-    rerank" without disturbing the positional-union ``agentic`` stage: reranked-only chunks get a
-    score but no positional rank. Skipped silently when the index has no semantic configuration.
+    ``rerank_scores["agentic_rerank"]`` (provenance ``agentic_rerank``). This models "agentic
+    retrieve → rerank" without disturbing the positional-union ``agentic`` stage: reranked-only
+    chunks get a score but no positional rank. Skipped silently when the index has no semantic
+    configuration.
+
+    When ``cohere`` is configured (see :mod:`app.services.cohere_rerank`), two cross-encoder heads
+    also run: ``cohere_rerank`` rescores the base question's hybrid top-``cohere_depth`` (the same
+    window Azure's semantic head reranks, so the two are comparable) and ``agentic_cohere``
+    rescores the pooled agentic candidates against the original question. Both are score-ordered
+    like ``agentic_rerank``; a failure is reported in ``heads_failed`` rather than raised.
 
     ``agent_chunks`` (the project's own retrieval agent's ranking, see
     :mod:`app.services.agent_retrieval`) are folded in last under provenance ``agent``, so the
@@ -368,9 +238,37 @@ async def assemble_pool(
             for d in docs:
                 if d.id and isinstance(d.score, (int, float)):
                     agentic_rerank_ran = True
-                    _merge_rerank_hit(pool, d, score=float(d.score))
+                    _merge_rerank_hit(pool, d, head="agentic_rerank", score=float(d.score))
     if agentic_rerank_ran:
         heads_ran.append("agentic_rerank")
+
+    # Cross-encoder (Cohere) heads: one over the base question's hybrid window, one over the
+    # agentic union. Both need the reranker configured; each reports its own failure so a bad key
+    # or an unreachable endpoint is visible instead of looking like a reranker that found nothing.
+    if provider is not None and cohere is not None:
+        client = http_client or httpx.AsyncClient()
+        try:
+            if query.strip():
+                try:
+                    if await _cohere_base_pass(
+                        pool, provider, cohere, client, query, cohere_depth, filters, query_vector
+                    ):
+                        heads_ran.append(COHERE_STAGE)
+                except (CohereRerankError, NotImplementedError) as exc:
+                    heads_failed[COHERE_STAGE] = str(exc) or type(exc).__name__
+                except Exception as exc:  # noqa: BLE001 — transient index/network error
+                    heads_failed[COHERE_STAGE] = f"{type(exc).__name__}: {exc}"
+            if agentic_ran and query.strip():
+                try:
+                    if await _agentic_cohere_pass(pool, cohere, client, query):
+                        heads_ran.append(AGENTIC_COHERE_STAGE)
+                except CohereRerankError as exc:
+                    heads_failed[AGENTIC_COHERE_STAGE] = str(exc)
+                except Exception as exc:  # noqa: BLE001
+                    heads_failed[AGENTIC_COHERE_STAGE] = f"{type(exc).__name__}: {exc}"
+        finally:
+            if http_client is None:
+                await client.aclose()
 
     # Last, so index heads keep their ranks/metadata and the agent's own finds append after them.
     if agent_chunks is not None and _merge_agent_chunks(pool, agent_chunks):
@@ -379,3 +277,4 @@ async def assemble_pool(
     return PoolResult(
         chunks=list(pool.values()), heads_ran=heads_ran, heads_failed=heads_failed
     )
+

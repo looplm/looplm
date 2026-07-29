@@ -164,11 +164,11 @@ async def test_agentic_rerank_scores_by_semantic_and_keeps_best_across_subquerie
     )
     by_id = {c.chunk_id: c for c in res.chunks}
     # b1 scored 1.0 (sub-a) and 2.5 (sub-b) → best kept.
-    assert by_id["b1"].agentic_rerank_score == 2.5
-    assert by_id["a1"].agentic_rerank_score == 3.5
+    assert by_id["b1"].rerank_scores["agentic_rerank"] == 2.5
+    assert by_id["a1"].rerank_scores["agentic_rerank"] == 3.5
     # A chunk only the rerank pass surfaced enters the pool with a score but no positional rank,
     # so it can't inflate the positional-union "agentic" stage.
-    assert by_id["z1"].agentic_rerank_score == 0.4
+    assert by_id["z1"].rerank_scores["agentic_rerank"] == 0.4
     assert "agentic" not in by_id["z1"].ranks
     assert "agentic_rerank" in by_id["z1"].provenance
     assert "agentic_rerank" in res.heads_ran
@@ -187,7 +187,7 @@ async def test_agentic_rerank_skipped_without_depth():
     res = await assemble_pool(
         provider, "base", modes=["keyword"], agentic_queries=[AgenticQuery("sub")]
     )
-    assert all(c.agentic_rerank_score is None for c in res.chunks)
+    assert all("agentic_rerank" not in c.rerank_scores for c in res.chunks)
     assert "agentic_rerank" not in res.heads_ran
 
 

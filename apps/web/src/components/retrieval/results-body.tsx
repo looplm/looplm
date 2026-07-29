@@ -24,6 +24,7 @@ export function RetrievalResultsBody({
   activeK,
   displaySource,
   rerankSweep,
+  rerankScaleMax,
   displayLoading,
   retrieverLabel,
   selectedRetriever,
@@ -41,6 +42,7 @@ export function RetrievalResultsBody({
   activeK: number;
   displaySource: Source;
   rerankSweep: ByStageMetricsResponse["stages"][number]["threshold_sweep"] | undefined;
+  rerankScaleMax: number | null;
   displayLoading: boolean;
   retrieverLabel?: string;
   selectedRetriever: string;
@@ -63,9 +65,14 @@ export function RetrievalResultsBody({
         retriever={selectedRetriever}
       />
 
-      {/* Score-threshold cutoff explorer — Agentic + rerank only. */}
+      {/* Score-threshold cutoff explorer — the rerank stages only (each on its own scale). */}
       {showByStage && rerankSweep && rerankSweep.length > 0 && (
-        <RerankThreshold sweep={rerankSweep} precisionTarget={targets?.precision ?? null} />
+        <RerankThreshold
+          sweep={rerankSweep}
+          precisionTarget={targets?.precision ?? null}
+          scaleMax={rerankScaleMax}
+          stageLabel={retrieverLabel}
+        />
       )}
 
       {/* Overall — the selected retriever, in detail. */}
