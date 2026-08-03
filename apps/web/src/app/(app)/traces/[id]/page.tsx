@@ -10,6 +10,7 @@ import { formatDuration } from "@/lib/format";
 import SmartViewer from "@/components/smart-viewer";
 import RagPipeline from "@/components/rag-pipeline";
 import ThreadConversation from "@/components/thread-conversation";
+import { useUserDirectory } from "@/components/user-directory-context";
 
 const TraceGraph = lazy(() => import("@/components/trace-graph"));
 
@@ -116,6 +117,7 @@ function SpanTree({ spans, depth = 0 }: { spans: SpanNode[]; depth?: number }) {
 export default function TraceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { displayName, isNamed } = useUserDirectory();
   const [trace, setTrace] = useState<TraceDetail | null>(null);
   const [childNodes, setChildNodes] = useState<TraceTreeNode[] | null>(null);
   const [childViewMode, setChildViewMode] = useState<ChildViewMode>("tree");
@@ -167,8 +169,17 @@ export default function TraceDetailPage() {
           <p className="text-sm font-mono">{trace.external_id}</p>
         </div>
         <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
-          <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">User ID</p>
-          <p className="text-sm font-mono">{trace.user_id || "—"}</p>
+          <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">User</p>
+          <p className={`text-sm ${isNamed(trace.user_id) ? "" : "font-mono"}`}>
+            {displayName(trace.user_id) || "—"}
+          </p>
+          {/* The raw id stays visible when a name replaced it, so this card is still the place
+              to copy the id from. */}
+          {isNamed(trace.user_id) && (
+            <p className="mt-0.5 text-[11px] font-mono text-gray-400 dark:text-slate-500 truncate">
+              {trace.user_id}
+            </p>
+          )}
         </div>
         <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800">
           <p className="text-xs text-gray-500 dark:text-slate-400 mb-1">Start Time</p>

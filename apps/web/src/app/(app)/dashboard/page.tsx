@@ -6,6 +6,7 @@ import { useGlobalFilters } from "@/components/global-filters-context";
 import Tooltip from "@/components/tooltip";
 import { UsageTrendChart } from "./usage-trend-chart";
 import { Sparkline } from "./sparkline";
+import { userFilterArrays } from "@/lib/user-filter-params";
 
 function InfoIcon() {
   return (
@@ -31,7 +32,8 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const { startDate, endDate, environment, userFilterMode, filteredUsers, traceNames } = useGlobalFilters();
+  const { startDate, endDate, environment, userFilterMode, effectiveUserIds, traceNames } =
+    useGlobalFilters();
 
   useEffect(() => {
     setStats(null);
@@ -41,12 +43,9 @@ export default function DashboardPage() {
     if (endDate) params.end_date = new Date(endDate).toISOString();
     if (!startDate) params.days = 7;
     if (environment && environment !== "all") params.environment = environment;
-    if (filteredUsers.length > 0) {
-      if (userFilterMode === "exclude") params.exclude_user_ids = filteredUsers;
-      else params.include_user_ids = filteredUsers;
-    }
+    Object.assign(params, userFilterArrays({ userFilterMode, effectiveUserIds }));
     getDashboardStats(params).then(setStats).catch((e) => setError(e.message));
-  }, [startDate, endDate, environment, userFilterMode, filteredUsers, traceNames]);
+  }, [startDate, endDate, environment, userFilterMode, effectiveUserIds, traceNames]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {

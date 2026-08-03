@@ -40,6 +40,7 @@ from app.schemas.analytics import (
 )
 from app.services.multi_hop_analytics import build_multi_hop_response
 from app.services.observe_filter import get_observe_trace_names
+from app.services.user_filter import user_id_filters
 from app.services.retrieval_config import get_rag_span_names, get_retrieval_span_name
 
 logger = logging.getLogger(__name__)
@@ -65,10 +66,7 @@ def _trace_base_filter(
         filters.append(Trace.start_time <= end)
     if environment:
         filters.append(Trace.trace_metadata["environment"].astext == environment)
-    if include_user_ids:
-        filters.append(Trace.user_id.in_(include_user_ids))
-    if exclude_user_ids:
-        filters.append(~Trace.user_id.in_(exclude_user_ids))
+    filters.extend(user_id_filters(include_user_ids, exclude_user_ids))
     trace_names = get_observe_trace_names(project)
     if trace_names:
         filters.append(Trace.name.in_(trace_names))

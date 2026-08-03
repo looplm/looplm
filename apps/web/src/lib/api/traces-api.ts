@@ -23,6 +23,7 @@ import type {
   AdvisorResponse,
   AdvisorRunResponse,
   AdvisorRunTrigger,
+  TraceUser,
 } from "../api-types";
 import { cachedRequest, invalidateCache, request } from "./client";
 
@@ -96,8 +97,7 @@ export const revokeIngestKey = (integrationId: string, keyId: string) =>
 export const getTraceEnvironments = () =>
   request<string[]>("/api/traces/environments");
 
-export const getTraceUsers = () =>
-  request<{ user_id: string; username: string | null }[]>("/api/traces/users");
+export const getTraceUsers = () => request<TraceUser[]>("/api/traces/users");
 
 export const getTraceNames = () =>
   request<string[]>("/api/traces/names");

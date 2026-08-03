@@ -19,6 +19,7 @@ import {
 import { useGlobalFilters } from "@/components/global-filters-context";
 import { HeatmapMatrix } from "./heatmap-matrix";
 import { MultiHopPanel } from "./multi-hop-panel";
+import { userFilterArrays } from "@/lib/user-filter-params";
 
 export default function AnalyticsPage() {
   const {
@@ -26,7 +27,7 @@ export default function AnalyticsPage() {
     endDate,
     environment,
     userFilterMode,
-    filteredUsers,
+    effectiveUserIds,
     traceNames,
     canEditTraceNames,
     retrievalSpanName,
@@ -39,13 +40,10 @@ export default function AnalyticsPage() {
     if (startDate) f.from_date = new Date(startDate).toISOString();
     if (endDate) f.to_date = new Date(endDate).toISOString();
     if (environment && environment !== "all") f.environment = environment;
-    if (filteredUsers.length > 0) {
-      if (userFilterMode === "exclude") f.exclude_user_ids = filteredUsers;
-      else f.include_user_ids = filteredUsers;
-    }
+    Object.assign(f, userFilterArrays({ userFilterMode, effectiveUserIds }));
     return f;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startDate, endDate, environment, userFilterMode, filteredUsers, traceNames]);
+  }, [startDate, endDate, environment, userFilterMode, effectiveUserIds, traceNames]);
 
   // --- Request clusters (async LLM analysis) ---
   const [clusters, setClusters] = useState<RequestClustersResponse | null>(null);

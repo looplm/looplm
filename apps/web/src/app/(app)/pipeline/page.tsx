@@ -8,9 +8,10 @@ import {
 } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import RetrievalPipelineGraph from "@/components/retrieval-pipeline-graph";
+import { userFilterArrays } from "@/lib/user-filter-params";
 
 export default function PipelinePage() {
-  const { startDate, endDate, environment, userFilterMode, filteredUsers } =
+  const { startDate, endDate, environment, userFilterMode, effectiveUserIds } =
     useGlobalFilters();
 
   const filters = useMemo<AnalyticsFilters>(() => {
@@ -18,12 +19,9 @@ export default function PipelinePage() {
     if (startDate) f.from_date = new Date(startDate).toISOString();
     if (endDate) f.to_date = new Date(endDate).toISOString();
     if (environment && environment !== "all") f.environment = environment;
-    if (filteredUsers.length > 0) {
-      if (userFilterMode === "exclude") f.exclude_user_ids = filteredUsers;
-      else f.include_user_ids = filteredUsers;
-    }
+    Object.assign(f, userFilterArrays({ userFilterMode, effectiveUserIds }));
     return f;
-  }, [startDate, endDate, environment, userFilterMode, filteredUsers]);
+  }, [startDate, endDate, environment, userFilterMode, effectiveUserIds]);
 
   const [data, setData] = useState<RetrievalPipelineResponse | null>(null);
   const [loading, setLoading] = useState(true);

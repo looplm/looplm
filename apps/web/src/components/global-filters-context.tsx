@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useEffect,
+  useMemo,
   useRef,
   useCallback,
   type ReactNode,
@@ -17,6 +18,7 @@ import {
   updateProject,
   type Project,
 } from "@/lib/api";
+import { useUserDirectory } from "./user-directory-context";
 
 export type UserFilterMode = "exclude" | "include";
 
@@ -25,7 +27,18 @@ export interface GlobalFilters {
   endDate: string;
   environment: string;
   userFilterMode: UserFilterMode;
+  /** Raw user ids picked directly in the filter bar. */
   filteredUsers: string[];
+  /** Named identities picked in the filter bar (see Settings → Users). */
+  filteredIdentityIds: string[];
+  /** User groups picked in the filter bar. */
+  filteredGroupIds: string[];
+  /**
+   * Every raw user id the current selection resolves to — raw picks plus the members of the
+   * selected identities and groups. This is what the API filters on; the group/identity ids are
+   * a UI-side convenience the endpoints never see.
+   */
+  effectiveUserIds: string[];
   traceNames: string[];
 }
 
@@ -35,9 +48,13 @@ interface GlobalFiltersContextValue extends GlobalFilters {
   setEnvironment: (v: string) => void;
   setUserFilterMode: (v: UserFilterMode) => void;
   setFilteredUsers: (v: string[]) => void;
+  setFilteredIdentityIds: (v: string[]) => void;
+  setFilteredGroupIds: (v: string[]) => void;
   setDateRange: (start: string, end: string) => void;
   resetFilters: () => void;
   hasActiveFilters: boolean;
+  /** True once at least one user id, identity or group is selected. */
+  hasUserSelection: boolean;
   // Persistent trace-name scope (project setting)
   traceNameOptions: string[];
   canEditTraceNames: boolean;
@@ -89,6 +106,12 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const {
+    identities,
+    groups,
+    ready: directoryReady,
+    expand: expandUserSelection,
+  } = useUserDirectory();
 
   const [startDate, setStartDate] = useState(() => searchParams.get("sd") || daysAgo(DEFAULT_RANGE_DAYS));
   const [endDate, setEndDate] = useState(() => searchParams.get("ed") || nowLocal());
@@ -98,6 +121,14 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
   );
   const [filteredUsers, setFilteredUsers] = useState<string[]>(() => {
     const val = searchParams.get("ufl");
+    return val ? val.split(",") : [];
+  });
+  const [filteredIdentityIds, setFilteredIdentityIds] = useState<string[]>(() => {
+    const val = searchParams.get("uil");
+    return val ? val.split(",") : [];
+  });
+  const [filteredGroupIds, setFilteredGroupIds] = useState<string[]>(() => {
+    const val = searchParams.get("ugl");
     return val ? val.split(",") : [];
   });
 
@@ -184,7 +215,36 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
     setEnvironment("all");
     setUserFilterMode("exclude");
     setFilteredUsers([]);
+    setFilteredIdentityIds([]);
+    setFilteredGroupIds([]);
   }, []);
+
+  // Drop selections whose identity or group has since been deleted, so a shared link degrades to
+  // the part of the selection that still resolves instead of filtering on a dangling id.
+  useEffect(() => {
+    if (!directoryReady) return;
+    setFilteredIdentityIds((prev) => {
+      const kept = prev.filter((id) => identities.some((i) => String(i.id) === id));
+      return kept.length === prev.length ? prev : kept;
+    });
+    setFilteredGroupIds((prev) => {
+      const kept = prev.filter((id) => groups.some((g) => String(g.id) === id));
+      return kept.length === prev.length ? prev : kept;
+    });
+  }, [directoryReady, identities, groups]);
+
+  const hasUserSelection =
+    filteredUsers.length > 0 || filteredIdentityIds.length > 0 || filteredGroupIds.length > 0;
+
+  const effectiveUserIds = useMemo(
+    () =>
+      expandUserSelection({
+        userIds: filteredUsers,
+        identityIds: filteredIdentityIds,
+        groupIds: filteredGroupIds,
+      }),
+    [expandUserSelection, filteredUsers, filteredIdentityIds, filteredGroupIds],
+  );
 
   // Sync state to URL search params with debounce
   // Use a ref for searchParams to avoid a feedback loop:
@@ -205,13 +265,14 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
       else params.delete("ed");
       if (environment && environment !== "all") params.set("env", environment);
       else params.delete("env");
-      if (filteredUsers.length > 0) {
-        params.set("ufm", userFilterMode);
-        params.set("ufl", filteredUsers.join(","));
-      } else {
-        params.delete("ufm");
-        params.delete("ufl");
-      }
+      if (hasUserSelection) params.set("ufm", userFilterMode);
+      else params.delete("ufm");
+      if (filteredUsers.length > 0) params.set("ufl", filteredUsers.join(","));
+      else params.delete("ufl");
+      if (filteredIdentityIds.length > 0) params.set("uil", filteredIdentityIds.join(","));
+      else params.delete("uil");
+      if (filteredGroupIds.length > 0) params.set("ugl", filteredGroupIds.join(","));
+      else params.delete("ugl");
 
       const qs = params.toString();
       // Skip navigation if URL params haven't actually changed
@@ -220,9 +281,22 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
       router.replace(target, { scroll: false });
     }, 300);
     return () => clearTimeout(timerRef.current);
-  }, [startDate, endDate, isDefaultRange, environment, userFilterMode, filteredUsers, pathname, router]);
+  }, [
+    startDate,
+    endDate,
+    isDefaultRange,
+    environment,
+    userFilterMode,
+    hasUserSelection,
+    filteredUsers,
+    filteredIdentityIds,
+    filteredGroupIds,
+    pathname,
+    router,
+  ]);
 
-  const hasActiveFilters = !isDefaultRange || (environment !== "all" && environment !== "") || filteredUsers.length > 0;
+  const hasActiveFilters =
+    !isDefaultRange || (environment !== "all" && environment !== "") || hasUserSelection;
 
   return (
     <GlobalFiltersContext.Provider
@@ -232,14 +306,20 @@ export function GlobalFiltersProvider({ children }: { children: ReactNode }) {
         environment,
         userFilterMode,
         filteredUsers,
+        filteredIdentityIds,
+        filteredGroupIds,
+        effectiveUserIds,
         setStartDate,
         setEndDate,
         setEnvironment,
         setUserFilterMode,
         setFilteredUsers,
+        setFilteredIdentityIds,
+        setFilteredGroupIds,
         setDateRange,
         resetFilters,
         hasActiveFilters,
+        hasUserSelection,
         traceNames,
         traceNameOptions,
         canEditTraceNames,

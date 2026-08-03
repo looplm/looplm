@@ -18,6 +18,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.services.feedback_stats_service import compute_feedback_stats
 from app.services.observe_filter import get_observe_trace_names
+from app.services.user_filter import user_id_filters
 from app.services.retrieval_config import get_retrieval_span_name
 from app.schemas.feedback import (
     FeedbackStatsResponse,
@@ -170,10 +171,8 @@ async def generate_suggestions(
         if environment:
             query = query.where(Trace.trace_metadata["environment"].astext == environment)
 
-        if inc_uids:
-            query = query.where(Trace.user_id.in_(inc_uids))
-        if exc_uids:
-            query = query.where(~Trace.user_id.in_(exc_uids))
+        for criterion in user_id_filters(inc_uids, exc_uids):
+            query = query.where(criterion)
 
         query = query.order_by(FeedbackScore.scored_at.desc()).limit(limit)
     result = await db.execute(query)

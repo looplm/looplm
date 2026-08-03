@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useGlobalFilters, daysAgo, nowLocal } from "./global-filters-context";
-import { getTraceEnvironments, getTraceUsers, getIntegrations } from "@/lib/api";
+import GlobalFilterUsers from "./global-filter-users";
+import { getTraceEnvironments, getIntegrations } from "@/lib/api";
 
 type QuickRange = "3d" | "7d" | "30d" | "90d" | "custom";
 
@@ -46,13 +47,9 @@ export default function GlobalFilterHeader() {
     startDate,
     endDate,
     environment,
-    userFilterMode,
-    filteredUsers,
     setStartDate,
     setEndDate,
     setEnvironment,
-    setUserFilterMode,
-    setFilteredUsers,
     setDateRange,
     resetFilters,
     hasActiveFilters,
@@ -65,11 +62,6 @@ export default function GlobalFilterHeader() {
   } = useGlobalFilters();
 
   const [environments, setEnvironments] = useState<string[]>([]);
-  const [users, setUsers] = useState<{ user_id: string; username: string | null }[]>([]);
-  const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const [userSearch, setUserSearch] = useState("");
-  const userDropdownRef = useRef<HTMLDivElement>(null);
-  const userInputRef = useRef<HTMLInputElement>(null);
   const [showTraceDropdown, setShowTraceDropdown] = useState(false);
   const [traceSearch, setTraceSearch] = useState("");
   const traceDropdownRef = useRef<HTMLDivElement>(null);
@@ -82,9 +74,6 @@ export default function GlobalFilterHeader() {
   // Close dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
-        setShowUserDropdown(false);
-      }
       if (traceDropdownRef.current && !traceDropdownRef.current.contains(e.target as Node)) {
         setShowTraceDropdown(false);
       }
@@ -95,7 +84,6 @@ export default function GlobalFilterHeader() {
 
   useEffect(() => {
     getTraceEnvironments().then(setEnvironments).catch(() => {});
-    getTraceUsers().then(setUsers).catch(() => {});
     getIntegrations()
       .then((r) => {
         const timestamps = r.data
@@ -201,152 +189,7 @@ export default function GlobalFilterHeader() {
         </div>
       )}
 
-      {/* User filter (include/exclude combo box) */}
-      {users.length > 0 && (
-        <div className="relative" ref={userDropdownRef}>
-          <button
-            onClick={() => {
-              setShowUserDropdown((v) => !v);
-              setTimeout(() => userInputRef.current?.focus(), 0);
-            }}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-colors focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
-              filteredUsers.length > 0
-                ? userFilterMode === "exclude"
-                  ? "bg-red-50 dark:bg-red-600/15 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-500/30"
-                  : "bg-green-50 dark:bg-green-600/15 text-green-600 dark:text-green-300 border border-green-200 dark:border-green-500/30"
-                : "bg-gray-50 dark:bg-slate-800 text-gray-600 dark:text-slate-300 border border-gray-200 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-700"
-            }`}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
-            </svg>
-            {filteredUsers.length > 0
-              ? `${filteredUsers.length} ${userFilterMode === "exclude" ? "excluded" : "included"}`
-              : "Filter Users"}
-          </button>
-          {showUserDropdown && (
-            <div className="absolute right-0 top-full mt-1 z-50 w-80 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
-              {/* Mode toggle */}
-              <div className="flex border-b border-gray-100 dark:border-slate-700">
-                {(["include", "exclude"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setUserFilterMode(mode)}
-                    className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                      userFilterMode === mode
-                        ? mode === "exclude"
-                          ? "bg-red-50 dark:bg-red-600/15 text-red-600 dark:text-red-300"
-                          : "bg-green-50 dark:bg-green-600/15 text-green-600 dark:text-green-300"
-                        : "text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300"
-                    }`}
-                  >
-                    {mode === "include" ? "Include only" : "Exclude"}
-                  </button>
-                ))}
-              </div>
-              {/* Search input */}
-              <div className="p-2 border-b border-gray-100 dark:border-slate-700">
-                <input
-                  ref={userInputRef}
-                  type="text"
-                  value={userSearch}
-                  onChange={(e) => setUserSearch(e.target.value)}
-                  placeholder="Search users..."
-                  className="w-full px-2.5 py-1.5 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-md text-xs text-gray-700 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
-              </div>
-              {/* Selected tags */}
-              {filteredUsers.length > 0 && (
-                <div className="px-2 pt-2 pb-1 flex flex-wrap gap-1 border-b border-gray-100 dark:border-slate-700">
-                  {filteredUsers.map((uid) => {
-                    const u = users.find((u) => u.user_id === uid);
-                    const label = u?.username || uid.slice(0, 12) + "...";
-                    return (
-                      <span
-                        key={uid}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                          userFilterMode === "exclude"
-                            ? "bg-red-100 dark:bg-red-600/20 text-red-700 dark:text-red-300"
-                            : "bg-green-100 dark:bg-green-600/20 text-green-700 dark:text-green-300"
-                        }`}
-                      >
-                        {label}
-                        <button
-                          onClick={() => setFilteredUsers(filteredUsers.filter((id) => id !== uid))}
-                          className="hover:opacity-70"
-                        >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              {/* User list */}
-              <div className="max-h-48 overflow-y-auto py-1">
-                {users
-                  .filter((u) => {
-                    if (!userSearch) return true;
-                    const q = userSearch.toLowerCase();
-                    return u.user_id.toLowerCase().includes(q) || (u.username?.toLowerCase().includes(q) ?? false);
-                  })
-                  .map((u) => {
-                    const isSelected = filteredUsers.includes(u.user_id);
-                    const label = u.username ? `${u.username}` : u.user_id;
-                    const sublabel = u.username ? u.user_id : null;
-                    return (
-                      <button
-                        key={u.user_id}
-                        onClick={() => {
-                          setFilteredUsers(
-                            isSelected
-                              ? filteredUsers.filter((id) => id !== u.user_id)
-                              : [...filteredUsers, u.user_id]
-                          );
-                          setUserSearch("");
-                        }}
-                        className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors ${
-                          isSelected ? "bg-gray-50 dark:bg-slate-700/50" : ""
-                        }`}
-                      >
-                        <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
-                          isSelected
-                            ? userFilterMode === "exclude"
-                              ? "bg-red-500 border-red-500 text-white"
-                              : "bg-green-500 border-green-500 text-white"
-                            : "border-gray-300 dark:border-slate-600"
-                        }`}>
-                          {isSelected && (
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                            </svg>
-                          )}
-                        </span>
-                        <span className="truncate flex-1">
-                          <span className="text-gray-700 dark:text-slate-200">{label}</span>
-                          {sublabel && (
-                            <span className="text-gray-400 dark:text-slate-500 ml-1 text-[10px]">{sublabel}</span>
-                          )}
-                        </span>
-                      </button>
-                    );
-                  })}
-              </div>
-              {/* Clear all */}
-              {filteredUsers.length > 0 && (
-                <button
-                  onClick={() => setFilteredUsers([])}
-                  className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-400/10 border-t border-gray-100 dark:border-slate-700 transition-colors"
-                >
-                  Clear all
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      <GlobalFilterUsers />
 
       {/* Trace-type filter (persisted to project.settings, owner-only) */}
       {traceNameOptions.length > 0 && (

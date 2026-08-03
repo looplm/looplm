@@ -6,6 +6,7 @@ import Sidebar from "./sidebar";
 import { GlobalFiltersProvider } from "./global-filters-context";
 import GlobalFilterHeader from "./global-filter-header";
 import { PermissionsProvider, usePermissions } from "./permissions-context";
+import { UserDirectoryProvider } from "./user-directory-context";
 
 const FILTER_PATHS = new Set(["/dashboard", "/traces", "/analytics", "/feedback", "/costs"]);
 
@@ -136,10 +137,14 @@ export default function NavigationWrapper({ children }: { children: React.ReactN
         <main className="flex-1 p-4 md:p-8 overflow-auto w-full">
           <Suspense>
             <SectionGuard>
-              <GlobalFiltersProvider>
-                {showFilters && <GlobalFilterHeader />}
-                {children}
-              </GlobalFiltersProvider>
+              {/* Outside the filters provider: the filter bar resolves group/identity
+                  selections into raw user ids through this directory. */}
+              <UserDirectoryProvider>
+                <GlobalFiltersProvider>
+                  {showFilters && <GlobalFilterHeader />}
+                  {children}
+                </GlobalFiltersProvider>
+              </UserDirectoryProvider>
             </SectionGuard>
           </Suspense>
         </main>

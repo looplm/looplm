@@ -17,6 +17,7 @@ from app.schemas.feedback import (
     GraderTrend,
 )
 from app.services.observe_filter import get_observe_trace_names
+from app.services.user_filter import user_id_filters
 
 
 def _apply_trace_filters(
@@ -34,10 +35,8 @@ def _apply_trace_filters(
     query = query.join(Trace, FeedbackScore.trace_id == Trace.id)
     if environment:
         query = query.where(Trace.trace_metadata["environment"].astext == environment)
-    if inc_uids:
-        query = query.where(Trace.user_id.in_(inc_uids))
-    if exc_uids:
-        query = query.where(~Trace.user_id.in_(exc_uids))
+    for criterion in user_id_filters(inc_uids, exc_uids):
+        query = query.where(criterion)
     if observe_names:
         query = query.where(Trace.name.in_(observe_names))
     return query
@@ -140,10 +139,7 @@ async def compute_feedback_stats(
         trace_filter.append(Trace.integration_id == integration_id)
     if environment:
         trace_filter.append(Trace.trace_metadata["environment"].astext == environment)
-    if _inc_uids:
-        trace_filter.append(Trace.user_id.in_(_inc_uids))
-    if _exc_uids:
-        trace_filter.append(~Trace.user_id.in_(_exc_uids))
+    trace_filter.extend(user_id_filters(_inc_uids, _exc_uids))
     if observe_names:
         trace_filter.append(Trace.name.in_(observe_names))
 

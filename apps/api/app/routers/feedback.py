@@ -17,6 +17,7 @@ from app.db import get_db
 from app.models.models import FeedbackScore, Integration, IntegrationType, JsonImport, SyncStatus, Trace
 from app.models.project import Project
 from app.services.observe_filter import get_observe_trace_names
+from app.services.user_filter import user_id_filters
 from app.schemas.feedback import (
     FeedbackListResponse,
     FeedbackScoreDetail,
@@ -197,18 +198,13 @@ async def list_feedback(
         count_query = count_query.where(Trace.name.in_(observe_names))
     _inc_uids = [v.strip() for v in (include_user_ids or "").split(",") if v.strip()]
     _exc_uids = [v.strip() for v in (exclude_user_ids or "").split(",") if v.strip()]
-    if _inc_uids:
-        query = query.where(Trace.user_id.in_(_inc_uids))
+    _uid_filters = user_id_filters(_inc_uids, _exc_uids)
+    if _uid_filters:
+        query = query.where(*_uid_filters)
         if not _count_has_trace_join:
             count_query = count_query.outerjoin(Trace, FeedbackScore.trace_id == Trace.id)
             _count_has_trace_join = True
-        count_query = count_query.where(Trace.user_id.in_(_inc_uids))
-    if _exc_uids:
-        query = query.where(~Trace.user_id.in_(_exc_uids))
-        if not _count_has_trace_join:
-            count_query = count_query.outerjoin(Trace, FeedbackScore.trace_id == Trace.id)
-            _count_has_trace_join = True
-        count_query = count_query.where(~Trace.user_id.in_(_exc_uids))
+        count_query = count_query.where(*_uid_filters)
     if search:
         from sqlalchemy import Text as SAText, cast as sa_cast
 

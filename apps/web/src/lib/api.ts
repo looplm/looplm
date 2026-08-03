@@ -203,6 +203,17 @@ export type {
   IssueEventItem,
   IssueDetail,
   IssueDetectResponse,
+  UserIdentity,
+  UserIdentityListResponse,
+  CreateUserIdentityBody,
+  UpdateUserIdentityBody,
+  UserGroup,
+  UserGroupListResponse,
+  CreateUserGroupBody,
+  UpdateUserGroupBody,
+  TraceUser,
+  ResolvedUserName,
+  UserSelection,
 } from "./api-types";
 
 // Re-export all functions from domain modules
@@ -224,5 +235,6 @@ export * from "./api/index-explorer-api";
 export * from "./api/source-registry-api";
 export * from "./api/chunk-quality-api";
 export * from "./api/issues-api";
+export * from "./api/user-directory-api";
 export * from "./api/version";
 export * from "./api/admin";

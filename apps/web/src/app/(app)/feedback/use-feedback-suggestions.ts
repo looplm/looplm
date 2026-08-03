@@ -16,6 +16,7 @@ import { getSuggestionRun, stopSuggestionRun } from "@/lib/api/evals-api";
 import type { SuggestionRunResponse } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
 import type { TestCaseFormData } from "../datasets/[id]/test-case-modal";
+import { userFilterParams } from "@/lib/user-filter-params";
 
 // `setDerivedView` is owned by the compose hook; the loaders jump to the
 // results view when a run is already in progress, so it is threaded in.
@@ -47,10 +48,7 @@ export function useFeedbackSuggestions(setDerivedView: (v: "picker" | "results")
         if (globalFilters.environment && globalFilters.environment !== "all") {
           params.environment = globalFilters.environment;
         }
-        if (globalFilters.filteredUsers.length > 0) {
-          const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-          params[key] = globalFilters.filteredUsers.join(",");
-        }
+        Object.assign(params, userFilterParams(globalFilters));
       }
       const [run, dsData] = await Promise.all([
         generateSuggestions(params),
@@ -74,7 +72,7 @@ export function useFeedbackSuggestions(setDerivedView: (v: "picker" | "results")
       toast.error("Failed to generate suggestions", { description: err.message });
       setSugLoading(false);
     }
-  }, [sugFilter, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers]);
+  }, [sugFilter, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.effectiveUserIds]);
 
   const loadLatestSuggestions = useCallback(async () => {
     setSugLoading(true);

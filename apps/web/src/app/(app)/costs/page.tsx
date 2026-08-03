@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from "react";
 import { getCostsOverview } from "@/lib/api";
 import type { CostsOverviewResponse } from "@/lib/api-types/costs";
 import { useGlobalFilters } from "@/components/global-filters-context";
+import { userFilterParams } from "@/lib/user-filter-params";
 
 function formatCost(usd: number): string {
   if (usd === 0) return "$0.00";
@@ -35,7 +36,8 @@ export default function CostsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [costView, setCostView] = useState<CostView>("all");
-  const { startDate, endDate, environment, userFilterMode, filteredUsers, traceNames } = useGlobalFilters();
+  const { startDate, endDate, environment, userFilterMode, effectiveUserIds, traceNames } =
+    useGlobalFilters();
 
   useEffect(() => {
     setLoading(true);
@@ -45,16 +47,13 @@ export default function CostsPage() {
     if (endDate) params.end_date = new Date(endDate).toISOString();
     if (!startDate) params.days = "30";
     if (environment && environment !== "all") params.environment = environment;
-    if (filteredUsers.length > 0) {
-      const key = userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-      params[key] = filteredUsers.join(",");
-    }
+    Object.assign(params, userFilterParams({ userFilterMode, effectiveUserIds }));
 
     getCostsOverview(params)
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [startDate, endDate, environment, userFilterMode, filteredUsers, traceNames]);
+  }, [startDate, endDate, environment, userFilterMode, effectiveUserIds, traceNames]);
 
   const showApp = costView === "all" || costView === "application";
   const showPlatform = costView === "all" || costView === "platform";

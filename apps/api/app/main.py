@@ -17,7 +17,7 @@ from app.routers import (
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
     index_explorer, ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent,
     permissions, project_members, projects, prompts, rag_coverage, retrieval, retrieval_readiness, retrieval_runs, route_analysis, source_registry, source_registry_scan, trace_detail,
-    traces, user_settings, version, chunk_labels,
+    traces, user_directory, user_settings, version, chunk_labels,
 )
 
 logger = logging.getLogger("looplm")
@@ -301,6 +301,8 @@ app.include_router(code_agent.router)
 app.include_router(github_oauth.router)
 app.include_router(costs_overview.router)
 app.include_router(llm_costs.router)
+app.include_router(user_directory.identities_router)
+app.include_router(user_directory.groups_router)
 app.include_router(user_settings.router)
 app.include_router(permissions.router)
 app.include_router(project_members.router)

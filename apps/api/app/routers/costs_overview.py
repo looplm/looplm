@@ -16,6 +16,7 @@ from app.models.integrations import Integration, Span, SpanType, Trace
 from app.models.llm_usage import LlmUsageRecord
 from app.models.project import Project
 from app.services.observe_filter import get_observe_trace_names
+from app.services.user_filter import user_id_filters
 from app.schemas.costs_overview import (
     CostOverviewTrendPoint,
     CostsOverviewResponse,
@@ -71,10 +72,7 @@ async def get_costs_overview(
         span_filters.append(Trace.trace_metadata["environment"].astext == environment)
     _inc_uids = [v.strip() for v in (include_user_ids or "").split(",") if v.strip()]
     _exc_uids = [v.strip() for v in (exclude_user_ids or "").split(",") if v.strip()]
-    if _inc_uids:
-        span_filters.append(Trace.user_id.in_(_inc_uids))
-    if _exc_uids:
-        span_filters.append(~Trace.user_id.in_(_exc_uids))
+    span_filters.extend(user_id_filters(_inc_uids, _exc_uids))
     if integration_id:
         span_filters.append(Trace.integration_id == integration_id)
 

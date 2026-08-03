@@ -12,6 +12,7 @@ import ProjectSettings from "@/components/settings/project-settings";
 import EvaluationsSettings from "@/components/settings/evaluations-settings";
 import GeneralSettings from "@/components/settings/general-settings";
 import MembersSettings from "@/components/settings/members-settings";
+import UsersSettings from "@/components/settings/users-settings";
 import AboutSettings from "@/components/settings/about-settings";
 import InstanceSettings from "@/components/settings/instance-settings";
 import IntegrationsPanel from "@/components/integrations-panel";
@@ -20,6 +21,7 @@ import { usePermissions } from "@/components/permissions-context";
 const ALL_TABS = [
   "project",
   "members",
+  "users",
   "evaluations",
   "integrations",
   "ai-models",
@@ -113,6 +115,7 @@ export default function SettingsPage() {
       {activeTab === "members" && isAdmin && (
         <MembersSettings projectId={currentProjectId} />
       )}
+      {activeTab === "users" && <UsersSettings />}
       {activeTab === "integrations" && <IntegrationsPanel />}
       {activeTab === "ai-models" && (
         <GeneralSettings

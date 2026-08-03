@@ -16,6 +16,7 @@ from app.db import get_db
 from app.models.models import Integration, IntegrationType, JsonImport, SyncStatus, Trace, TraceStatus
 from app.models.project import Project
 from app.services.observe_filter import get_observe_trace_names
+from app.services.user_filter import user_id_filters
 from app.schemas.traces import (
     PaginationInfo,
     TraceImportRequest,
@@ -145,13 +146,26 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
 ):
-    """Return distinct user_id values with optional username from metadata."""
+    """Return distinct user_id values with optional username from metadata.
+
+    ``trace_count`` lets the user-directory settings table surface the ids that actually
+    carry traffic; the username is the raw metadata value, which the directory's stored
+    identity names take precedence over on the client.
+
+    ``userName`` is the key the rest of the codebase reads (``dataset_suggestions``,
+    ``feedback_eval``), so it wins; lowercase ``username`` stays as a fallback for callers that
+    send it that way.
+    """
     project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
-    username_col = Trace.trace_metadata["username"].astext
+    username_col = func.coalesce(
+        Trace.trace_metadata["userName"].astext,
+        Trace.trace_metadata["username"].astext,
+    )
     result = await db.execute(
         select(
             Trace.user_id,
             func.max(username_col).label("username"),
+            func.count(Trace.id).label("trace_count"),
         )
         .where(
             Trace.integration_id.in_(project_integration_ids),
@@ -162,7 +176,7 @@ async def list_users(
         .order_by(Trace.user_id)
     )
     return [
-        {"user_id": row.user_id, "username": row.username}
+        {"user_id": row.user_id, "username": row.username, "trace_count": row.trace_count}
         for row in result.all()
     ]
 
@@ -305,14 +319,9 @@ async def list_traces(
         query = query.where(f)
         count_query = count_query.where(f)
 
-    inc_uids = _parse_multi(include_user_ids)
-    if inc_uids:
-        query = query.where(Trace.user_id.in_(inc_uids))
-        count_query = count_query.where(Trace.user_id.in_(inc_uids))
-    exc_uids = _parse_multi(exclude_user_ids)
-    if exc_uids:
-        query = query.where(~Trace.user_id.in_(exc_uids))
-        count_query = count_query.where(~Trace.user_id.in_(exc_uids))
+    for criterion in user_id_filters(_parse_multi(include_user_ids), _parse_multi(exclude_user_ids)):
+        query = query.where(criterion)
+        count_query = count_query.where(criterion)
 
     if start_after:
         query = query.where(Trace.start_time > start_after)

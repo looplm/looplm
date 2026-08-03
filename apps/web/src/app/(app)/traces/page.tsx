@@ -15,6 +15,7 @@ import TraceFilters, {
 import { useGlobalFilters } from "@/components/global-filters-context";
 import ResizableHeader from "@/components/resizable-header";
 import { TraceRow, ThreadGroup, RunTreeGroup } from "./trace-table-rows";
+import { userFilterParams } from "@/lib/user-filter-params";
 
 type ViewMode = "flat" | "runs" | "threads";
 
@@ -98,10 +99,7 @@ export default function TracesPage() {
     if (globalFilters.environment && globalFilters.environment !== "all") {
       params.environment = globalFilters.environment;
     }
-    if (globalFilters.filteredUsers.length > 0) {
-      const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-      params[key] = globalFilters.filteredUsers.join(",");
-    }
+    Object.assign(params, userFilterParams(globalFilters));
 
     if (viewMode === "flat" || viewMode === "runs") {
       const reqParams = viewMode === "runs" ? { ...params, root_only: "true" } : params;
@@ -131,7 +129,7 @@ export default function TracesPage() {
 
   useEffect(() => { localStorage.setItem("traces-view-mode", viewMode); }, [viewMode]);
 
-  useEffect(() => { load(); }, [page, cursorIdx, viewMode, filters, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
+  useEffect(() => { load(); }, [page, cursorIdx, viewMode, filters, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.effectiveUserIds, globalFilters.traceNames]);
 
   const isEmpty = viewMode === "threads"
     ? !threadData || (threadData.data.length === 0 && threadData.standalone_traces.length === 0)
@@ -194,7 +192,7 @@ export default function TracesPage() {
                 <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-slate-400">
                   <ResizableHeader width={colWidths.name} onResize={(w) => handleResize("name", w)} className="text-left py-3 px-4">Name</ResizableHeader>
                   <ResizableHeader width={colWidths.thread} onResize={(w) => handleResize("thread", w)} className="text-left py-3 px-4">Thread ID</ResizableHeader>
-                  <ResizableHeader width={colWidths.user} onResize={(w) => handleResize("user", w)} className="text-left py-3 px-4">User ID</ResizableHeader>
+                  <ResizableHeader width={colWidths.user} onResize={(w) => handleResize("user", w)} className="text-left py-3 px-4">User</ResizableHeader>
                   <ResizableHeader width={colWidths.input} onResize={(w) => handleResize("input", w)} className="text-left py-3 px-4">Input</ResizableHeader>
                   <ResizableHeader width={colWidths.status} onResize={(w) => handleResize("status", w)} className="text-left py-3 px-4">Status</ResizableHeader>
                   <ResizableHeader width={colWidths.duration} onResize={(w) => handleResize("duration", w)} className="text-right py-3 px-4">Duration</ResizableHeader>

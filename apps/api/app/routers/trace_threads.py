@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import Integration, Trace
 from app.models.project import Project
 from app.services.observe_filter import get_observe_trace_names
+from app.services.user_filter import user_id_filters
 from app.auth import get_current_project
 from app.db import get_db
 from app.schemas.traces import (
@@ -79,12 +80,9 @@ async def list_threads(
     env_vals = _parse_multi(environment)
     if env_vals:
         conditions.append(_multi_filter(Trace.trace_metadata["environment"].astext, env_vals, environment_mode))
-    inc_uids = _parse_multi(include_user_ids)
-    if inc_uids:
-        conditions.append(Trace.user_id.in_(inc_uids))
-    exc_uids = _parse_multi(exclude_user_ids)
-    if exc_uids:
-        conditions.append(~Trace.user_id.in_(exc_uids))
+    conditions.extend(
+        user_id_filters(_parse_multi(include_user_ids), _parse_multi(exclude_user_ids))
+    )
     if start_after:
         conditions.append(Trace.start_time > start_after)
     if start_before:

@@ -33,6 +33,7 @@ from app.schemas.retrieval import (
     RetrievalTargets,
 )
 from app.services.retrieval_config import get_rag_span_names
+from app.services.user_filter import user_id_filters
 from app.services.retrieval_labels_metrics import (
     compute_by_stage_metrics,
     compute_overall_labels_metrics,
@@ -100,10 +101,7 @@ async def get_retrieval_pipeline(
         filters.append(Trace.start_time <= to_date)
     if environment:
         filters.append(Trace.trace_metadata["environment"].astext == environment)
-    if include_user_ids:
-        filters.append(Trace.user_id.in_(include_user_ids))
-    if exclude_user_ids:
-        filters.append(~Trace.user_id.in_(exclude_user_ids))
+    filters.extend(user_id_filters(include_user_ids, exclude_user_ids))
 
     result = await db.execute(
         select(Trace)

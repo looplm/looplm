@@ -4576,6 +4576,10 @@ export interface paths {
         /**
          * List Users
          * @description Return distinct user_id values with optional username from metadata.
+         *
+         *     ``trace_count`` lets the user-directory settings table surface the ids that actually
+         *     carry traffic; the username is the raw metadata value, which the directory's stored
+         *     identity names take precedence over on the client.
          */
         get: operations["list_users_api_traces_users_get"];
         put?: never;
@@ -4698,6 +4702,102 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/user-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List User Groups
+         * @description List every user group in the project.
+         */
+        get: operations["list_user_groups_api_user_groups_get"];
+        put?: never;
+        /**
+         * Create User Group
+         * @description Create a group of identities and/or raw user ids.
+         */
+        post: operations["create_user_group_api_user_groups_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user-groups/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete User Group
+         * @description Delete a group. Identities and their user ids are untouched.
+         */
+        delete: operations["delete_user_group_api_user_groups__group_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update User Group
+         * @description Rename a group, edit its description, or replace its membership.
+         */
+        patch: operations["update_user_group_api_user_groups__group_id__patch"];
+        trace?: never;
+    };
+    "/api/user-identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List User Identities
+         * @description List every named identity in the project.
+         */
+        get: operations["list_user_identities_api_user_identities_get"];
+        put?: never;
+        /**
+         * Create User Identity
+         * @description Name a person and attach their raw user ids.
+         */
+        post: operations["create_user_identity_api_user_identities_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user-identities/{identity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete User Identity
+         * @description Delete an identity and drop it from every group that referenced it.
+         */
+        delete: operations["delete_user_identity_api_user_identities__identity_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update User Identity
+         * @description Rename an identity and/or replace the set of user ids it owns.
+         */
+        patch: operations["update_user_identity_api_user_identities__identity_id__patch"];
         trace?: never;
     };
     "/api/v1/ingest/traces": {
@@ -12299,6 +12399,104 @@ export interface components {
             session_id: string;
             /** Status */
             status: string;
+        };
+        /** UserGroupCreate */
+        UserGroupCreate: {
+            /** Description */
+            description?: string | null;
+            /** Identity Ids */
+            identity_ids?: string[];
+            /** Name */
+            name: string;
+            /** User Ids */
+            user_ids?: string[];
+        };
+        /** UserGroupListResponse */
+        UserGroupListResponse: {
+            /** Data */
+            data: components["schemas"]["UserGroupResponse"][];
+            /** Total */
+            total: number;
+        };
+        /** UserGroupResponse */
+        UserGroupResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Identity Ids */
+            identity_ids: string[];
+            /** Name */
+            name: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** User Ids */
+            user_ids: string[];
+        };
+        /** UserGroupUpdate */
+        UserGroupUpdate: {
+            /** Description */
+            description?: string | null;
+            /** Identity Ids */
+            identity_ids?: string[] | null;
+            /** Name */
+            name?: string | null;
+            /** User Ids */
+            user_ids?: string[] | null;
+        };
+        /** UserIdentityCreate */
+        UserIdentityCreate: {
+            /** Name */
+            name: string;
+            /** User Ids */
+            user_ids?: string[];
+        };
+        /** UserIdentityListResponse */
+        UserIdentityListResponse: {
+            /** Data */
+            data: components["schemas"]["UserIdentityResponse"][];
+            /** Total */
+            total: number;
+        };
+        /** UserIdentityResponse */
+        UserIdentityResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** User Ids */
+            user_ids: string[];
+        };
+        /** UserIdentityUpdate */
+        UserIdentityUpdate: {
+            /** Name */
+            name?: string | null;
+            /** User Ids */
+            user_ids?: string[] | null;
         };
         /** UserSettingsResponse */
         UserSettingsResponse: {
@@ -21656,6 +21854,274 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RagPipelineView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_user_groups_api_user_groups_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserGroupListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_user_group_api_user_groups_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserGroupCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserGroupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_user_group_api_user_groups__group_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_user_group_api_user_groups__group_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserGroupUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserGroupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_user_identities_api_user_identities_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserIdentityListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_user_identity_api_user_identities_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserIdentityCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserIdentityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_user_identity_api_user_identities__identity_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                identity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_user_identity_api_user_identities__identity_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                identity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserIdentityUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserIdentityResponse"];
                 };
             };
             /** @description Validation Error */

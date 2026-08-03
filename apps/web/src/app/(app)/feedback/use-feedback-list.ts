@@ -10,6 +10,7 @@ import {
   type FeedbackListResponse,
 } from "@/lib/api";
 import { useGlobalFilters } from "@/components/global-filters-context";
+import { userFilterParams } from "@/lib/user-filter-params";
 
 export type Tab = "feedback" | "suggestions" | "top-questions" | "themes" | "failure-modes";
 
@@ -52,10 +53,7 @@ export function useFeedbackList(tab: Tab, evalCompleted: number) {
       }
       if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
       if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
-      if (globalFilters.filteredUsers.length > 0) {
-        const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-        params[key] = globalFilters.filteredUsers.join(",");
-      }
+      Object.assign(params, userFilterParams(globalFilters));
 
       const statsParams: Record<string, string> = {};
       // Mirror the table's value/verdict filters so the KPI cards and trend
@@ -67,10 +65,7 @@ export function useFeedbackList(tab: Tab, evalCompleted: number) {
       if (globalFilters.endDate) statsParams.end_date = new Date(globalFilters.endDate).toISOString();
       if (!globalFilters.startDate) statsParams.days = "30";
       if (globalFilters.environment && globalFilters.environment !== "all") statsParams.environment = globalFilters.environment;
-      if (globalFilters.filteredUsers.length > 0) {
-        const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-        statsParams[key] = globalFilters.filteredUsers.join(",");
-      }
+      Object.assign(statsParams, userFilterParams(globalFilters));
 
       const [feedbackData, statsData] = await Promise.all([
         getFeedback(params),
@@ -83,7 +78,7 @@ export function useFeedbackList(tab: Tab, evalCompleted: number) {
     } finally {
       setLoading(false);
     }
-  }, [page, filterValue, filterVerdict, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames, tab, evalCompleted]);
+  }, [page, filterValue, filterVerdict, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.effectiveUserIds, globalFilters.traceNames, tab, evalCompleted]);
 
   const toggleFeedbackId = useCallback((id: string, checked: boolean) => {
     setSelectedFeedbackIds((prev) => {
@@ -126,10 +121,7 @@ export function useFeedbackList(tab: Tab, evalCompleted: number) {
       }
       if (globalFilters.startDate) params.from_date = new Date(globalFilters.startDate).toISOString();
       if (globalFilters.endDate) params.to_date = new Date(globalFilters.endDate).toISOString();
-      if (globalFilters.filteredUsers.length > 0) {
-        const key = globalFilters.userFilterMode === "exclude" ? "exclude_user_ids" : "include_user_ids";
-        params[key] = globalFilters.filteredUsers.join(",");
-      }
+      Object.assign(params, userFilterParams(globalFilters));
       const resp = await getFeedback(params);
       const ids = resp.data.map((i) => String(i.id));
       setSelectedFeedbackIds(new Set(ids));
@@ -143,7 +135,7 @@ export function useFeedbackList(tab: Tab, evalCompleted: number) {
     } finally {
       setSelectingAll(false);
     }
-  }, [filterValue, filterVerdict, globalFilters.environment, globalFilters.startDate, globalFilters.endDate, globalFilters.filteredUsers, globalFilters.userFilterMode]);
+  }, [filterValue, filterVerdict, globalFilters.environment, globalFilters.startDate, globalFilters.endDate, globalFilters.effectiveUserIds, globalFilters.userFilterMode]);
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -170,7 +162,7 @@ export function useFeedbackList(tab: Tab, evalCompleted: number) {
   // Reset to page 1 whenever the active tab or any filter changes.
   useEffect(() => {
     setPage(1);
-  }, [tab, filterValue, filterVerdict, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.filteredUsers, globalFilters.traceNames]);
+  }, [tab, filterValue, filterVerdict, globalFilters.startDate, globalFilters.endDate, globalFilters.environment, globalFilters.userFilterMode, globalFilters.effectiveUserIds, globalFilters.traceNames]);
 
   return {
     stats,

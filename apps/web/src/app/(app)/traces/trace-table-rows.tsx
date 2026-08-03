@@ -10,6 +10,7 @@ import {
 } from "@/lib/api";
 import StatusBadge from "@/components/status-badge";
 import Tooltip from "@/components/tooltip";
+import { useUserDirectory } from "@/components/user-directory-context";
 import { formatDuration } from "@/lib/format";
 
 const RUN_TYPE_COLORS: Record<string, string> = {
@@ -19,6 +20,36 @@ const RUN_TYPE_COLORS: Record<string, string> = {
   chain: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
   agent: "bg-orange-500/20 text-orange-300 border-orange-500/30",
 };
+
+/**
+ * The user column. Shows the name from Settings → Users when the ID has one (falling back to the
+ * username in trace metadata, then the raw ID), always with the raw ID on hover. Unnamed IDs keep
+ * the monospace styling so they still read as identifiers.
+ */
+function UserCell({
+  userId,
+  width,
+  dim = false,
+}: {
+  userId?: string | null;
+  width?: number;
+  dim?: boolean;
+}) {
+  const { displayName, isNamed } = useUserDirectory();
+  const label = displayName(userId);
+  return (
+    <td
+      className={`${dim ? "py-2" : "py-3"} px-4 text-xs truncate ${
+        isNamed(userId) ? "" : "font-mono"
+      } ${dim ? "text-gray-400 dark:text-slate-500" : "text-gray-500 dark:text-slate-400"}`}
+      style={{ width }}
+    >
+      <Tooltip content={userId || ""}>
+        <span>{label || "—"}</span>
+      </Tooltip>
+    </td>
+  );
+}
 
 function RunTypeBadge({ runType }: { runType?: string }) {
   if (!runType) return null;
@@ -74,11 +105,7 @@ export function TraceRow({ t, widths }: { t: TraceListItem; widths: any }) {
           <span>{t.thread_id || "\u2014"}</span>
         </Tooltip>
       </td>
-      <td className="py-3 px-4 text-xs font-mono text-gray-500 dark:text-slate-400 truncate" style={{ width: widths.user }}>
-        <Tooltip content={t.user_id || ""}>
-          <span>{t.user_id || "\u2014"}</span>
-        </Tooltip>
-      </td>
+      <UserCell userId={t.user_id} width={widths.user} />
       <td className="py-3 px-4 text-xs font-mono text-gray-500 dark:text-slate-400 truncate" style={{ width: widths.input }}>
         <Tooltip content={formatInputPreview(t.input)}>
           <div className="truncate cursor-default px-1 rounded hover:bg-gray-100/50 dark:hover:bg-slate-800/50">
@@ -133,11 +160,7 @@ export function ThreadGroup({ thread, widths }: { thread: ThreadSummary; widths:
             <span>{thread.thread_id}</span>
           </Tooltip>
         </td>
-        <td className="py-3 px-4 text-xs font-mono text-gray-500 dark:text-slate-400 truncate" style={{ width: widths.user }}>
-          <Tooltip content={rootTrace.user_id || ""}>
-            <span>{rootTrace.user_id || "\u2014"}</span>
-          </Tooltip>
-        </td>
+        <UserCell userId={rootTrace.user_id} width={widths.user} />
         <td className="py-3 px-4 text-xs font-mono text-gray-500 dark:text-slate-400 truncate" style={{ width: widths.input }}>
           <Tooltip content={formatInputPreview(rootTrace.input)}>
             <div className="truncate cursor-default px-1 rounded hover:bg-gray-100/50 dark:hover:bg-slate-800/50">
@@ -173,11 +196,7 @@ export function ThreadGroup({ thread, widths }: { thread: ThreadSummary; widths:
               <span className="opacity-50">&quot;</span>
             </Tooltip>
           </td>
-          <td className="py-2 px-4 text-xs font-mono text-gray-400 dark:text-slate-500 truncate" style={{ width: widths.user }}>
-            <Tooltip content={t.user_id || ""}>
-              <span>{t.user_id || "\u2014"}</span>
-            </Tooltip>
-          </td>
+          <UserCell userId={t.user_id} width={widths.user} dim />
           <td className="py-2 px-4 text-xs font-mono text-gray-400 dark:text-slate-500 truncate" style={{ width: widths.input }}>
             <Tooltip content={formatInputPreview(t.input)}>
               <div className="truncate cursor-default px-1 rounded hover:bg-gray-100/50 dark:hover:bg-slate-800/50">
@@ -312,11 +331,7 @@ export function RunTreeGroup({ trace, widths }: { trace: TraceListItem; widths: 
             <span>{trace.thread_id || "\u2014"}</span>
           </Tooltip>
         </td>
-        <td className="py-3 px-4 text-xs font-mono text-gray-500 dark:text-slate-400 truncate" style={{ width: widths.user }}>
-          <Tooltip content={trace.user_id || ""}>
-            <span>{trace.user_id || "\u2014"}</span>
-          </Tooltip>
-        </td>
+        <UserCell userId={trace.user_id} width={widths.user} />
         <td className="py-3 px-4 text-xs font-mono text-gray-500 dark:text-slate-400 truncate" style={{ width: widths.input }}>
           <Tooltip content={formatInputPreview(trace.input)}>
             <div className="truncate cursor-default px-1 rounded hover:bg-gray-100/50 dark:hover:bg-slate-800/50">

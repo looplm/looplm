@@ -21,6 +21,7 @@ from app.models.models import (
 )
 from app.models.project import Project
 from app.services.observe_filter import get_observe_trace_names
+from app.services.user_filter import user_id_filters
 from app.schemas.dashboard import (
     DashboardPeriod,
     DashboardStatsResponse,
@@ -151,10 +152,7 @@ async def get_dashboard_stats(
         base_filter.append(Trace.integration_id == integration_id)
     if environment:
         base_filter.append(Trace.trace_metadata["environment"].astext == environment)
-    if include_user_ids:
-        base_filter.append(Trace.user_id.in_(include_user_ids))
-    if exclude_user_ids:
-        base_filter.append(~Trace.user_id.in_(exclude_user_ids))
+    base_filter.extend(user_id_filters(include_user_ids, exclude_user_ids))
     if trace_names:
         base_filter.append(Trace.name.in_(trace_names))
 
