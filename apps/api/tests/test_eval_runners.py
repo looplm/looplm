@@ -8,7 +8,7 @@ import pytest
 
 from app.models.models import Evaluator, EvaluatorType, TestCase
 from app.services.eval_executor_helpers import _run_evaluators_for_turn
-from app.services.eval_runners import _run_deterministic
+from app.services.eval_runners import _run_deterministic, derive_judge_context
 from app.services.retrieval_config import extract_retrieved_urls
 
 
@@ -151,3 +151,58 @@ async def test_run_evaluators_for_turn_preserves_details():
     assert g.details is not None
     assert g.details["missing_urls"] == ["https://a.example/p1"]
     assert g.details["retrieved_urls"] == ["https://c.example/other"]
+
+
+# --- derive_judge_context ---
+
+def test_judge_context_narrows_to_retrieved_context():
+    """The judge must see retrieved evidence only — not the target's own system prompt.
+
+    Regression: the full payload was passed through, so the target's prompt (which states
+    what its answers may claim) reached the judge as if it were source material, and the
+    judge enforced it against the answer.
+    """
+    raw = json.dumps({
+        "answer": "Die Erstprüfung erfolgt monatlich.",
+        "retrievedContext": ["QUELLE [1]: Die Erstprüfung erfolgt monatlich."],
+        "prompt": {"system": "An offer to explain implicitly claims the context contains it."},
+        "formattedContext": "duplicate of the sources",
+        "searchSources": [{"content": "duplicate again"}],
+    })
+
+    narrowed = derive_judge_context(raw)
+
+    assert json.loads(narrowed) == ["QUELLE [1]: Die Erstprüfung erfolgt monatlich."]
+    assert "An offer to explain" not in narrowed
+    assert "duplicate" not in narrowed
+
+
+def test_judge_context_keeps_the_glossary_element():
+    """The abbreviation glossary is authoritative grounding and lives in retrievedContext."""
+    raw = json.dumps({
+        "retrievedContext": ["QUELLE [1]: …", "ABKÜRZUNGSVERZEICHNIS (autoritative Auflösungen)\nLF = Lieferant"],
+    })
+
+    narrowed = json.loads(derive_judge_context(raw))
+
+    assert len(narrowed) == 2
+    assert narrowed[1].startswith("ABKÜRZUNGSVERZEICHNIS")
+
+
+def test_judge_context_keeps_umlauts_unescaped():
+    raw = json.dumps({"retrievedContext": ["Die Erstprüfung für Mandant Ebersdorf"]})
+    assert "Erstprüfung für" in derive_judge_context(raw)
+
+
+@pytest.mark.parametrize("raw", [
+    None,
+    "",
+    "a plain-text answer, not JSON",
+    json.dumps(["already", "a", "list"]),
+    json.dumps({"answer": "no retrievedContext key here"}),
+    json.dumps({"retrievedContext": "not a list"}),
+    json.dumps({"retrievedContext": [{"not": "a string"}]}),
+])
+def test_judge_context_passes_through_unrecognised_payloads(raw):
+    """Targets that don't expose a retrievedContext string list keep their old behaviour."""
+    assert derive_judge_context(raw) == raw

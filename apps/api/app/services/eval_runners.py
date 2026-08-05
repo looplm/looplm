@@ -129,6 +129,46 @@ async def _call_target_api(
     return (str(answer), raw_response, elapsed_ms)
 
 
+JUDGE_CONTEXT_KEY = "retrievedContext"
+
+
+def derive_judge_context(context: str | None) -> str | None:
+    """Narrow a target's raw JSON response down to the retrieved context for LLM judges.
+
+    Callers pass the FULL response payload as `context`, which deterministic graders
+    genuinely need (they read `pageImageGroups`, source URLs, and similar). An LLM judge
+    must not see it: the payload also carries the target's own system prompt, its request
+    echo, and duplicated copies of the sources, none of which are retrieved evidence.
+
+    Measured on a 128-case run before this change, a faithfulness judge received 78.7k
+    tokens per call of which only 14.7% was `retrievedContext`; 14.6% was the target's
+    system prompt and ~50% was the same source text repeated via `formattedContext` and
+    `searchSources`. The consequence was not merely cost: the target's prompt contained
+    instructions about what its answers may claim, and the judge applied them as if they
+    were facts about the sources, failing answers that the dataset's own expected outputs
+    required. Graders must judge against evidence, never against the target's rulebook.
+
+    So when the payload exposes a `retrievedContext` list of strings, that list alone
+    becomes `{context}` — matching what the shipped judge templates already describe
+    ("Der Kontext erreicht dich als JSON-Dump eines String-Arrays"). Anything else is
+    passed through untouched, so targets without that key keep their current behaviour.
+    """
+    if not context:
+        return context
+    try:
+        payload = json.loads(context)
+    except (ValueError, TypeError):
+        return context  # not JSON (e.g. a plain-text answer) — leave it alone
+    if not isinstance(payload, dict):
+        return context
+    retrieved = payload.get(JUDGE_CONTEXT_KEY)
+    if isinstance(retrieved, list) and all(isinstance(item, str) for item in retrieved):
+        # ensure_ascii=False: the sources are German, and \uXXXX escapes cost ~6 chars per
+        # umlaut while making the text harder for the judge to read.
+        return json.dumps(retrieved, ensure_ascii=False)
+    return context
+
+
 def render_llm_judge_prompt(
     evaluator: Evaluator,
     input_text: str,
@@ -140,6 +180,9 @@ def render_llm_judge_prompt(
 
     Returns the messages list ready for chat completion, or None if no
     prompt_template is configured.
+
+    Every LLM-judge path funnels through here (batch, non-batch, and single-trace), so
+    this is where {context} is narrowed to retrieved evidence via derive_judge_context.
     """
     config = evaluator.config or {}
     prompt_template = config.get("prompt_template", "")
@@ -149,7 +192,7 @@ def render_llm_judge_prompt(
     rendered = prompt_template.replace("{input}", input_text or "")
     rendered = rendered.replace("{output}", output_text or "")
     rendered = rendered.replace("{expected_output}", expected_output or "")
-    rendered = rendered.replace("{context}", context or "")
+    rendered = rendered.replace("{context}", derive_judge_context(context) or "")
 
     return [
         {"role": "system", "content": "You are an evaluation judge. Respond ONLY with valid JSON."},
