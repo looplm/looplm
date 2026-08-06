@@ -4580,6 +4580,10 @@ export interface paths {
          *     ``trace_count`` lets the user-directory settings table surface the ids that actually
          *     carry traffic; the username is the raw metadata value, which the directory's stored
          *     identity names take precedence over on the client.
+         *
+         *     ``userName`` is the key the rest of the codebase reads (``dataset_suggestions``,
+         *     ``feedback_eval``), so it wins; lowercase ``username`` stays as a fallback for callers that
+         *     send it that way.
          */
         get: operations["list_users_api_traces_users_get"];
         put?: never;
