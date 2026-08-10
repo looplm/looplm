@@ -1,6 +1,6 @@
 "use client";
 
-import { type RetrievalRunMetrics, type RetrievalTargets } from "@/lib/api";
+import { type GoldSource, type RetrievalRunMetrics, type RetrievalTargets } from "@/lib/api";
 import { OverallResults } from "@/components/retrieval/overall-results";
 
 const empty =
@@ -31,7 +31,7 @@ export function OverallSection({
   retrieverNote?: string;
   // The selected retriever value + gold settings, threaded to the per-case diagnosis (labels path).
   retriever?: string;
-  goldSource?: "human" | "ai" | "both";
+  goldSource?: GoldSource;
   minGrade?: number;
   // A specific pipeline stage (not "best") is selected — used to tailor the unavailable message.
   perRetriever: boolean;

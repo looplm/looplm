@@ -52,6 +52,7 @@ export type {
   RetrievalPipelineEdge,
   RetrievalMetric,
   RetrievalRunMetrics,
+  GoldSource,
   RetrievalCaseMetrics,
   SliceMetrics,
   RiskSlice,
@@ -234,6 +235,7 @@ export * from "./api/retrieval-api";
 export * from "./api/index-explorer-api";
 export * from "./api/source-registry-api";
 export * from "./api/chunk-quality-api";
+export * from "./api/synthetic-questions-api";
 export * from "./api/issues-api";
 export * from "./api/user-directory-api";
 export * from "./api/version";

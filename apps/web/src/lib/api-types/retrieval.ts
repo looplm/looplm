@@ -481,9 +481,13 @@ export interface RetrievalRunRecord extends RetrievalRunSummary {
   by_stage?: ByStageMetricsResponse | null;
 }
 
+// Which annotators' chunk labels resolve the gold. `synthetic` is the source chunk of a
+// generated question, which is relevant by construction (see the Test questions tab).
+export type GoldSource = "human" | "ai" | "both" | "synthetic";
+
 export interface RetrievalRunCreateBody {
   dataset_ids: string[];
-  gold_source: "human" | "ai" | "both";
+  gold_source: GoldSource;
   min_grade?: number;
   name?: string | null;
 }
@@ -498,7 +502,7 @@ export interface RetrievalRunMetadataUpdate {
 
 export interface RetrievalComputeStartBody {
   dataset_ids: string[];
-  gold_source: "human" | "ai" | "both";
+  gold_source: GoldSource;
   min_grade?: number;
   view: "overall" | "byStage";
   refresh?: boolean;
@@ -512,7 +516,7 @@ export interface RetrievalComputeJob {
   id: string;
   status: RetrievalComputeStatus;
   view: "overall" | "byStage";
-  gold_source: "human" | "ai" | "both";
+  gold_source: GoldSource;
   min_grade?: number;
   dataset_ids: string[];
   progress_current?: number | null;

@@ -1,8 +1,9 @@
 "use client";
 
 import { gradeLabel } from "@/components/labeling/types";
+import type { GoldSource } from "@/lib/api-types/retrieval";
 
-export type GoldSource = "human" | "ai" | "both";
+export type { GoldSource };
 export type MinGrade = 1 | 2 | 3;
 
 const toggleClass = (active: boolean) =>
@@ -31,15 +32,20 @@ export function GoldControls({
     <>
       <div
         className="flex items-center gap-1.5 text-xs"
-        title="Which chunk labels resolve the gold: human only, the AI judge only, or both"
+        title="Which chunk labels resolve the gold: human only, the AI judge only, both, or the source chunks of generated questions"
       >
         <span className="text-gray-400 dark:text-slate-500">Gold</span>
         <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-700">
-          {(["human", "ai", "both"] as const).map((g) => (
+          {(["human", "ai", "both", "synthetic"] as const).map((g) => (
             <button
               key={g}
               onClick={() => onGoldSource(g)}
               className={`${toggleClass(goldSource === g)} capitalize`}
+              title={
+                g === "synthetic"
+                  ? "Questions generated from chunks: the source chunk is the gold. Read hit rate, MRR and nDCG; precision@k is capped at 1/k because each question has one known answer."
+                  : undefined
+              }
             >
               {g === "ai" ? "AI" : g}
             </button>

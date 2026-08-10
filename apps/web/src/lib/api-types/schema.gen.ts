@@ -3257,7 +3257,7 @@ export interface paths {
          *     For each case (pooled across ``dataset_ids``; ``dataset_id`` is the single-dataset alias) we
          *     assemble the candidate pool (which records each chunk's rank per head), reconstruct each
          *     stage's ranked list, and score it against the chunk-label gold (``gold_source`` = human | ai |
-         *     both, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
+         *     both | synthetic, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
          *     ``include_agent`` adds the configured custom-agent endpoint as an extra stage.
          */
         get: operations["get_retrieval_metrics_by_stage_api_pipeline_retrieval_metrics_by_stage_get"];
@@ -4423,6 +4423,72 @@ export interface paths {
          * @description Stop a pending/running scan. No-op if it already finished.
          */
         post: operations["cancel_scan_api_source_registry_scans__scan_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/synthetic-questions/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runs */
+        get: operations["list_runs_api_synthetic_questions_runs_get"];
+        put?: never;
+        /**
+         * Create Run
+         * @description Start a generation run. Returns immediately; poll ``GET /runs/{run_id}`` for progress.
+         */
+        post: operations["create_run_api_synthetic_questions_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/synthetic-questions/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_api_synthetic_questions_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Run
+         * @description Delete a run record. The dataset it created (if any) is left untouched.
+         */
+        delete: operations["delete_run_api_synthetic_questions_runs__run_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/synthetic-questions/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Run
+         * @description Stop a pending/running generation.
+         *
+         *     Flips the row to 'cancelled' first (so a worker that survives the task cancellation cannot
+         *     overwrite it), then cancels the in-process task. A run cancelled mid-generation persists
+         *     nothing: the dataset is written in one step at the end.
+         */
+        post: operations["cancel_run_api_synthetic_questions_runs__run_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7102,7 +7168,7 @@ export interface components {
          *     ``test_id`` targets one case (variant suffix tolerated); omitted, every case in the
          *     dataset with labeled-relevant URLs is synced. ``replace`` discards the current list and
          *     rebuilds it from the labels; ``merge`` only appends URLs the case doesn't already have.
-         *     ``gold_source`` picks whose labels resolve to gold (human | ai | both).
+         *     ``gold_source`` picks whose labels resolve to gold (human | ai | both | synthetic).
          */
         ExpectedUrlsSyncRequest: {
             /**
@@ -11503,6 +11569,273 @@ export interface components {
              * @default syncing
              */
             sync_status: string;
+        };
+        /**
+         * SyntheticQuestionCounts
+         * @description What the run produced and what it discarded, so nothing is silently dropped.
+         */
+        SyntheticQuestionCounts: {
+            /**
+             * Cases Created
+             * @default 0
+             */
+            cases_created: number;
+            /**
+             * Chunks Sampled
+             * @default 0
+             */
+            chunks_sampled: number;
+            /** Chunks Skipped */
+            chunks_skipped?: {
+                [key: string]: number;
+            };
+            /**
+             * Chunks Used
+             * @default 0
+             */
+            chunks_used: number;
+            /**
+             * Duplicates Dropped
+             * @default 0
+             */
+            duplicates_dropped: number;
+            /**
+             * Labels Created
+             * @default 0
+             */
+            labels_created: number;
+            /**
+             * Negatives Dropped
+             * @default 0
+             */
+            negatives_dropped: number;
+            /**
+             * Negatives Generated
+             * @default 0
+             */
+            negatives_generated: number;
+            /**
+             * Questions Generated
+             * @default 0
+             */
+            questions_generated: number;
+        };
+        /**
+         * SyntheticQuestionItem
+         * @description One generated question and the chunk it is grounded in.
+         *
+         *     ``source_chunk_id`` is the ground truth for the question. Negative questions have none —
+         *     that is what makes them negative.
+         */
+        SyntheticQuestionItem: {
+            /** Source Chunk Id */
+            source_chunk_id?: string | null;
+            /** Source Preview */
+            source_preview?: string | null;
+            /** Source Title */
+            source_title?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Style */
+            style: string;
+            /** Text */
+            text: string;
+        };
+        /** SyntheticQuestionResults */
+        SyntheticQuestionResults: {
+            counts?: components["schemas"]["SyntheticQuestionCounts"];
+            /** Questions */
+            questions?: components["schemas"]["SyntheticQuestionItem"][];
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** SyntheticQuestionRunCreateResponse */
+        SyntheticQuestionRunCreateResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * SyntheticQuestionRunRequest
+         * @description Start a generation run over one index provider.
+         *
+         *     ``scope="partition"`` requires ``partition_key`` + ``partition_value`` and restricts the
+         *     sample to that slice; ``corpus`` spreads it across the whole index. ``persist=False`` is the
+         *     preview path: questions are generated and returned on the run, but no dataset, test case or
+         *     label is written — the cheap way to tune the parameters before committing to a full run.
+         */
+        SyntheticQuestionRunRequest: {
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Dataset Name */
+            dataset_name?: string | null;
+            /**
+             * Negative Share
+             * @default 15
+             */
+            negative_share: number;
+            /** Partition Key */
+            partition_key?: string | null;
+            /** Partition Value */
+            partition_value?: string | null;
+            /**
+             * Persist
+             * @default true
+             */
+            persist: boolean;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /**
+             * Questions Per Chunk
+             * @default 2
+             */
+            questions_per_chunk: number;
+            /**
+             * Sample Size
+             * @default 50
+             */
+            sample_size: number;
+            /**
+             * Scope
+             * @default corpus
+             */
+            scope: string;
+            /**
+             * Verify Negatives
+             * @default true
+             */
+            verify_negatives: boolean;
+        };
+        /**
+         * SyntheticQuestionRunResponse
+         * @description Full run row, including the generated questions.
+         */
+        SyntheticQuestionRunResponse: {
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Dataset Name */
+            dataset_name?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Negative Share */
+            negative_share: number;
+            /** Partition Key */
+            partition_key?: string | null;
+            /** Partition Value */
+            partition_value?: string | null;
+            /** Persist */
+            persist: boolean;
+            /** Processed */
+            processed: number;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /** Questions Per Chunk */
+            questions_per_chunk: number;
+            results?: components["schemas"]["SyntheticQuestionResults"] | null;
+            /** Sample Size */
+            sample_size: number;
+            /** Scope */
+            scope: string;
+            /** Stage */
+            stage?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /** Total */
+            total: number;
+            /** Verify Negatives */
+            verify_negatives: boolean;
+        };
+        /**
+         * SyntheticQuestionRunSummary
+         * @description Row shape for the run list (no question bodies).
+         */
+        SyntheticQuestionRunSummary: {
+            /**
+             * Cases Created
+             * @default 0
+             */
+            cases_created: number;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Dataset Name */
+            dataset_name?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Negative Share */
+            negative_share: number;
+            /** Partition Key */
+            partition_key?: string | null;
+            /** Partition Value */
+            partition_value?: string | null;
+            /** Persist */
+            persist: boolean;
+            /** Processed */
+            processed: number;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /**
+             * Questions Generated
+             * @default 0
+             */
+            questions_generated: number;
+            /** Questions Per Chunk */
+            questions_per_chunk: number;
+            /** Sample Size */
+            sample_size: number;
+            /** Scope */
+            scope: string;
+            /** Stage */
+            stage?: string | null;
+            /** Status */
+            status: string;
+            /** Total */
+            total: number;
+        };
+        /** SyntheticQuestionRunSummaryListResponse */
+        SyntheticQuestionRunSummaryListResponse: {
+            /** Data */
+            data: components["schemas"]["SyntheticQuestionRunSummary"][];
         };
         /** TestCaseCreate */
         TestCaseCreate: {
@@ -21367,6 +21700,171 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourceScanRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_api_synthetic_questions_runs_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyntheticQuestionRunSummaryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_run_api_synthetic_questions_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SyntheticQuestionRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyntheticQuestionRunCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_api_synthetic_questions_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyntheticQuestionRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_run_api_synthetic_questions_runs__run_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_run_api_synthetic_questions_runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyntheticQuestionRunCreateResponse"];
                 };
             };
             /** @description Validation Error */

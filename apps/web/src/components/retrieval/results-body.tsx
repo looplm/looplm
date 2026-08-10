@@ -7,6 +7,7 @@ import { RecommendationsPanel } from "@/components/retrieval/recommendations-pan
 import { ByStageComparison } from "@/components/retrieval/by-stage-table";
 import { RerankThreshold } from "@/components/retrieval/rerank-threshold";
 import { type GoldSource, type MinGrade } from "@/components/retrieval/gold-controls";
+import { SyntheticGoldNotice } from "@/components/retrieval/synthetic-gold-notice";
 import { ErrorNotice } from "@/components/error-notice";
 
 type Source = "urls" | "labels";
@@ -55,6 +56,9 @@ export function RetrievalResultsBody({
 }) {
   return (
     <>
+      {/* Synthetic gold changes how recall/precision should be read; say so before the numbers. */}
+      {displayGold === "synthetic" && <SyntheticGoldNotice />}
+
       {/* What to improve — rule-based findings over the computed metrics, most-severe first. */}
       <RecommendationsPanel
         overall={displayMetrics}
