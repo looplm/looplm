@@ -15,6 +15,7 @@ from app.models.chunk_labels import (
     GRADE_MAX,
     GRADE_MIN,
     SLICE_VALUES,
+    SYNTHETIC_ANNOTATOR,
     ChunkGoldLabel,
     ChunkRelevanceLabel,
     TestCaseLabelingStatus,
@@ -341,7 +342,9 @@ async def get_agreement(
 
     # A label's annotator identity is its ``annotator`` value (the AI judge) when set, else the
     # human who authored it. Both become distinct annotators in the agreement computation, so a
-    # single human reviewer plus the AI judge already produces a Cohen's kappa.
+    # single human reviewer plus the AI judge already produces a Cohen's kappa. Synthetic labels
+    # are excluded: they are definitional (the question was written from the chunk), so scoring
+    # anyone's agreement with them measures nothing.
     votes = [
         Vote(
             test_id=lbl.test_id,
@@ -352,6 +355,7 @@ async def get_agreement(
             title=lbl.title,
         )
         for lbl in labels
+        if lbl.annotator != SYNTHETIC_ANNOTATOR
     ]
 
     golds = (

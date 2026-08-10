@@ -1,7 +1,7 @@
 export const ALL_SECTIONS = ["observe", "evaluate", "improve"] as const;
 
 export const SECTION_PAGES: Record<string, string[]> = {
-  observe: ["dashboard", "traces", "analytics", "feedback", "costs", "data-sources"],
+  observe: ["overview", "dashboard", "traces", "analytics", "feedback", "costs", "data-sources"],
   evaluate: ["evaluations", "evaluators", "datasets", "coverage", "pipeline", "labeling"],
   improve: ["issues", "advisor", "routes", "prompts"],
 };

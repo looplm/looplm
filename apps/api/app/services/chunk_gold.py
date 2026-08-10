@@ -12,7 +12,14 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.chunk_labels import GRADE_MAX, RELEVANT_GRADE, ChunkGoldLabel, ChunkRelevanceLabel
+from app.models.chunk_labels import (
+    AI_ANNOTATOR,
+    GRADE_MAX,
+    RELEVANT_GRADE,
+    SYNTHETIC_ANNOTATOR,
+    ChunkGoldLabel,
+    ChunkRelevanceLabel,
+)
 from app.models.project import Project
 from app.services.chunk_agreement import resolve_gold
 from app.services.retrieval_config import normalize_source_url
@@ -24,9 +31,10 @@ async def resolve_project_gold(
     """Resolve gold chunk relevance for the project from the chosen annotator source.
 
     ``gold_source`` picks whose labels count: ``human`` (default, human labels only), ``ai`` (the
-    AI judge's labels only), or ``both`` (as independent annotators). Human labels carry
-    ``annotator=None`` (keyed by user); the AI judge carries ``annotator="AI"``. Adjudicated gold
-    overrides always win. ``min_grade`` (clamped to 1..3) is the binary-metrics strictness — see
+    AI judge's labels only), ``both`` (human + AI judge as independent annotators), or
+    ``synthetic`` (the source chunks of generated questions, which are relevant by construction).
+    Human labels carry ``annotator=None`` (keyed by user); the AI judge carries ``annotator="AI"``;
+    the generator carries ``annotator="Synthetic"``. Adjudicated gold overrides always win. ``min_grade`` (clamped to 1..3) is the binary-metrics strictness — see
     :func:`app.services.chunk_agreement.resolve_gold` for the exact semantics. Returns
     ``(relevant_by_test, nonrelevant_by_test, grade_by_test)``.
     """
@@ -54,12 +62,15 @@ async def resolve_project_gold(
     overrides = {(test_id, chunk_id): relevance for test_id, chunk_id, relevance in golds}
 
     def _included(annotator: str | None) -> bool:
-        is_ai = annotator is not None
+        # Matched by exact annotator identity rather than "is it null": synthetic labels are also
+        # non-null, and lumping them in with the AI judge would silently widen human+AI gold.
         if gold_source == "ai":
-            return is_ai
+            return annotator == AI_ANNOTATOR
         if gold_source == "both":
-            return True
-        return not is_ai  # "human"
+            return annotator is None or annotator == AI_ANNOTATOR
+        if gold_source == "synthetic":
+            return annotator == SYNTHETIC_ANNOTATOR
+        return annotator is None  # "human"
 
     return resolve_gold(
         (

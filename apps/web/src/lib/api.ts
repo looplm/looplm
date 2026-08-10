@@ -52,6 +52,7 @@ export type {
   RetrievalPipelineEdge,
   RetrievalMetric,
   RetrievalRunMetrics,
+  GoldSource,
   RetrievalCaseMetrics,
   SliceMetrics,
   RiskSlice,
@@ -214,6 +215,29 @@ export type {
   TraceUser,
   ResolvedUserName,
   UserSelection,
+  OverviewBucket,
+  OverviewPeriod,
+  OverviewDelta,
+  OverviewKpi,
+  OverviewSummary,
+  OverviewSummaryParams,
+  FeedbackBucketPoint,
+  FeedbackOverview,
+  AdoptionBucketPoint,
+  AdoptionOverview,
+  AdoptionTotals,
+  EvalBucketPoint,
+  EvalOverview,
+  EvalProgress,
+  SourcesOverview,
+  RegistryDimension,
+  RegistryDimensionValue,
+  CoverageBlock,
+  CoveragePoint,
+  OverviewProviderRef,
+  ProviderTypeAggregate,
+  SourceDimension,
+  LiveState,
 } from "./api-types";
 
 // Re-export all functions from domain modules
@@ -234,7 +258,9 @@ export * from "./api/retrieval-api";
 export * from "./api/index-explorer-api";
 export * from "./api/source-registry-api";
 export * from "./api/chunk-quality-api";
+export * from "./api/synthetic-questions-api";
 export * from "./api/issues-api";
 export * from "./api/user-directory-api";
+export * from "./api/overview-api";
 export * from "./api/version";
 export * from "./api/admin";

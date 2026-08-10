@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { type ByStageMetricsResponse } from "@/lib/api";
+import { type ByStageMetricsResponse, type GoldSource } from "@/lib/api";
 import { pct, dec } from "@/components/retrieval/constants";
 
 // Side-by-side deterministic retrieval metrics for each pipeline stage (sparse/dense/RRF/reranked/
@@ -15,7 +15,7 @@ export function ByStageComparison({
 }: {
   data: ByStageMetricsResponse | null;
   loading: boolean;
-  goldSource: "human" | "ai" | "both";
+  goldSource: GoldSource;
   selectedK?: number | null;
 }) {
   const [drillMetric, setDrillMetric] = useState<"recall" | "ndcg">("recall");

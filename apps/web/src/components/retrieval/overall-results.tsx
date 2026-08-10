@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { type RetrievalRunMetrics, type RetrievalTargets } from "@/lib/api";
+import { type GoldSource, type RetrievalRunMetrics, type RetrievalTargets } from "@/lib/api";
 import { EXPLAIN, METRICS, PERK_METRICS, type MetricDef } from "@/components/retrieval/constants";
 import { Info, MetricCard } from "@/components/retrieval/metric-card";
 import { RecallCurve } from "@/components/retrieval/recall-curve";
@@ -31,7 +31,7 @@ export function OverallResults({
   retrieverNote?: string;
   // The selected retriever value + gold settings — passed to the per-case diagnosis (labels path).
   retriever?: string;
-  goldSource?: "human" | "ai" | "both";
+  goldSource?: GoldSource;
   minGrade?: number;
 }) {
   const lk = String(activeK);

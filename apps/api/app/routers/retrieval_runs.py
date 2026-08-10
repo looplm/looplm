@@ -37,7 +37,12 @@ from app.services.retrieval_labels_metrics import (
     resolve_datasets,
 )
 
-_GOLD_LABELS = {"human": "Human labels", "ai": "AI labels", "both": "Human+AI labels"}
+_GOLD_LABELS = {
+    "human": "Human labels",
+    "ai": "AI labels",
+    "both": "Human+AI labels",
+    "synthetic": "Synthetic labels",
+}
 
 
 def _default_run_name(gold_source: str, dataset_name: str, min_grade: int = 1) -> str:

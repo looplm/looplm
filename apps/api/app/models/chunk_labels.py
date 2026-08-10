@@ -48,6 +48,13 @@ GRADE_LABELS = {0: "Irrelevant", 1: "Marginally relevant", 2: "Relevant", 3: "Hi
 # truth, the AI judge is a second opinion.
 AI_ANNOTATOR = "AI"
 
+# Display name (and stored ``annotator`` value) of the synthetic-question generator. A synthetic
+# label is not a judgment at all: the question was written *from* the chunk, so the chunk is
+# relevant by construction. It gets its own annotator so it never contaminates the human or AI
+# gold, is selectable as its own ``gold_source``, and is excluded from inter-annotator agreement
+# (agreeing with yourself is not a signal).
+SYNTHETIC_ANNOTATOR = "Synthetic"
+
 
 def is_valid_grade(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and GRADE_MIN <= value <= GRADE_MAX

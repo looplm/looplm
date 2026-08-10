@@ -16,7 +16,7 @@ from app.routers import (
     admin, analysis, analytics, advisor, auth_router, chunk_quality, costs_overview, dashboard, datasets, evaluations,
     evaluators, experiments, feedback, fixes, github_oauth, graph, health, imports,
     index_explorer, ingest, ingest_keys, integrations, issues, langsmith, llm_costs, code_agent,
-    permissions, project_members, projects, prompts, rag_coverage, retrieval, retrieval_readiness, retrieval_runs, route_analysis, source_registry, source_registry_scan, trace_detail,
+    overview, permissions, project_members, projects, prompts, rag_coverage, retrieval, retrieval_readiness, retrieval_runs, route_analysis, source_registry, source_registry_scan, synthetic_questions, trace_detail,
     traces, user_directory, user_settings, version, chunk_labels,
 )
 
@@ -54,6 +54,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         PassageOffsetBackfillRun,
     )
     from app.models.chunk_quality import ChunkQualityRun  # noqa: F401 — ensure table is created
+    from app.models.synthetic_questions import (  # noqa: F401 — ensure table is created
+        SyntheticQuestionRun,
+    )
     from app.models.retrieval_runs import RetrievalRun  # noqa: F401 — ensure table is created
     from app.models.retrieval_metrics_jobs import (  # noqa: F401 — ensure table is created
         RetrievalMetricsJob,
@@ -274,6 +277,7 @@ app.include_router(traces.router)
 app.include_router(trace_detail.router)
 app.include_router(feedback.router)
 app.include_router(fixes.router)
+app.include_router(overview.router)
 app.include_router(dashboard.router)
 app.include_router(analytics.router)
 app.include_router(analysis.router)
@@ -296,6 +300,7 @@ app.include_router(index_explorer.router)
 app.include_router(source_registry.router)
 app.include_router(source_registry_scan.router)
 app.include_router(chunk_quality.router)
+app.include_router(synthetic_questions.router)
 app.include_router(imports.router)
 app.include_router(code_agent.router)
 app.include_router(github_oauth.router)

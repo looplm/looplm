@@ -13,3 +13,4 @@ export * from "./api-types/retrieval";
 export * from "./api-types/index-explorer";
 export * from "./api-types/issues";
 export * from "./api-types/user-directory";
+export * from "./api-types/overview";

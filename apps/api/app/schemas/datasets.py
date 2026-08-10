@@ -115,12 +115,12 @@ class ExpectedUrlsSyncRequest(BaseModel):
     ``test_id`` targets one case (variant suffix tolerated); omitted, every case in the
     dataset with labeled-relevant URLs is synced. ``replace`` discards the current list and
     rebuilds it from the labels; ``merge`` only appends URLs the case doesn't already have.
-    ``gold_source`` picks whose labels resolve to gold (human | ai | both).
+    ``gold_source`` picks whose labels resolve to gold (human | ai | both | synthetic).
     """
 
     test_id: Optional[str] = Field(default=None, max_length=300)
     mode: str = Field(default="merge", pattern="^(merge|replace)$")
-    gold_source: str = Field(default="human", pattern="^(human|ai|both)$")
+    gold_source: str = Field(default="human", pattern="^(human|ai|both|synthetic)$")
 
 
 class ExpectedUrlsSyncCase(BaseModel):
@@ -151,7 +151,7 @@ class ExpectedUrlsSyncAllRequest(BaseModel):
     """Project-wide variant of :class:`ExpectedUrlsSyncRequest`: sync every dataset at once."""
 
     mode: str = Field(default="merge", pattern="^(merge|replace)$")
-    gold_source: str = Field(default="human", pattern="^(human|ai|both)$")
+    gold_source: str = Field(default="human", pattern="^(human|ai|both|synthetic)$")
 
 
 class ExpectedUrlsSyncDatasetResult(BaseModel):

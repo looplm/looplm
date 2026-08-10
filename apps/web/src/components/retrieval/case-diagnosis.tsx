@@ -7,6 +7,7 @@ import {
   getChunkMetadata,
   type CaseDiagnosisResponse,
   type DiagnosedChunk,
+  type GoldSource,
 } from "@/lib/api";
 import { pickIndexText } from "@/components/labeling/chunk-row";
 
@@ -234,7 +235,7 @@ export function CaseDiagnosisPanel({
   testId: string;
   k: number;
   retriever: string;
-  goldSource: "human" | "ai" | "both";
+  goldSource: GoldSource;
   // Binary-metrics strictness: the miss list only contains chunks with gold grade >= minGrade.
   minGrade?: number;
 }) {

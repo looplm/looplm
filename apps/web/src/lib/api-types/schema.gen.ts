@@ -2786,6 +2786,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/overview/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview Sources
+         * @description Registry counts by business metadata, coverage status, and provider type.
+         *
+         *     Not filtered by the page's date range: this is the current state of the index, not a
+         *     period. The live file/content-type breakdown comes from
+         *     ``/api/index-explorer/file-types``, fetched separately so a slow or broken index
+         *     cannot hold up this response.
+         */
+        get: operations["overview_sources_api_overview_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/overview/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview Summary
+         * @description Feedback sentiment, user adoption and eval pass rate for one window.
+         *
+         *     All three series share the bucket axis built here, so column *i* of every chart and
+         *     every KPI sparkline refers to the same period.
+         */
+        get: operations["overview_summary_api_overview_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipeline/case-diagnosis": {
         parameters: {
             query?: never;
@@ -3257,7 +3305,7 @@ export interface paths {
          *     For each case (pooled across ``dataset_ids``; ``dataset_id`` is the single-dataset alias) we
          *     assemble the candidate pool (which records each chunk's rank per head), reconstruct each
          *     stage's ranked list, and score it against the chunk-label gold (``gold_source`` = human | ai |
-         *     both, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
+         *     both | synthetic, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
          *     ``include_agent`` adds the configured custom-agent endpoint as an extra stage.
          */
         get: operations["get_retrieval_metrics_by_stage_api_pipeline_retrieval_metrics_by_stage_get"];
@@ -4429,6 +4477,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/synthetic-questions/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runs */
+        get: operations["list_runs_api_synthetic_questions_runs_get"];
+        put?: never;
+        /**
+         * Create Run
+         * @description Start a generation run. Returns immediately; poll ``GET /runs/{run_id}`` for progress.
+         */
+        post: operations["create_run_api_synthetic_questions_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/synthetic-questions/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_api_synthetic_questions_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Run
+         * @description Delete a run record. The dataset it created (if any) is left untouched.
+         */
+        delete: operations["delete_run_api_synthetic_questions_runs__run_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/synthetic-questions/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Run
+         * @description Stop a pending/running generation.
+         *
+         *     Flips the row to 'cancelled' first (so a worker that survives the task cancellation cannot
+         *     overwrite it), then cancels the in-process task. A run cancelled mid-generation persists
+         *     nothing: the dataset is written in one step at the end.
+         */
+        post: operations["cancel_run_api_synthetic_questions_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/traces": {
         parameters: {
             query?: never;
@@ -4938,6 +5052,84 @@ export interface components {
              * Format: uuid
              */
             provider_id: string;
+        };
+        /** AdoptionBucketPoint */
+        AdoptionBucketPoint: {
+            /** Active Users */
+            active_users: number;
+            /** Avg Traces Per Active User */
+            avg_traces_per_active_user: number;
+            /** Bucket */
+            bucket: string;
+            /** Cumulative Users */
+            cumulative_users: number;
+            /** Dau */
+            dau?: number | null;
+            /** Mau */
+            mau?: number | null;
+            /** New Users */
+            new_users: number;
+            /** Returning Users */
+            returning_users: number;
+            /** Stickiness */
+            stickiness?: number | null;
+            /** Threads */
+            threads: number;
+            /** Traces */
+            traces: number;
+            /** Traces Attributed */
+            traces_attributed: number;
+            /** Wau */
+            wau?: number | null;
+        };
+        /**
+         * AdoptionGrowth
+         * @description Period-over-period change for the volume metrics.
+         */
+        AdoptionGrowth: {
+            active_users: components["schemas"]["Delta"];
+            avg_traces_per_active_user: components["schemas"]["Delta"];
+            threads: components["schemas"]["Delta"];
+            traces: components["schemas"]["Delta"];
+        };
+        /** AdoptionOverview */
+        AdoptionOverview: {
+            growth: components["schemas"]["AdoptionGrowth"];
+            /** Points */
+            points: components["schemas"]["AdoptionBucketPoint"][];
+            /**
+             * Rolling Available
+             * @default true
+             */
+            rolling_available: boolean;
+            totals: components["schemas"]["AdoptionTotals"];
+        };
+        /** AdoptionTotals */
+        AdoptionTotals: {
+            /** Active Users */
+            active_users: number;
+            /** Avg Traces Per Active User */
+            avg_traces_per_active_user: number;
+            /** Cumulative Users */
+            cumulative_users: number;
+            /** Dau */
+            dau?: number | null;
+            /** Mau */
+            mau?: number | null;
+            /** New Users */
+            new_users: number;
+            /** Returning Users */
+            returning_users: number;
+            /** Stickiness */
+            stickiness?: number | null;
+            /** Threads */
+            threads: number;
+            /** Traces */
+            traces: number;
+            /** Traces Attributed */
+            traces_attributed: number;
+            /** Wau */
+            wau?: number | null;
         };
         /** AdvisorAnalyzeRequest */
         AdvisorAnalyzeRequest: {
@@ -6095,6 +6287,16 @@ export interface components {
             /** Trend */
             trend: components["schemas"]["CostOverviewTrendPoint"][];
         };
+        /** CoverageBlock */
+        CoverageBlock: {
+            /** History */
+            history: components["schemas"]["CoveragePoint"][];
+            latest?: components["schemas"]["CoveragePoint"] | null;
+            /** Stale */
+            stale: boolean;
+            /** Stale Reason */
+            stale_reason?: string | null;
+        };
         /**
          * CoverageCategoryOverview
          * @description Latest coverage for one partition key, with a trend vs the previous run.
@@ -6114,6 +6316,34 @@ export interface components {
         CoverageOverviewResponse: {
             /** Data */
             data: components["schemas"]["CoverageCategoryOverview"][];
+        };
+        /**
+         * CoveragePoint
+         * @description One completed gap run. Coverage is a level, not a flow, so runs are never summed.
+         */
+        CoveragePoint: {
+            /** Acked */
+            acked: number;
+            /** Covered */
+            covered: number;
+            /** Covered Rate */
+            covered_rate: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Missing */
+            missing: number;
+            /** Review */
+            review: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Total */
+            total: number;
         };
         /** CoverageRunResponse */
         CoverageRunResponse: {
@@ -6331,6 +6561,21 @@ export interface components {
             /** Datasets */
             datasets: components["schemas"]["DatasetPickerItem"][];
         };
+        /**
+         * Delta
+         * @description A metric compared against the equally-long window immediately before this one.
+         *
+         *     ``change_pct`` is None when there is no usable baseline (a zero or missing previous
+         *     value). The UI renders nothing in that case rather than inventing a 0% or +100%.
+         */
+        Delta: {
+            /** Change Pct */
+            change_pct?: number | null;
+            /** Current */
+            current?: number | null;
+            /** Previous */
+            previous?: number | null;
+        };
         /** DetectResponse */
         DetectResponse: {
             /** Issues Created */
@@ -6472,6 +6717,21 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** EvalBucketPoint */
+        EvalBucketPoint: {
+            /** Bucket */
+            bucket: string;
+            /** Cases */
+            cases: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /** Passed */
+            passed: number;
+            /** Run Count */
+            run_count: number;
+            /** Unweighted Pass Rate */
+            unweighted_pass_rate?: number | null;
+        };
         /** EvalJobListResponse */
         EvalJobListResponse: {
             /** Data */
@@ -6521,6 +6781,67 @@ export interface components {
             status: string;
             /** Test Suite */
             test_suite: string;
+        };
+        /** EvalLatestRun */
+        EvalLatestRun: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Pass Rate */
+            pass_rate: number;
+            /** Passed */
+            passed: number;
+            /** Source */
+            source?: string | null;
+            /** Total */
+            total: number;
+        };
+        /** EvalOverview */
+        EvalOverview: {
+            /** Cases */
+            cases: number;
+            /** Current Pass Rate */
+            current_pass_rate?: number | null;
+            latest_run?: components["schemas"]["EvalLatestRun"] | null;
+            /** Passed */
+            passed: number;
+            /** Points */
+            points: components["schemas"]["EvalBucketPoint"][];
+            progress: components["schemas"]["EvalProgress"];
+            /** Runs */
+            runs: number;
+            /** Runs Excluded No Cases */
+            runs_excluded_no_cases: number;
+            /** Window Pass Rate */
+            window_pass_rate?: number | null;
+        };
+        /**
+         * EvalProgress
+         * @description Dataset coverage: how much of the test suite has ever been evaluated.
+         *
+         *     All-time on purpose. Scoping this to the selected window would make the number
+         *     shrink whenever the user narrows the date range, which reads as a regression.
+         */
+        EvalProgress: {
+            /** Evaluated */
+            evaluated: number;
+            /** Evaluated Unknown */
+            evaluated_unknown: number;
+            /** Never Evaluated */
+            never_evaluated: number;
+            /** Progress Rate */
+            progress_rate: number;
+            /** Total */
+            total: number;
         };
         /** EvalReportDetail */
         EvalReportDetail: {
@@ -7102,7 +7423,7 @@ export interface components {
          *     ``test_id`` targets one case (variant suffix tolerated); omitted, every case in the
          *     dataset with labeled-relevant URLs is synced. ``replace`` discards the current list and
          *     rebuilds it from the labels; ``merge`` only appends URLs the case doesn't already have.
-         *     ``gold_source`` picks whose labels resolve to gold (human | ai | both).
+         *     ``gold_source`` picks whose labels resolve to gold (human | ai | both | synthetic).
          */
         ExpectedUrlsSyncRequest: {
             /**
@@ -7353,6 +7674,21 @@ export interface components {
              */
             total_traces: number;
         };
+        /** FeedbackBucketPoint */
+        FeedbackBucketPoint: {
+            /** Bucket */
+            bucket: string;
+            /** Negative */
+            negative: number;
+            /** Positive */
+            positive: number;
+            /** Positive Rate */
+            positive_rate: number;
+            /** Total */
+            total: number;
+            /** Traces With Feedback */
+            traces_with_feedback: number;
+        };
         /** FeedbackEvalItem */
         FeedbackEvalItem: {
             /** Comment */
@@ -7517,6 +7853,19 @@ export interface components {
             /** Data */
             data: components["schemas"]["FeedbackScoreItem"][];
             pagination: components["schemas"]["app__schemas__feedback__PaginationInfo"];
+        };
+        /**
+         * FeedbackOverview
+         * @description End-user thumbs (``score_name == 'user-feedback'``) over time.
+         *
+         *     Bucketed on the *trace's* ``start_time``, not the score's ``scored_at``, so these
+         *     counts line up with the volume numbers in the adoption section for the same bucket.
+         *     Same choice the dashboard already makes.
+         */
+        FeedbackOverview: {
+            /** Points */
+            points: components["schemas"]["FeedbackBucketPoint"][];
+            totals: components["schemas"]["FeedbackTotals"];
         };
         /** FeedbackScoreDetail */
         FeedbackScoreDetail: {
@@ -7738,6 +8087,19 @@ export interface components {
              * @default 0
              */
             total_comments: number;
+        };
+        /** FeedbackTotals */
+        FeedbackTotals: {
+            /** Negative */
+            negative: number;
+            /** Positive */
+            positive: number;
+            /** Positive Rate */
+            positive_rate: number;
+            /** Total */
+            total: number;
+            /** Traces With Feedback */
+            traces_with_feedback: number;
         };
         /** FeedbackTrend */
         FeedbackTrend: {
@@ -9277,6 +9639,84 @@ export interface components {
             /** Total Cost Usd */
             total_cost_usd?: number | null;
         };
+        /**
+         * OverviewKpi
+         * @description One headline tile. Values are in native units: rates are 0..1, counts absolute.
+         */
+        OverviewKpi: {
+            /** Change Pct */
+            change_pct?: number | null;
+            /**
+             * Higher Is Better
+             * @default true
+             */
+            higher_is_better: boolean;
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "feedback_rate" | "active_users" | "eval_pass_rate" | "indexed_sources";
+            /** Label */
+            label: string;
+            /** Previous */
+            previous?: number | null;
+            /**
+             * Series
+             * @default []
+             */
+            series: (number | null)[];
+            /** Sub */
+            sub?: string | null;
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "rate" | "count";
+            /** Value */
+            value?: number | null;
+        };
+        /**
+         * OverviewPeriod
+         * @description The resolved window, echoed back so the UI can label the axis.
+         */
+        OverviewPeriod: {
+            /**
+             * Bucket
+             * @enum {string}
+             */
+            bucket: "day" | "week" | "month";
+            /** Buckets */
+            buckets: number;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /**
+             * Previous End
+             * Format: date-time
+             */
+            previous_end: string;
+            /**
+             * Previous Start
+             * Format: date-time
+             */
+            previous_start: string;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+        };
+        /** OverviewSummaryResponse */
+        OverviewSummaryResponse: {
+            adoption: components["schemas"]["AdoptionOverview"];
+            evals: components["schemas"]["EvalOverview"];
+            feedback: components["schemas"]["FeedbackOverview"];
+            /** Kpis */
+            kpis: components["schemas"]["OverviewKpi"][];
+            period: components["schemas"]["OverviewPeriod"];
+        };
         /** PairwiseKappa */
         PairwiseKappa: {
             /** A */
@@ -9783,6 +10223,27 @@ export interface components {
              */
             synced: number;
         };
+        /** ProviderRef */
+        ProviderRef: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Source Count */
+            source_count: number;
+            /** Type */
+            type: string;
+        };
+        /** ProviderTypeAggregate */
+        ProviderTypeAggregate: {
+            /** Provider Count */
+            provider_count: number;
+            /** Type */
+            type: string;
+        };
         /** RagCounts */
         RagCounts: {
             /**
@@ -9938,6 +10399,48 @@ export interface components {
             invite_token?: string | null;
             /** Password */
             password: string;
+        };
+        /** RegistryDimension */
+        RegistryDimension: {
+            /** Distinct Values */
+            distinct_values: number;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Truncated */
+            truncated: boolean;
+            /** Values */
+            values: components["schemas"]["RegistryDimensionValue"][];
+        };
+        /**
+         * RegistryDimensionValue
+         * @description One value of a registry metadata field, with its coverage cross-tab.
+         */
+        RegistryDimensionValue: {
+            /** Acked */
+            acked: number;
+            /** Count */
+            count: number;
+            /** Covered */
+            covered: number;
+            /** Label */
+            label: string;
+            /** Missing */
+            missing: number;
+            /** Review */
+            review: number;
+            /** Unknown */
+            unknown: number;
+            /** Value */
+            value?: string | null;
+        };
+        /** RegistrySummary */
+        RegistrySummary: {
+            /** Dimensions */
+            dimensions: components["schemas"]["RegistryDimension"][];
+            /** Total Sources */
+            total_sources: number;
         };
         /**
          * RegressionFlag
@@ -11304,6 +11807,15 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** SourcesOverviewResponse */
+        SourcesOverviewResponse: {
+            /** By Type */
+            by_type: components["schemas"]["ProviderTypeAggregate"][];
+            coverage: components["schemas"]["CoverageBlock"];
+            /** Providers */
+            providers: components["schemas"]["ProviderRef"][];
+            registry: components["schemas"]["RegistrySummary"];
+        };
         /**
          * SpanNameCount
          * @description A distinct span name and how often it occurs — feeds the retrieval
@@ -11503,6 +12015,273 @@ export interface components {
              * @default syncing
              */
             sync_status: string;
+        };
+        /**
+         * SyntheticQuestionCounts
+         * @description What the run produced and what it discarded, so nothing is silently dropped.
+         */
+        SyntheticQuestionCounts: {
+            /**
+             * Cases Created
+             * @default 0
+             */
+            cases_created: number;
+            /**
+             * Chunks Sampled
+             * @default 0
+             */
+            chunks_sampled: number;
+            /** Chunks Skipped */
+            chunks_skipped?: {
+                [key: string]: number;
+            };
+            /**
+             * Chunks Used
+             * @default 0
+             */
+            chunks_used: number;
+            /**
+             * Duplicates Dropped
+             * @default 0
+             */
+            duplicates_dropped: number;
+            /**
+             * Labels Created
+             * @default 0
+             */
+            labels_created: number;
+            /**
+             * Negatives Dropped
+             * @default 0
+             */
+            negatives_dropped: number;
+            /**
+             * Negatives Generated
+             * @default 0
+             */
+            negatives_generated: number;
+            /**
+             * Questions Generated
+             * @default 0
+             */
+            questions_generated: number;
+        };
+        /**
+         * SyntheticQuestionItem
+         * @description One generated question and the chunk it is grounded in.
+         *
+         *     ``source_chunk_id`` is the ground truth for the question. Negative questions have none —
+         *     that is what makes them negative.
+         */
+        SyntheticQuestionItem: {
+            /** Source Chunk Id */
+            source_chunk_id?: string | null;
+            /** Source Preview */
+            source_preview?: string | null;
+            /** Source Title */
+            source_title?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Style */
+            style: string;
+            /** Text */
+            text: string;
+        };
+        /** SyntheticQuestionResults */
+        SyntheticQuestionResults: {
+            counts?: components["schemas"]["SyntheticQuestionCounts"];
+            /** Questions */
+            questions?: components["schemas"]["SyntheticQuestionItem"][];
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** SyntheticQuestionRunCreateResponse */
+        SyntheticQuestionRunCreateResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * SyntheticQuestionRunRequest
+         * @description Start a generation run over one index provider.
+         *
+         *     ``scope="partition"`` requires ``partition_key`` + ``partition_value`` and restricts the
+         *     sample to that slice; ``corpus`` spreads it across the whole index. ``persist=False`` is the
+         *     preview path: questions are generated and returned on the run, but no dataset, test case or
+         *     label is written — the cheap way to tune the parameters before committing to a full run.
+         */
+        SyntheticQuestionRunRequest: {
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Dataset Name */
+            dataset_name?: string | null;
+            /**
+             * Negative Share
+             * @default 15
+             */
+            negative_share: number;
+            /** Partition Key */
+            partition_key?: string | null;
+            /** Partition Value */
+            partition_value?: string | null;
+            /**
+             * Persist
+             * @default true
+             */
+            persist: boolean;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /**
+             * Questions Per Chunk
+             * @default 2
+             */
+            questions_per_chunk: number;
+            /**
+             * Sample Size
+             * @default 50
+             */
+            sample_size: number;
+            /**
+             * Scope
+             * @default corpus
+             */
+            scope: string;
+            /**
+             * Verify Negatives
+             * @default true
+             */
+            verify_negatives: boolean;
+        };
+        /**
+         * SyntheticQuestionRunResponse
+         * @description Full run row, including the generated questions.
+         */
+        SyntheticQuestionRunResponse: {
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Dataset Name */
+            dataset_name?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Negative Share */
+            negative_share: number;
+            /** Partition Key */
+            partition_key?: string | null;
+            /** Partition Value */
+            partition_value?: string | null;
+            /** Persist */
+            persist: boolean;
+            /** Processed */
+            processed: number;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /** Questions Per Chunk */
+            questions_per_chunk: number;
+            results?: components["schemas"]["SyntheticQuestionResults"] | null;
+            /** Sample Size */
+            sample_size: number;
+            /** Scope */
+            scope: string;
+            /** Stage */
+            stage?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Status */
+            status: string;
+            /** Total */
+            total: number;
+            /** Verify Negatives */
+            verify_negatives: boolean;
+        };
+        /**
+         * SyntheticQuestionRunSummary
+         * @description Row shape for the run list (no question bodies).
+         */
+        SyntheticQuestionRunSummary: {
+            /**
+             * Cases Created
+             * @default 0
+             */
+            cases_created: number;
+            /** Completed At */
+            completed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Id */
+            dataset_id?: string | null;
+            /** Dataset Name */
+            dataset_name?: string | null;
+            /** Error */
+            error?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Negative Share */
+            negative_share: number;
+            /** Partition Key */
+            partition_key?: string | null;
+            /** Partition Value */
+            partition_value?: string | null;
+            /** Persist */
+            persist: boolean;
+            /** Processed */
+            processed: number;
+            /**
+             * Provider Id
+             * Format: uuid
+             */
+            provider_id: string;
+            /**
+             * Questions Generated
+             * @default 0
+             */
+            questions_generated: number;
+            /** Questions Per Chunk */
+            questions_per_chunk: number;
+            /** Sample Size */
+            sample_size: number;
+            /** Scope */
+            scope: string;
+            /** Stage */
+            stage?: string | null;
+            /** Status */
+            status: string;
+            /** Total */
+            total: number;
+        };
+        /** SyntheticQuestionRunSummaryListResponse */
+        SyntheticQuestionRunSummaryListResponse: {
+            /** Data */
+            data: components["schemas"]["SyntheticQuestionRunSummary"][];
         };
         /** TestCaseCreate */
         TestCaseCreate: {
@@ -18108,6 +18887,83 @@ export interface operations {
             };
         };
     };
+    overview_sources_api_overview_sources_get: {
+        parameters: {
+            query?: {
+                provider_id?: string | null;
+                top?: number;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcesOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_summary_api_overview_summary_get: {
+        parameters: {
+            query?: {
+                bucket?: "day" | "week" | "month";
+                days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
+                environment?: string | null;
+                integration_id?: string | null;
+                include_user_ids?: string[] | null;
+                exclude_user_ids?: string[] | null;
+                include_reruns?: boolean;
+                sources?: string | null;
+                dataset_id?: string | null;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     diagnose_case_api_pipeline_case_diagnosis_get: {
         parameters: {
             query: {
@@ -21367,6 +22223,171 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourceScanRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_api_synthetic_questions_runs_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyntheticQuestionRunSummaryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_run_api_synthetic_questions_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SyntheticQuestionRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyntheticQuestionRunCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_api_synthetic_questions_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyntheticQuestionRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_run_api_synthetic_questions_runs__run_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_run_api_synthetic_questions_runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyntheticQuestionRunCreateResponse"];
                 };
             };
             /** @description Validation Error */

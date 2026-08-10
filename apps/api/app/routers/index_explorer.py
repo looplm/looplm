@@ -21,7 +21,6 @@ from app.index_providers.registry import build_index_provider
 from app.models.index_providers import IndexProvider
 from app.models.project import Project
 from app.models.user import User
-from app.index_providers.chunk_quality_common import pick_field
 from app.schemas.index_explorer import (
     IndexChunkMetadataResponse,
     IndexFieldDocs,
@@ -47,6 +46,7 @@ from app.schemas.index_explorer import (
     IndexTreeSection,
 )
 from app.services.analysis_llm import AnalysisLlmConfigError, merge_llm_settings
+from app.services.index_dimensions import file_type_distribution
 from app.services.index_field_docs import explain_fields
 from app.services.index_grouping_advisor import suggest_grouping
 
@@ -59,13 +59,6 @@ router = APIRouter(
 )
 
 _MAX_SAMPLE = 200
-
-# File-type dimension candidates for the "Files" tab overview, in priority order.
-# Detected among the index's *facetable* fields so the distribution can be faceted.
-_FILETYPE_FIELDS = [
-    "content_type", "doc_type", "file_type", "mimetype", "mime_type",
-    "format", "source_type", "type",
-]
 
 
 def _visible_fields(fields: dict) -> dict:
@@ -245,18 +238,14 @@ async def file_types(
     provider = await _get_provider_or_404(db, provider_id, project)
     client = build_index_provider(provider)
     try:
-        keys = await client.list_partition_keys()
-        field = pick_field({k.key for k in keys}, _FILETYPE_FIELDS)
-        if field is None:
-            return IndexFileTypesResponse(field=None, values=[])
-        values = await client.get_partition_distribution(field)
+        field, values = await file_type_distribution(client)
     except Exception as e:
         raise _provider_error(e)
     finally:
         await client.aclose()
     return IndexFileTypesResponse(
         field=field,
-        values=[IndexFileTypeValue(value=v.value, count=v.doc_count) for v in values],
+        values=[IndexFileTypeValue(value=value, count=count) for value, count in values],
     )
 
 

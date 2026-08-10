@@ -186,7 +186,7 @@ async def get_retrieval_metrics_by_stage(
     For each case (pooled across ``dataset_ids``; ``dataset_id`` is the single-dataset alias) we
     assemble the candidate pool (which records each chunk's rank per head), reconstruct each
     stage's ranked list, and score it against the chunk-label gold (``gold_source`` = human | ai |
-    both, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
+    both | synthetic, binarized at ``min_grade``). Stages are compared side by side, with a per-case grid.
     ``include_agent`` adds the configured custom-agent endpoint as an extra stage.
     """
     ids = dataset_ids or ([dataset_id] if dataset_id else None)

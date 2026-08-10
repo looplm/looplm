@@ -39,8 +39,7 @@ from app.schemas.analytics import (
     SpanNameCount,
 )
 from app.services.multi_hop_analytics import build_multi_hop_response
-from app.services.observe_filter import get_observe_trace_names
-from app.services.user_filter import user_id_filters
+from app.services.trace_scope import trace_scope_filters
 from app.services.retrieval_config import get_rag_span_names, get_retrieval_span_name
 
 logger = logging.getLogger(__name__)
@@ -58,19 +57,14 @@ def _trace_base_filter(
     end: datetime | None = None,
 ) -> list:
     """Build the standard Observe trace filter (same shape as the dashboard)."""
-    project_integration_ids = select(Integration.id).where(Integration.project_id == project.id)
-    filters = [Trace.integration_id.in_(project_integration_ids)]
-    if start:
-        filters.append(Trace.start_time >= start)
-    if end:
-        filters.append(Trace.start_time <= end)
-    if environment:
-        filters.append(Trace.trace_metadata["environment"].astext == environment)
-    filters.extend(user_id_filters(include_user_ids, exclude_user_ids))
-    trace_names = get_observe_trace_names(project)
-    if trace_names:
-        filters.append(Trace.name.in_(trace_names))
-    return filters
+    return trace_scope_filters(
+        project,
+        start=start,
+        end=end,
+        environment=environment,
+        include_user_ids=include_user_ids,
+        exclude_user_ids=exclude_user_ids,
+    )
 
 
 def _build_response(analysis) -> RequestClustersResponse:

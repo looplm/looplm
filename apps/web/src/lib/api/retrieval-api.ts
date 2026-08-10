@@ -5,6 +5,7 @@
 import { ApiError, request } from "./client";
 import type { AnalyticsFilters } from "./analytics-api";
 import type {
+  GoldSource,
   RetrievalPipelineResponse,
   RetrievalRunMetrics,
   RetrievalTargets,
@@ -61,7 +62,7 @@ export const getRetrievalMetrics = (
     datasetIds?: string[];
     source?: "urls" | "labels";
     refresh?: boolean;
-    goldSource?: "human" | "ai" | "both";
+    goldSource?: GoldSource;
     minGrade?: number;
   } = {},
   signal?: AbortSignal,
@@ -82,7 +83,7 @@ export const getRetrievalMetrics = (
 export const getRetrievalByStageMetrics = (
   opts: {
     datasetIds?: string[];
-    goldSource?: "human" | "ai" | "both";
+    goldSource?: GoldSource;
     minGrade?: number;
     refresh?: boolean;
     includeAgent?: boolean;
@@ -109,7 +110,7 @@ export const getCaseDiagnosis = (
     testId: string;
     k?: number;
     retriever?: string;
-    goldSource?: "human" | "ai" | "both";
+    goldSource?: GoldSource;
     minGrade?: number;
     refresh?: boolean;
   },
