@@ -43,6 +43,7 @@ from app.schemas.source_registry import (
     SourceExpectationResponse,
     SourceExpectationUpdate,
 )
+from app.services.overview_sources import gap_run_counts
 from app.services.source_chunks import SourceChunkInput, get_source_chunks
 from app.services.source_csv import parse_source_csv
 
@@ -400,17 +401,19 @@ async def create_gap_run(
 
 
 def _summary_from_run(run: SourceGapRun) -> GapRunSummary:
-    summary = (run.results or {}).get("summary", {})
+    # gap_run_counts is the shared reader for the persisted summary keys, so this and the
+    # Overview page's coverage block cannot drift apart.
+    counts = gap_run_counts(run)
     return GapRunSummary(
         id=run.id,
         provider_id=run.provider_id,
         status=run.status,
         total=run.total,
         processed=run.processed,
-        covered=int(summary.get("covered") or 0),
-        missing=int(summary.get("missing") or 0),
-        review=int(summary.get("review") or 0),
-        acked=int(summary.get("acked") or 0),
+        covered=counts["covered"],
+        missing=counts["missing"],
+        review=counts["review"],
+        acked=counts["acked"],
         error=run.error,
         created_at=run.created_at,
         completed_at=run.completed_at,

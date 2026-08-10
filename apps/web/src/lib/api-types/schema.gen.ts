@@ -2786,6 +2786,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/overview/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview Sources
+         * @description Registry counts by business metadata, coverage status, and provider type.
+         *
+         *     Not filtered by the page's date range: this is the current state of the index, not a
+         *     period. The live file/content-type breakdown comes from
+         *     ``/api/index-explorer/file-types``, fetched separately so a slow or broken index
+         *     cannot hold up this response.
+         */
+        get: operations["overview_sources_api_overview_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/overview/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview Summary
+         * @description Feedback sentiment, user adoption and eval pass rate for one window.
+         *
+         *     All three series share the bucket axis built here, so column *i* of every chart and
+         *     every KPI sparkline refers to the same period.
+         */
+        get: operations["overview_summary_api_overview_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipeline/case-diagnosis": {
         parameters: {
             query?: never;
@@ -5005,6 +5053,84 @@ export interface components {
              */
             provider_id: string;
         };
+        /** AdoptionBucketPoint */
+        AdoptionBucketPoint: {
+            /** Active Users */
+            active_users: number;
+            /** Avg Traces Per Active User */
+            avg_traces_per_active_user: number;
+            /** Bucket */
+            bucket: string;
+            /** Cumulative Users */
+            cumulative_users: number;
+            /** Dau */
+            dau?: number | null;
+            /** Mau */
+            mau?: number | null;
+            /** New Users */
+            new_users: number;
+            /** Returning Users */
+            returning_users: number;
+            /** Stickiness */
+            stickiness?: number | null;
+            /** Threads */
+            threads: number;
+            /** Traces */
+            traces: number;
+            /** Traces Attributed */
+            traces_attributed: number;
+            /** Wau */
+            wau?: number | null;
+        };
+        /**
+         * AdoptionGrowth
+         * @description Period-over-period change for the volume metrics.
+         */
+        AdoptionGrowth: {
+            active_users: components["schemas"]["Delta"];
+            avg_traces_per_active_user: components["schemas"]["Delta"];
+            threads: components["schemas"]["Delta"];
+            traces: components["schemas"]["Delta"];
+        };
+        /** AdoptionOverview */
+        AdoptionOverview: {
+            growth: components["schemas"]["AdoptionGrowth"];
+            /** Points */
+            points: components["schemas"]["AdoptionBucketPoint"][];
+            /**
+             * Rolling Available
+             * @default true
+             */
+            rolling_available: boolean;
+            totals: components["schemas"]["AdoptionTotals"];
+        };
+        /** AdoptionTotals */
+        AdoptionTotals: {
+            /** Active Users */
+            active_users: number;
+            /** Avg Traces Per Active User */
+            avg_traces_per_active_user: number;
+            /** Cumulative Users */
+            cumulative_users: number;
+            /** Dau */
+            dau?: number | null;
+            /** Mau */
+            mau?: number | null;
+            /** New Users */
+            new_users: number;
+            /** Returning Users */
+            returning_users: number;
+            /** Stickiness */
+            stickiness?: number | null;
+            /** Threads */
+            threads: number;
+            /** Traces */
+            traces: number;
+            /** Traces Attributed */
+            traces_attributed: number;
+            /** Wau */
+            wau?: number | null;
+        };
         /** AdvisorAnalyzeRequest */
         AdvisorAnalyzeRequest: {
             /**
@@ -6161,6 +6287,16 @@ export interface components {
             /** Trend */
             trend: components["schemas"]["CostOverviewTrendPoint"][];
         };
+        /** CoverageBlock */
+        CoverageBlock: {
+            /** History */
+            history: components["schemas"]["CoveragePoint"][];
+            latest?: components["schemas"]["CoveragePoint"] | null;
+            /** Stale */
+            stale: boolean;
+            /** Stale Reason */
+            stale_reason?: string | null;
+        };
         /**
          * CoverageCategoryOverview
          * @description Latest coverage for one partition key, with a trend vs the previous run.
@@ -6180,6 +6316,34 @@ export interface components {
         CoverageOverviewResponse: {
             /** Data */
             data: components["schemas"]["CoverageCategoryOverview"][];
+        };
+        /**
+         * CoveragePoint
+         * @description One completed gap run. Coverage is a level, not a flow, so runs are never summed.
+         */
+        CoveragePoint: {
+            /** Acked */
+            acked: number;
+            /** Covered */
+            covered: number;
+            /** Covered Rate */
+            covered_rate: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Missing */
+            missing: number;
+            /** Review */
+            review: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Total */
+            total: number;
         };
         /** CoverageRunResponse */
         CoverageRunResponse: {
@@ -6397,6 +6561,21 @@ export interface components {
             /** Datasets */
             datasets: components["schemas"]["DatasetPickerItem"][];
         };
+        /**
+         * Delta
+         * @description A metric compared against the equally-long window immediately before this one.
+         *
+         *     ``change_pct`` is None when there is no usable baseline (a zero or missing previous
+         *     value). The UI renders nothing in that case rather than inventing a 0% or +100%.
+         */
+        Delta: {
+            /** Change Pct */
+            change_pct?: number | null;
+            /** Current */
+            current?: number | null;
+            /** Previous */
+            previous?: number | null;
+        };
         /** DetectResponse */
         DetectResponse: {
             /** Issues Created */
@@ -6538,6 +6717,21 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** EvalBucketPoint */
+        EvalBucketPoint: {
+            /** Bucket */
+            bucket: string;
+            /** Cases */
+            cases: number;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /** Passed */
+            passed: number;
+            /** Run Count */
+            run_count: number;
+            /** Unweighted Pass Rate */
+            unweighted_pass_rate?: number | null;
+        };
         /** EvalJobListResponse */
         EvalJobListResponse: {
             /** Data */
@@ -6587,6 +6781,67 @@ export interface components {
             status: string;
             /** Test Suite */
             test_suite: string;
+        };
+        /** EvalLatestRun */
+        EvalLatestRun: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Pass Rate */
+            pass_rate: number;
+            /** Passed */
+            passed: number;
+            /** Source */
+            source?: string | null;
+            /** Total */
+            total: number;
+        };
+        /** EvalOverview */
+        EvalOverview: {
+            /** Cases */
+            cases: number;
+            /** Current Pass Rate */
+            current_pass_rate?: number | null;
+            latest_run?: components["schemas"]["EvalLatestRun"] | null;
+            /** Passed */
+            passed: number;
+            /** Points */
+            points: components["schemas"]["EvalBucketPoint"][];
+            progress: components["schemas"]["EvalProgress"];
+            /** Runs */
+            runs: number;
+            /** Runs Excluded No Cases */
+            runs_excluded_no_cases: number;
+            /** Window Pass Rate */
+            window_pass_rate?: number | null;
+        };
+        /**
+         * EvalProgress
+         * @description Dataset coverage: how much of the test suite has ever been evaluated.
+         *
+         *     All-time on purpose. Scoping this to the selected window would make the number
+         *     shrink whenever the user narrows the date range, which reads as a regression.
+         */
+        EvalProgress: {
+            /** Evaluated */
+            evaluated: number;
+            /** Evaluated Unknown */
+            evaluated_unknown: number;
+            /** Never Evaluated */
+            never_evaluated: number;
+            /** Progress Rate */
+            progress_rate: number;
+            /** Total */
+            total: number;
         };
         /** EvalReportDetail */
         EvalReportDetail: {
@@ -7419,6 +7674,21 @@ export interface components {
              */
             total_traces: number;
         };
+        /** FeedbackBucketPoint */
+        FeedbackBucketPoint: {
+            /** Bucket */
+            bucket: string;
+            /** Negative */
+            negative: number;
+            /** Positive */
+            positive: number;
+            /** Positive Rate */
+            positive_rate: number;
+            /** Total */
+            total: number;
+            /** Traces With Feedback */
+            traces_with_feedback: number;
+        };
         /** FeedbackEvalItem */
         FeedbackEvalItem: {
             /** Comment */
@@ -7583,6 +7853,19 @@ export interface components {
             /** Data */
             data: components["schemas"]["FeedbackScoreItem"][];
             pagination: components["schemas"]["app__schemas__feedback__PaginationInfo"];
+        };
+        /**
+         * FeedbackOverview
+         * @description End-user thumbs (``score_name == 'user-feedback'``) over time.
+         *
+         *     Bucketed on the *trace's* ``start_time``, not the score's ``scored_at``, so these
+         *     counts line up with the volume numbers in the adoption section for the same bucket.
+         *     Same choice the dashboard already makes.
+         */
+        FeedbackOverview: {
+            /** Points */
+            points: components["schemas"]["FeedbackBucketPoint"][];
+            totals: components["schemas"]["FeedbackTotals"];
         };
         /** FeedbackScoreDetail */
         FeedbackScoreDetail: {
@@ -7804,6 +8087,19 @@ export interface components {
              * @default 0
              */
             total_comments: number;
+        };
+        /** FeedbackTotals */
+        FeedbackTotals: {
+            /** Negative */
+            negative: number;
+            /** Positive */
+            positive: number;
+            /** Positive Rate */
+            positive_rate: number;
+            /** Total */
+            total: number;
+            /** Traces With Feedback */
+            traces_with_feedback: number;
         };
         /** FeedbackTrend */
         FeedbackTrend: {
@@ -9343,6 +9639,84 @@ export interface components {
             /** Total Cost Usd */
             total_cost_usd?: number | null;
         };
+        /**
+         * OverviewKpi
+         * @description One headline tile. Values are in native units: rates are 0..1, counts absolute.
+         */
+        OverviewKpi: {
+            /** Change Pct */
+            change_pct?: number | null;
+            /**
+             * Higher Is Better
+             * @default true
+             */
+            higher_is_better: boolean;
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "feedback_rate" | "active_users" | "eval_pass_rate" | "indexed_sources";
+            /** Label */
+            label: string;
+            /** Previous */
+            previous?: number | null;
+            /**
+             * Series
+             * @default []
+             */
+            series: (number | null)[];
+            /** Sub */
+            sub?: string | null;
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "rate" | "count";
+            /** Value */
+            value?: number | null;
+        };
+        /**
+         * OverviewPeriod
+         * @description The resolved window, echoed back so the UI can label the axis.
+         */
+        OverviewPeriod: {
+            /**
+             * Bucket
+             * @enum {string}
+             */
+            bucket: "day" | "week" | "month";
+            /** Buckets */
+            buckets: number;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /**
+             * Previous End
+             * Format: date-time
+             */
+            previous_end: string;
+            /**
+             * Previous Start
+             * Format: date-time
+             */
+            previous_start: string;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+        };
+        /** OverviewSummaryResponse */
+        OverviewSummaryResponse: {
+            adoption: components["schemas"]["AdoptionOverview"];
+            evals: components["schemas"]["EvalOverview"];
+            feedback: components["schemas"]["FeedbackOverview"];
+            /** Kpis */
+            kpis: components["schemas"]["OverviewKpi"][];
+            period: components["schemas"]["OverviewPeriod"];
+        };
         /** PairwiseKappa */
         PairwiseKappa: {
             /** A */
@@ -9849,6 +10223,27 @@ export interface components {
              */
             synced: number;
         };
+        /** ProviderRef */
+        ProviderRef: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Source Count */
+            source_count: number;
+            /** Type */
+            type: string;
+        };
+        /** ProviderTypeAggregate */
+        ProviderTypeAggregate: {
+            /** Provider Count */
+            provider_count: number;
+            /** Type */
+            type: string;
+        };
         /** RagCounts */
         RagCounts: {
             /**
@@ -10004,6 +10399,48 @@ export interface components {
             invite_token?: string | null;
             /** Password */
             password: string;
+        };
+        /** RegistryDimension */
+        RegistryDimension: {
+            /** Distinct Values */
+            distinct_values: number;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Truncated */
+            truncated: boolean;
+            /** Values */
+            values: components["schemas"]["RegistryDimensionValue"][];
+        };
+        /**
+         * RegistryDimensionValue
+         * @description One value of a registry metadata field, with its coverage cross-tab.
+         */
+        RegistryDimensionValue: {
+            /** Acked */
+            acked: number;
+            /** Count */
+            count: number;
+            /** Covered */
+            covered: number;
+            /** Label */
+            label: string;
+            /** Missing */
+            missing: number;
+            /** Review */
+            review: number;
+            /** Unknown */
+            unknown: number;
+            /** Value */
+            value?: string | null;
+        };
+        /** RegistrySummary */
+        RegistrySummary: {
+            /** Dimensions */
+            dimensions: components["schemas"]["RegistryDimension"][];
+            /** Total Sources */
+            total_sources: number;
         };
         /**
          * RegressionFlag
@@ -11369,6 +11806,15 @@ export interface components {
             status: string;
             /** Total */
             total: number;
+        };
+        /** SourcesOverviewResponse */
+        SourcesOverviewResponse: {
+            /** By Type */
+            by_type: components["schemas"]["ProviderTypeAggregate"][];
+            coverage: components["schemas"]["CoverageBlock"];
+            /** Providers */
+            providers: components["schemas"]["ProviderRef"][];
+            registry: components["schemas"]["RegistrySummary"];
         };
         /**
          * SpanNameCount
@@ -18428,6 +18874,83 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PermissionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_sources_api_overview_sources_get: {
+        parameters: {
+            query?: {
+                provider_id?: string | null;
+                top?: number;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcesOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_summary_api_overview_summary_get: {
+        parameters: {
+            query?: {
+                bucket?: "day" | "week" | "month";
+                days?: number;
+                start_date?: string | null;
+                end_date?: string | null;
+                environment?: string | null;
+                integration_id?: string | null;
+                include_user_ids?: string[] | null;
+                exclude_user_ids?: string[] | null;
+                include_reruns?: boolean;
+                sources?: string | null;
+                dataset_id?: string | null;
+            };
+            header?: {
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewSummaryResponse"];
                 };
             };
             /** @description Validation Error */

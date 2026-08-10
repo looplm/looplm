@@ -21,6 +21,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "OBSERVE",
     items: [
+      { href: "/overview", label: "Overview", icon: "\u{1F310}" },
       { href: "/dashboard", label: "Dashboard", icon: "\u{1F4CA}" },
       { href: "/traces", label: "Traces", icon: "\u{1F50D}" },
       { href: "/analytics", label: "Analytics", icon: "\u{1F4C8}" },

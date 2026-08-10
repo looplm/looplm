@@ -205,3 +205,33 @@ async def test_permissions_endpoint_returns_write_pages(
     assert data["role"] == "member"
     assert data["allowed_pages"] == ["evaluations"]
     assert data["write_pages"] == ["evaluations"]
+
+
+# ── Overview page gating ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_member_without_overview_page_is_denied(client, db_session, test_project):
+    """Overview is its own page slug, so it must be granted explicitly.
+
+    Members whose allowed_pages predate the Overview page lose access until an admin
+    re-grants it. That is the intended posture, but it is a visible change on upgrade.
+    """
+    _, headers = await _create_member(
+        db_session, test_project,
+        allowed_pages=["dashboard"],
+    )
+    resp = await client.get("/api/overview/summary", headers=headers)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_member_with_overview_page_is_allowed(client, db_session, test_project):
+    _, headers = await _create_member(
+        db_session, test_project,
+        allowed_pages=["overview"],
+    )
+    resp = await client.get("/api/overview/summary", headers=headers)
+    assert resp.status_code == 200
+    resp = await client.get("/api/overview/sources", headers=headers)
+    assert resp.status_code == 200

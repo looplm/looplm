@@ -8,15 +8,25 @@ import GlobalFilterHeader from "./global-filter-header";
 import { PermissionsProvider, usePermissions } from "./permissions-context";
 import { UserDirectoryProvider } from "./user-directory-context";
 
-const FILTER_PATHS = new Set(["/dashboard", "/traces", "/analytics", "/feedback", "/costs"]);
+const FILTER_PATHS = new Set([
+  "/overview",
+  "/dashboard",
+  "/traces",
+  "/analytics",
+  "/feedback",
+  "/costs",
+]);
 
 const SECTION_ROUTES: Record<string, string[]> = {
-  observe: ["/dashboard", "/traces", "/analytics", "/feedback", "/data-sources", "/costs"],
+  // Order matters: findFirstAccessibleRoute walks this list, so Overview being first makes
+  // it the landing page for members whose permissions exclude some Observe pages.
+  observe: ["/overview", "/dashboard", "/traces", "/analytics", "/feedback", "/data-sources", "/costs"],
   evaluate: ["/evaluations", "/evaluators", "/datasets"],
   improve: ["/issues", "/advisor", "/routes", "/prompts"],
 };
 
 const ROUTE_TO_PAGE: Record<string, string> = {
+  "/overview": "overview",
   "/dashboard": "dashboard",
   "/traces": "traces",
   "/analytics": "analytics",
