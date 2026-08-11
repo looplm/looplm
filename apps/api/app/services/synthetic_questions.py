@@ -94,6 +94,19 @@ _ID_FIELDS = ["id", "chunk_id", "key", "doc_id"]
 # Fields identifying the parent document a chunk belongs to, for the per-document cap.
 _PARENT_FIELDS = ["attachment_filename", "page_id", "parent_id", "document_id", "file_id"]
 
+# Fields naming what KIND of document a chunk belongs to, and the values that mark it as an index
+# artifact rather than source content.
+#
+# Retrieval pipelines commonly index derived documents — per-page summaries, embeddings-only
+# stubs — and use them internally (to pick which pages to drill into) while filtering them out of
+# the results a user ever sees. A question generated from one of those is unanswerable by
+# construction for the very system under test: it can never return that document, so the case is
+# scored as a miss no matter how good retrieval is. Worse, an index probe that does NOT apply the
+# same filter gets credit for finding it, which silently biases every comparison against the real
+# agent. Observed on a live corpus: 4 of 96 questions were unwinnable this way.
+_DOC_KIND_FIELDS = ["document_type", "doc_type", "record_type", "kind"]
+ARTIFACT_DOC_KINDS = frozenset({"summary", "abstract", "synopsis"})
+
 # How many chunks one document may contribute to a run. Without a cap, a single long PDF
 # supplies the entire benchmark: index backends return a document's chunks adjacent to each
 # other, so any sample drawn from a contiguous window is really a sample of a few documents.
@@ -188,7 +201,8 @@ def chunk_from_document(doc: dict) -> SourceChunk | None:
     """Build a :class:`SourceChunk` from a raw index document, resolving field names.
 
     Returns None when the document carries no usable key or no text at all — there is nothing
-    to ground a question in, and nothing to score a retriever against.
+    to ground a question in, and nothing to score a retriever against — or when it is an index
+    artifact rather than source content (see :data:`ARTIFACT_DOC_KINDS`).
     """
     keys = set(doc.keys())
     id_field = pick_field(keys, _ID_FIELDS)
@@ -198,6 +212,9 @@ def chunk_from_document(doc: dict) -> SourceChunk | None:
     chunk_id = as_text(doc.get(id_field)).strip()
     text = as_text(doc.get(text_field))
     if not chunk_id or not text.strip():
+        return None
+    kind_field = pick_field(keys, _DOC_KIND_FIELDS)
+    if kind_field and as_text(doc.get(kind_field)).strip().lower() in ARTIFACT_DOC_KINDS:
         return None
     title_field = pick_field(keys, _TITLE_FIELDS)
     url_field = pick_field(keys, _URL_FIELDS)

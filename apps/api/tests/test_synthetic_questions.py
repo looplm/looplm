@@ -370,3 +370,35 @@ def test_selection_reports_how_many_documents_it_covers():
         [_chunk("docA_chunk_0"), _chunk("docA_chunk_1"), _chunk("docB_chunk_0")]
     )
     assert selection.documents == 2
+
+
+# --- index artifacts are not source content ------------------------------------
+
+
+def test_summary_documents_are_never_used_as_gold():
+    """A per-page summary is derived from other chunks, and the pipeline under test filters it
+    out of user-facing results — so a question written from one is unwinnable by construction,
+    while an index probe that skips that filter gets credit for finding it."""
+    assert chunk_from_document({"id": "p1_summary", "chunk_text": GOOD_TEXT,
+                                "document_type": "summary"}) is None
+    assert chunk_from_document({"id": "p1_chunk_0", "chunk_text": GOOD_TEXT,
+                                "document_type": "chunk"}) is not None
+
+
+def test_artifact_detection_is_case_insensitive_and_covers_synonyms():
+    for kind in ("Summary", "SUMMARY", " abstract ", "synopsis"):
+        assert chunk_from_document(
+            {"id": "x", "chunk_text": GOOD_TEXT, "doc_type": kind}
+        ) is None, kind
+
+
+def test_documents_without_a_kind_field_are_kept():
+    # Most backends expose no such field; absence must not be read as "artifact".
+    assert chunk_from_document({"id": "x", "chunk_text": GOOD_TEXT}) is not None
+
+
+def test_an_unknown_kind_is_kept():
+    # Only known artifact kinds are excluded; a novel value is content until shown otherwise.
+    assert chunk_from_document(
+        {"id": "x", "chunk_text": GOOD_TEXT, "document_type": "faq"}
+    ) is not None
