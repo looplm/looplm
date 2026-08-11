@@ -225,7 +225,12 @@ async def start_retrieval_metrics_compute(
     await db.refresh(job)
 
     task = asyncio.create_task(
-        run_metrics_job(job.id, refresh=body.refresh, include_agent=body.include_agent)
+        run_metrics_job(
+            job.id,
+            refresh=body.refresh,
+            include_agent=body.include_agent,
+            plan_agentic=body.plan_agentic,
+        )
     )
     _metrics_jobs[job.id] = task
     task.add_done_callback(lambda _t, jid=job.id: _metrics_jobs.pop(jid, None))

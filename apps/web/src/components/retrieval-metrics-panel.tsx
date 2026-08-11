@@ -47,6 +47,9 @@ type Draft = {
   // Score the custom-agent endpoint as an extra by-stage stage (opt-in; slow — one agent call
   // per case). Only offered when the project has an agent endpoint configured.
   includeAgent: boolean;
+  // Plan each case's agentic sub-queries before scoring, for cases that have none (opt-in; one
+  // LLM call per unplanned case). Without it the agentic stages have nothing to score.
+  planAgentic: boolean;
 };
 // A snapshot of Draft that has been sent to compute, plus a nonce to retrigger the fetch on
 // Recompute (same settings, forced refresh) and a refresh flag.
@@ -58,6 +61,7 @@ const sameSettings = (a: Draft, b: Draft): boolean =>
   a.minGrade === b.minGrade &&
   a.runId === b.runId &&
   a.includeAgent === b.includeAgent &&
+  a.planAgentic === b.planAgentic &&
   a.datasetIds.length === b.datasetIds.length &&
   a.datasetIds.every((id) => b.datasetIds.includes(id));
 
@@ -94,6 +98,7 @@ export default function RetrievalMetricsPanel({
     datasetIds: [],
     runId: null,
     includeAgent: false,
+    planAgentic: false,
   });
   const setDraftField = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -188,7 +193,7 @@ export default function RetrievalMetricsPanel({
 
     const runByStage = async () => {
       const job = await startRetrievalCompute(
-        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, min_grade: applied.minGrade, view: "byStage", refresh: applied.refresh, include_agent: applied.includeAgent },
+        { dataset_ids: applied.datasetIds, gold_source: applied.goldSource, min_grade: applied.minGrade, view: "byStage", refresh: applied.refresh, include_agent: applied.includeAgent, plan_agentic: applied.planAgentic },
         signal,
       );
       await pollRetrievalCompute(job.id, signal);
@@ -364,6 +369,20 @@ export default function RetrievalMetricsPanel({
               onGoldSource={(g) => setDraftField("goldSource", g)}
               onMinGrade={(g) => setDraftField("minGrade", g)}
             />
+          )}
+          {draft.source === "labels" && (
+            <label
+              className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-slate-300 cursor-pointer select-none"
+              title="Plan each case's agentic sub-queries first, for cases that have none yet. The agentic stages score a planned multi-query union, so without this they have nothing to score. Costs one LLM call per unplanned case; planned queries are saved, so you only pay it once per dataset."
+            >
+              <input
+                type="checkbox"
+                checked={draft.planAgentic}
+                onChange={(e) => setDraftField("planAgentic", e.target.checked)}
+                className="w-3.5 h-3.5 rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
+              />
+              Plan agentic queries
+            </label>
           )}
           {draft.source === "labels" && agentConfigured && (
             <label

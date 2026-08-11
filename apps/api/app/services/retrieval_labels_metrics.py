@@ -28,7 +28,11 @@ from app.models.chunk_labels import TestCaseLabelingStatus
 from app.models.datasets import TestCase, TestDataset
 from app.models.index_providers import IndexProvider
 from app.models.project import Project
-from app.routers.chunk_labels._helpers import _dataset_case_agentic_queries
+from app.models.user import User
+from app.routers.chunk_labels._helpers import (
+    _dataset_case_agentic_queries,
+    ensure_case_agentic_queries,
+)
 from app.schemas.retrieval import ByStageMetricsResponse, RetrievalRunMetrics
 from app.services.analysis_llm import merge_llm_settings
 from app.services.chunk_pool import AGENTIC_RERANK_DEPTH
@@ -253,6 +257,8 @@ async def compute_by_stage_metrics(
     refresh: bool,
     min_grade: int = 1,
     include_agent: bool = False,
+    plan_agentic: bool = False,
+    user: User | None = None,
 ) -> ByStageMetricsResponse:
     """Deterministic per-stage retrieval metrics (sparse/dense/RRF/reranked/agentic) vs gold.
 
@@ -261,6 +267,13 @@ async def compute_by_stage_metrics(
     Redis keyed by dataset set + gold source + min grade. ``include_agent`` additionally probes the
     project's configured custom-agent endpoint as an extra stage (opt-in — it's slow and hits the
     agent per case), keyed separately so toggling it doesn't collide with the index-only result.
+
+    ``plan_agentic`` (needs ``user``) plans the agentic sub-queries for cases that have none, so the
+    agentic stages have something to score. Without it those stages are dark for any dataset nobody
+    opened in the labeling workbench — which is every synthetic dataset. It is deliberately NOT part
+    of the cache key: it is an action ("plan what's missing"), not a result dimension. Planned
+    queries persist on the case, so once planned a later run without the flag reads them and
+    produces the same numbers, and the panel's warm-cache read still hits.
     """
     if not datasets:
         return ByStageMetricsResponse(
@@ -300,6 +313,20 @@ async def compute_by_stage_metrics(
 
     # Only pool cases that have gold (others are dropped by the aggregator anyway).
     todo = [(tid, q) for tid, q in cases if relevant_by_test.get(tid)]
+
+    dataset_by_test = await resolve_case_datasets(db, dataset_uuids)
+    if plan_agentic and user is not None:
+        # Sequential and before pooling, on purpose: planning WRITES to the case and commits, and
+        # the pooling fan-out shares one session, so planning inside it would interleave writes on
+        # a session being read concurrently. One LLM call per unplanned case, once per dataset.
+        for test_id, query in todo:
+            ds_id = dataset_by_test.get(test_id)
+            if ds_id is None:
+                continue
+            await ensure_case_agentic_queries(
+                db, project, user, dataset_id=UUID(ds_id), test_id=test_id, query=str(query or "")
+            )
+        await db.commit()
     # Drop the Cohere stages entirely when no reranker is configured, rather than reporting two
     # permanently empty rows the reader has to learn to ignore.
     index_stage_labels = (
@@ -396,7 +423,7 @@ async def compute_by_stage_metrics(
         nonrelevant_by_test,
         grade_by_test,
         slice_by_test,
-        dataset_by_test=await resolve_case_datasets(db, dataset_uuids),
+        dataset_by_test=dataset_by_test,
         stage_labels=stage_labels,
         failed_by_stage=failed_by_stage,
     )

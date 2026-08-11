@@ -781,6 +781,12 @@ class RetrievalComputeStart(BaseModel):
     # Also score the project's configured custom-agent endpoint as an extra by-stage stage.
     # Opt-in (byStage only): it's slow and calls the agent once per case.
     include_agent: bool = False
+    # Plan each case's agentic sub-queries first, for cases that have none yet. The agentic stages
+    # score a *planned* multi-query union, so without this they stay dark for any dataset nobody
+    # opened in the labeling workbench — every synthetic dataset, since those need no labeling.
+    # Opt-in (byStage only): one LLM call per unplanned case. Planned queries persist, so a run
+    # only pays this once per dataset.
+    plan_agentic: bool = False
 
 
 class RetrievalComputeJob(BaseModel):

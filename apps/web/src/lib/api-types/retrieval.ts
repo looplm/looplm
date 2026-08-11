@@ -514,6 +514,8 @@ export interface RetrievalComputeStartBody {
   refresh?: boolean;
   // Also score the configured custom-agent endpoint as an extra by-stage stage (opt-in; slow).
   include_agent?: boolean;
+  /** Plan missing agentic sub-queries first, so the agentic stages have something to score. */
+  plan_agentic?: boolean;
 }
 
 export type RetrievalComputeStatus = "pending" | "running" | "completed" | "failed";

@@ -10930,6 +10930,11 @@ export interface components {
              */
             min_grade: number;
             /**
+             * Plan Agentic
+             * @default false
+             */
+            plan_agentic: boolean;
+            /**
              * Refresh
              * @default false
              */

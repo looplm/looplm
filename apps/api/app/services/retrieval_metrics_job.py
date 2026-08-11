@@ -18,6 +18,7 @@ from app.config import settings
 from app.db import async_session
 from app.models.project import Project
 from app.models.retrieval_metrics_jobs import RetrievalMetricsJob
+from app.models.user import User
 from app.services.retrieval_labels_metrics import (
     compute_by_stage_metrics,
     compute_overall_labels_metrics,
@@ -27,11 +28,18 @@ from app.services.retrieval_labels_metrics import (
 logger = logging.getLogger(__name__)
 
 
-async def run_metrics_job(job_id: UUID, refresh: bool = False, include_agent: bool = False) -> None:
+async def run_metrics_job(
+    job_id: UUID,
+    refresh: bool = False,
+    include_agent: bool = False,
+    plan_agentic: bool = False,
+) -> None:
     """Run one metrics compute to completion, updating its status row throughout.
 
     ``refresh`` bypasses the result + probe caches (Recompute); otherwise a warm cache is reused.
     ``include_agent`` (byStage only) also probes the configured custom-agent endpoint as a stage.
+    ``plan_agentic`` (byStage only) plans missing agentic sub-queries first, so the agentic stages
+    have something to score; it runs as the job's user, whose LLM settings the planner uses.
     """
     async with async_session() as db:
         job = await db.get(RetrievalMetricsJob, job_id)
@@ -51,8 +59,18 @@ async def run_metrics_job(job_id: UUID, refresh: bool = False, include_agent: bo
             datasets = await resolve_datasets(db, project, dataset_uuids or None)
             min_grade = job.min_grade or 1
             if job.view == "byStage":
+                # The planner needs a user for its LLM settings; the job records who started it.
+                job_user = await db.get(User, job.created_by) if job.created_by else None
                 await compute_by_stage_metrics(
-                    db, project, datasets, job.gold_source, refresh, min_grade, include_agent
+                    db,
+                    project,
+                    datasets,
+                    job.gold_source,
+                    refresh,
+                    min_grade,
+                    include_agent,
+                    plan_agentic=plan_agentic and job_user is not None,
+                    user=job_user,
                 )
             else:
                 await compute_overall_labels_metrics(
