@@ -65,8 +65,13 @@ export function ByStageComparison({
     }
   };
   // Best (max) value per column, to highlight the winning stage.
+  // A stage is comparable only when it ran on essentially every case. One that errored on most
+  // of them (a rate-limited reranker, an agent returning 500s) has an average over whichever
+  // cases got through, which must not win a column or set the bar for the others.
+  const partial = (s: ByStageMetricsResponse["stages"][number]) =>
+    (s.cases_failed ?? 0) > (s.evaluated_cases + (s.cases_failed ?? 0)) * 0.1;
   const bestByCol = new Map<string, number>();
-  const scored = data.stages.filter((s) => s.available !== false);
+  const scored = data.stages.filter((s) => s.available !== false && !partial(s));
   for (const c of cols) {
     let best = -Infinity;
     for (const s of scored) {
@@ -102,6 +107,7 @@ export function ByStageComparison({
           <tbody>
             {data.stages.map((s) => {
               const unavailable = s.available === false;
+              const failed = s.cases_failed ?? 0;
               return (
               <tr key={s.stage} className="border-b border-gray-100/50 dark:border-slate-800/50">
                 <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
@@ -112,6 +118,18 @@ export function ByStageComparison({
                       title="This stage returned no ranking for any case: it is not configured, it failed, or it had nothing to run. Its numbers are absent, not zero."
                     >
                       not run
+                    </span>
+                  )}
+                  {!unavailable && failed > 0 && (
+                    <span
+                      className="ml-2 px-1.5 py-0.5 rounded text-[11px] font-normal bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"
+                      title={
+                        s.failure_reason
+                          ? `${failed} case(s) excluded because this stage errored: ${s.failure_reason}`
+                          : `${failed} case(s) excluded because this stage errored`
+                      }
+                    >
+                      {failed} failed
                     </span>
                   )}
                 </td>

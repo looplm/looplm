@@ -101,7 +101,9 @@ async def test_probe_skips_degraded_run(monkeypatch):
     monkeypatch.setattr(agent_retrieval, "cache_set_json", lambda *a, **k: _none())
 
     ids = await probe_agent_chunk_ids(None, cfg, uuid4(), "t1", "q", 50, refresh=True)
-    assert ids == []
+    # None, not []: a degraded run was not measured, so the metrics must exclude the case
+    # rather than score it as a miss.
+    assert ids is None
 
 
 @pytest.mark.asyncio
@@ -115,7 +117,7 @@ async def test_probe_swallows_errors(monkeypatch):
     monkeypatch.setattr(agent_retrieval, "cache_get_json", lambda *a, **k: _none())
 
     ids = await probe_agent_chunk_ids(None, cfg, uuid4(), "t1", "q", 50, refresh=True)
-    assert ids == []
+    assert ids is None
 
 
 @pytest.mark.asyncio
@@ -126,7 +128,40 @@ async def test_probe_empty_query_short_circuits(monkeypatch):
         raise AssertionError("should not call the endpoint for an empty query")
 
     monkeypatch.setattr(agent_retrieval, "_call_target_api", should_not_call)
-    assert await probe_agent_chunk_ids(None, cfg, uuid4(), "t1", "   ", 50) == []
+    assert await probe_agent_chunk_ids(None, cfg, uuid4(), "t1", "   ", 50) is None
+
+
+@pytest.mark.asyncio
+async def test_probe_returns_empty_list_when_the_agent_genuinely_ranked_nothing(monkeypatch):
+    """An agent that answers with no chunks IS a miss, and must not be excluded as a failure."""
+    cfg = get_agent_retrieval_config({"agent_retrieval_endpoint": "https://x"})
+
+    async def fake_call(*args, **kwargs):
+        return ("", json.dumps({"rankedChunks": []}), 12)
+
+    monkeypatch.setattr(agent_retrieval, "_call_target_api", fake_call)
+    monkeypatch.setattr(agent_retrieval, "cache_get_json", lambda *a, **k: _none())
+    monkeypatch.setattr(agent_retrieval, "cache_set_json", lambda *a, **k: _none())
+
+    ids = await probe_agent_chunk_ids(None, cfg, uuid4(), "t1", "q", 50, refresh=True)
+    assert ids == []
+
+
+@pytest.mark.asyncio
+async def test_probe_agent_chunks_still_returns_a_list_on_failure(monkeypatch):
+    """The labeling pool's contract is unchanged: it only cares that nothing was contributed."""
+    cfg = get_agent_retrieval_config({"agent_retrieval_endpoint": "https://x"})
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("503")
+
+    monkeypatch.setattr(agent_retrieval, "_call_target_api", boom)
+    monkeypatch.setattr(agent_retrieval, "cache_get_json", lambda *a, **k: _none())
+
+    chunks = await agent_retrieval.probe_agent_chunks(
+        None, cfg, uuid4(), "t1", "q", 50, refresh=True
+    )
+    assert chunks == []
 
 
 async def _none():

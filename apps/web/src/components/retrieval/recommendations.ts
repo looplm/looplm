@@ -243,9 +243,13 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
   if (byStage?.available) {
     // A stage that returned no ranking is absent, not zero. Treating its 0.0 as a measurement
     // produced advice like "switch the production reranker, Cohere scores 0% vs 42%" about a
-    // head that never ran.
+    // head that never ran. A head that errored on a large share of cases is just as unusable
+    // for comparison: its average covers whichever cases happened to get through.
+    const measured = (s: StageMetrics): boolean =>
+      s.available !== false &&
+      (s.cases_failed ?? 0) <= (s.evaluated_cases + (s.cases_failed ?? 0)) * 0.1;
     const stage = (v: string): StageMetrics | null =>
-      byStage.stages.find((s) => s.stage === v && s.available !== false) ?? null;
+      byStage.stages.find((s) => s.stage === v && measured(s)) ?? null;
     const recallOf = (v: string): number | null => num(stage(v)?.recall_at_k?.[lk]);
     const ndcgOf = (v: string): number | null => num(stage(v)?.ndcg_at_k?.[lk]);
 

@@ -11872,10 +11872,17 @@ export interface components {
              */
             available: boolean;
             /**
+             * Cases Failed
+             * @default 0
+             */
+            cases_failed: number;
+            /**
              * Evaluated Cases
              * @default 0
              */
             evaluated_cases: number;
+            /** Failure Reason */
+            failure_reason?: string | null;
             /** Hit Rate At K */
             hit_rate_at_k?: {
                 [key: string]: number;

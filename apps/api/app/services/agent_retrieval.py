@@ -116,6 +116,20 @@ def _cached_chunks(cached: Any) -> list[dict[str, Any]] | None:
     return [c for c in cached["chunks"] if isinstance(c, dict) and isinstance(c.get("chunk_id"), str)]
 
 
+@dataclass
+class AgentProbeResult:
+    """One probe's outcome, separating "the agent ranked nothing" from "we couldn't ask it".
+
+    Both used to surface as an empty list, which the metrics then scored as a total miss. That
+    is right for a genuine empty ranking and wrong for an unreachable endpoint, a 500 or a
+    degraded keyword-fallback run: those are measurement failures and must leave the average
+    rather than drag it down. ``failure`` carries the reason for the UI when set.
+    """
+
+    chunks: list[dict[str, Any]]
+    failure: str | None = None
+
+
 async def probe_agent_chunk_ids(
     client: httpx.AsyncClient,
     config: AgentRetrievalConfig,
@@ -125,11 +139,15 @@ async def probe_agent_chunk_ids(
     n: int,
     *,
     refresh: bool = False,
-) -> list[str]:
+) -> list[str] | None:
     """Ranked chunk ids the customer's agent retrieves for ``query`` (top-n), Redis-cached.
 
     Thin projection of :func:`probe_agent_chunks` for the metrics path, which scores positions
     and needs nothing else. Reads id-only cache entries written before the pooling head existed.
+
+    Returns ``None`` when the agent could not be measured for this case (unreachable endpoint,
+    HTTP error, degraded keyword-fallback run, or an empty query) so the caller can exclude it
+    instead of recording a miss. An empty list means the agent genuinely ranked nothing.
     """
     if not refresh:
         cached = await cache_get_json(_agent_cache_key(project_id, test_id, n))
@@ -138,12 +156,10 @@ async def probe_agent_chunk_ids(
             return [c["chunk_id"] for c in chunks]
         if isinstance(cached, dict) and isinstance(cached.get("chunk_ids"), list):
             return [c for c in cached["chunk_ids"] if isinstance(c, str)]
-    return [
-        c["chunk_id"]
-        for c in await probe_agent_chunks(
-            client, config, project_id, test_id, query, n, refresh=refresh
-        )
-    ]
+    result = await _probe_agent(client, config, project_id, test_id, query, n, refresh=refresh)
+    if result.failure is not None:
+        return None
+    return [c["chunk_id"] for c in result.chunks]
 
 
 async def probe_agent_chunks(
@@ -162,17 +178,36 @@ async def probe_agent_chunks(
     render a judgeable candidate, in the agent's own ranking order.
 
     Returns ``[]`` (the agent contributes nothing for this case) when the query is empty, the
-    endpoint is unreachable/errors, or the run degraded to keyword-only retrieval — none of
-    which should be scored as the agent's real ranking. A hard failure is logged, not cached,
-    so a transient outage doesn't stick for the whole TTL.
+    endpoint is unreachable/errors, or the run degraded to keyword-only retrieval. Callers that
+    must tell those apart — the metrics, which would otherwise score a 500 as a miss — use
+    :func:`probe_agent_chunk_ids` or :func:`_probe_agent` instead.
+    """
+    return (
+        await _probe_agent(client, config, project_id, test_id, query, n, refresh=refresh)
+    ).chunks
+
+
+async def _probe_agent(
+    client: httpx.AsyncClient,
+    config: AgentRetrievalConfig,
+    project_id: UUID,
+    test_id: str,
+    query: str,
+    n: int,
+    *,
+    refresh: bool = False,
+) -> AgentProbeResult:
+    """Probe the agent once, reporting whether it answered at all (see :class:`AgentProbeResult`).
+
+    A hard failure is logged, not cached, so a transient outage doesn't stick for the whole TTL.
     """
     if not query.strip():
-        return []
+        return AgentProbeResult([], failure="empty query")
     cache_key = _agent_cache_key(project_id, test_id, n)
     if not refresh:
         chunks = _cached_chunks(await cache_get_json(cache_key))
         if chunks is not None:
-            return chunks
+            return AgentProbeResult(chunks)
 
     headers = {TOKEN_HEADER: config.token} if config.token else {}
     try:
@@ -191,16 +226,16 @@ async def probe_agent_chunks(
         )
     except Exception as exc:  # noqa: BLE001 — unreachable/4xx/5xx: agent stage skips this case
         logger.warning("Agent retrieval probe failed for test %s: %s", test_id, exc)
-        return []
+        return AgentProbeResult([], failure=f"{type(exc).__name__}: {exc}"[:200])
 
     parsed = _safe_json_loads(raw_response)
     # A keyword-fallback run means the agent's vector path failed for every query (its
     # reranker never ran) — not representative of prod, so don't fold it into the metrics.
     if _retrieval_mode_from_parsed(parsed) == DEGRADED_RETRIEVAL_MODE:
         logger.info("Agent retrieval probe degraded (keyword-fallback) for test %s; skipped", test_id)
-        return []
+        return AgentProbeResult([], failure="degraded keyword-fallback run")
 
     extracted = extract_retrieved_chunks(parsed)  # reads rankedChunks (chunk-level) first
     chunks = [_slim_chunk(c) for c in extracted if c.get("chunk_id")][:n]
     await cache_set_json(cache_key, {"chunks": chunks}, ttl_seconds=_AGENT_CACHE_TTL)
-    return chunks
+    return AgentProbeResult(chunks)

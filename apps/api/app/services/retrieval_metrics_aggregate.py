@@ -166,6 +166,7 @@ def build_by_stage_metrics(
     ks: tuple[int, ...] = AGG_KS,
     dataset_by_test: dict[str, str] | None = None,
     stage_labels: tuple[tuple[str, str], ...] = STAGE_LABELS,
+    failed_by_stage: dict[str, dict[str, str]] | None = None,
 ) -> tuple[list[StageMetrics], list[ByStageCaseMetrics], int]:
     """Per-stage metrics + a per-case grid, by scoring each stage's ranking against the gold.
 
@@ -181,15 +182,21 @@ def build_by_stage_metrics(
     # test_id -> {"input", "recall": {stage: v}, "ndcg": {stage: v}}
     per_case: dict[str, dict[str, Any]] = {}
     evaluated = 0
+    failures = failed_by_stage or {}
     for head, label in stage_labels:
         rankings = retrieved_by_stage.get(head, {})
+        head_failures = failures.get(head, {})
+        # Drop the cases this head errored on before scoring it.
+        stage_cases = (
+            [(tid, q) for tid, q in cases if tid not in head_failures] if head_failures else cases
+        )
         # A head that returned nothing for every case did not run: it is unconfigured, it errored,
         # or it had no input (the agentic heads need planned sub-queries). Scoring it yields a row
         # of 0.0 that reads as a measured result, and readers — including the recommendation
         # rules — then compare a working stage against a stage that never happened.
         available = any(rankings.values())
         m = aggregate_retrieval_metrics_from_labels(
-            cases,
+            stage_cases,
             rankings,
             relevant_by_test,
             nonrelevant_by_test,
@@ -206,6 +213,9 @@ def build_by_stage_metrics(
                 stage=head,
                 label=label,
                 available=available,
+                cases_failed=len(head_failures),
+                # One representative reason; they are near-always identical for a given head.
+                failure_reason=next(iter(head_failures.values()), None) if head_failures else None,
                 evaluated_cases=m.evaluated_cases if available else 0,
                 recall_at_k=m.recall_at_k,
                 precision_at_k=m.precision_at_k,

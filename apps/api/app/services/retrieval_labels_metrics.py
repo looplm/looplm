@@ -313,6 +313,10 @@ async def compute_by_stage_metrics(
     rerank_scores_by_head: dict[str, dict[str, list[tuple[str, float]]]] = {
         h: {} for h in heads if h in RERANK_SCALE_MAX
     }
+    # head -> {test_id: why it failed}. A head that errored on a case (rate limit, no semantic
+    # config, transient backend error) did not measure that case, so scoring it as a miss would
+    # report a broken integration as a bad retriever. See build_by_stage_metrics.
+    failed_by_stage: dict[str, dict[str, str]] = {}
     sem = asyncio.Semaphore(PROBE_CONCURRENCY)
 
     async def _pool_case(test_id: str, query: str) -> None:
@@ -337,6 +341,8 @@ async def compute_by_stage_metrics(
             )
             if not connected:
                 return
+            for head, reason in (pool.heads_failed or {}).items():
+                failed_by_stage.setdefault(head, {})[test_id] = str(reason)
             for head in heads:
                 # Rerank heads order by relevance score (desc), the rest by positional rank.
                 ranked = ranked_chunks_for_head(pool.chunks, head)
@@ -362,8 +368,10 @@ async def compute_by_stage_metrics(
 
         async def _agent_case(
             client: httpx.AsyncClient, test_id: str, query: str
-        ) -> tuple[str, list[str]]:
+        ) -> tuple[str, list[str] | None]:
             async with agent_sem:
+                # None = the agent could not be measured for this case (unreachable, HTTP error,
+                # degraded run). Distinct from an empty ranking, which is a genuine miss.
                 ids = await probe_agent_chunk_ids(
                     client, agent_config, project.id, test_id, str(query or ""), k, refresh=refresh
                 )
@@ -374,9 +382,12 @@ async def compute_by_stage_metrics(
                 *(_agent_case(client, tid, q) for tid, q in todo)
             )
         agent_map = {tid: ids for tid, ids in agent_probed if ids}
+        agent_failed = {tid: "probe failed" for tid, ids in agent_probed if ids is None}
         if agent_map:
             retrieved_by_stage[AGENT_STAGE] = agent_map
             stage_labels = index_stage_labels + ((AGENT_STAGE, agent_config.label),)
+            if agent_failed:
+                failed_by_stage.setdefault(AGENT_STAGE, {}).update(agent_failed)
 
     stages, case_rows_out, evaluated = build_by_stage_metrics(
         cases,
@@ -387,6 +398,7 @@ async def compute_by_stage_metrics(
         slice_by_test,
         dataset_by_test=await resolve_case_datasets(db, dataset_uuids),
         stage_labels=stage_labels,
+        failed_by_stage=failed_by_stage,
     )
     # Attach each rerank stage's own score-threshold sweep (on that head's scale: 0-4 for Azure's
     # rerankerScore, 0-1 for Cohere) so the UI can offer a variable-k cutoff without another compute.

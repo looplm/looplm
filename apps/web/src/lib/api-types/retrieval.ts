@@ -313,6 +313,9 @@ export interface StageMetrics {
   // False when the stage returned no ranking for any case: not configured, failed, or nothing to
   // run. Its metrics are all 0.0 and must be shown as absent, never compared against.
   available?: boolean;
+  /** Cases this head errored on. Excluded from its averages, so the numbers cover fewer cases. */
+  cases_failed?: number;
+  failure_reason?: string | null;
   evaluated_cases: number;
   recall_at_k: Record<string, number>;
   precision_at_k: Record<string, number>;

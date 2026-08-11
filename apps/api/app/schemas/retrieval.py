@@ -648,6 +648,11 @@ class StageMetrics(BaseModel):
     # then all 0.0, which reads as "ranks nothing correctly" when it means "never ran"; readers
     # and the recommendation rules must skip it rather than compare against it.
     available: bool = True
+    # Cases this head errored on (rate limit, missing semantic config, unreachable agent). They are
+    # excluded from this stage's averages rather than scored as misses, so the numbers describe the
+    # cases it actually measured. ``failure_reason`` is one representative reason, for the UI.
+    cases_failed: int = 0
+    failure_reason: str | None = None
     evaluated_cases: int = 0
     recall_at_k: dict[str, float] = Field(default_factory=dict)
     precision_at_k: dict[str, float] = Field(default_factory=dict)
