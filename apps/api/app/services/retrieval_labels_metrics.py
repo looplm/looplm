@@ -38,6 +38,7 @@ from app.services.analysis_llm import merge_llm_settings
 from app.services.chunk_pool import AGENTIC_RERANK_DEPTH
 from app.services.chunk_gold import resolve_project_gold
 from app.services.cohere_rerank import (
+    AGENTIC_COHERE_MAX_STAGE,
     AGENTIC_COHERE_STAGE,
     COHERE_STAGE,
     get_cohere_rerank_config,
@@ -63,7 +64,7 @@ from app.services.retrieval_probe import cached_probe_chunk_ids
 PROBE_CONCURRENCY = 4
 
 # The cross-encoder stages, dropped from the by-stage comparison when no reranker is configured.
-COHERE_HEADS = (COHERE_STAGE, AGENTIC_COHERE_STAGE)
+COHERE_HEADS = (COHERE_STAGE, AGENTIC_COHERE_STAGE, AGENTIC_COHERE_MAX_STAGE)
 
 
 async def resolve_datasets(

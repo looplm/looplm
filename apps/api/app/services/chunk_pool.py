@@ -29,6 +29,7 @@ import httpx
 
 from app.index_providers.base import SEARCH_MODES, BaseIndexProvider
 from app.services.cohere_rerank import (
+    AGENTIC_COHERE_MAX_STAGE,
     AGENTIC_COHERE_STAGE,
     COHERE_RERANK_DEPTH,
     COHERE_STAGE,
@@ -65,7 +66,12 @@ AGENTIC_RERANK_DEPTH = 50
 
 # Heads whose ranking comes from a relevance score rather than a result position. They order by
 # ``PooledChunk.rerank_scores[head]`` descending; every other head orders by ``ranks[head]``.
-RERANK_HEADS = ("agentic_rerank", COHERE_STAGE, AGENTIC_COHERE_STAGE)
+RERANK_HEADS = (
+    "agentic_rerank",
+    COHERE_STAGE,
+    AGENTIC_COHERE_STAGE,
+    AGENTIC_COHERE_MAX_STAGE,
+)
 
 
 async def _cohere_base_pass(
@@ -123,6 +129,48 @@ async def _agentic_cohere_pass(
         if chunk is not None:
             chunk._seen_rerank(AGENTIC_COHERE_STAGE, score)
     return bool(scores)
+
+
+async def _agentic_cohere_per_query_pass(
+    pool: dict[str, PooledChunk],
+    provider: BaseIndexProvider,
+    config: CohereRerankConfig,
+    client: httpx.AsyncClient,
+    agentic_list: list["AgenticQuery"],
+    depth: int,
+    filters: dict[str, str] | None,
+) -> bool:
+    """Rerank EACH sub-query's own candidates with Cohere, keeping the best score per chunk.
+
+    The control for a confounded comparison. ``agentic_rerank`` fuses sub-queries by taking the
+    best Azure reranker score per chunk; ``agentic_cohere`` fuses them with one global Cohere pass
+    against the original question. Those differ in both reranker *and* fusion, so neither could be
+    attributed. This stage applies Cohere with ``agentic_rerank``'s fusion, so:
+
+    * vs ``agentic_rerank`` — same fusion, different reranker → isolates the reranker.
+    * vs ``agentic_cohere`` — same reranker, different fusion → isolates the fusion.
+
+    Candidates are each sub-query's hybrid top-``depth``, which is the set Azure's L2 ranker sees
+    for that sub-query (same reasoning as :func:`_cohere_base_pass`), and each chunk is scored
+    against the sub-query that retrieved it — exactly what the Azure pass does.
+    """
+    ran = False
+    for aq in agentic_list:
+        if not aq.text.strip():
+            continue
+        docs = await provider.search_documents(
+            aq.text, depth, filters, mode="hybrid", query_vector=aq.vector
+        )
+        by_id = {d.id: d for d in docs if d.id}
+        if not by_id:
+            continue
+        scores = await rerank_documents(
+            client, config, aq.text, [(d.id, d.snippet or "") for d in by_id.values()]
+        )
+        for cid, score in scores.items():
+            _merge_rerank_hit(pool, by_id[cid], head=AGENTIC_COHERE_MAX_STAGE, score=score)
+            ran = True
+    return ran
 
 
 async def assemble_pool(
@@ -266,6 +314,17 @@ async def assemble_pool(
                     heads_failed[AGENTIC_COHERE_STAGE] = str(exc)
                 except Exception as exc:  # noqa: BLE001
                     heads_failed[AGENTIC_COHERE_STAGE] = f"{type(exc).__name__}: {exc}"
+            if agentic_list and agentic_rerank_depth:
+                try:
+                    if await _agentic_cohere_per_query_pass(
+                        pool, provider, cohere, client, agentic_list,
+                        agentic_rerank_depth, filters,
+                    ):
+                        heads_ran.append(AGENTIC_COHERE_MAX_STAGE)
+                except CohereRerankError as exc:
+                    heads_failed[AGENTIC_COHERE_MAX_STAGE] = str(exc)
+                except Exception as exc:  # noqa: BLE001
+                    heads_failed[AGENTIC_COHERE_MAX_STAGE] = f"{type(exc).__name__}: {exc}"
         finally:
             if http_client is None:
                 await client.aclose()

@@ -10,6 +10,7 @@ from app.services.chunk_pool import AgenticQuery, assemble_pool
 from app.services.chunk_labeling import build_pool_view
 from app.services.chunk_pool_merge import PooledChunk, PoolResult
 from app.services.cohere_rerank import (
+    AGENTIC_COHERE_MAX_STAGE,
     AGENTIC_COHERE_STAGE,
     AUTH_API_KEY,
     COHERE_STAGE,
@@ -311,10 +312,17 @@ async def test_no_cohere_config_leaves_pool_untouched():
 # --- Stage plumbing --------------------------------------------------------------------------
 
 
-def test_both_cohere_stages_are_registered_next_to_their_azure_counterpart():
+def test_cohere_stages_are_registered_next_to_their_azure_counterpart():
+    """Each Cohere stage sits immediately after the Azure stage it should be read against.
+
+    The table is a comparison, so adjacency is the point: Cohere's base pass next to Reranked
+    (same candidates), and both agentic Cohere variants next to Agentic + rerank (the per-query
+    one shares its fusion, the global one shares only its candidates).
+    """
     heads = [h for h, _ in STAGE_LABELS]
     assert heads.index(COHERE_STAGE) == heads.index("semantic") + 1
-    assert heads.index(AGENTIC_COHERE_STAGE) == heads.index("agentic_rerank") + 1
+    assert heads.index(AGENTIC_COHERE_MAX_STAGE) == heads.index("agentic_rerank") + 1
+    assert heads.index(AGENTIC_COHERE_STAGE) == heads.index("agentic_rerank") + 2
     assert RERANK_SCALE_MAX[COHERE_STAGE] == 1.0
     assert RERANK_SCALE_MAX["agentic_rerank"] == 4.0
 
@@ -342,3 +350,90 @@ def test_pool_view_orders_by_cohere_score_when_scored():
     )
     assert [c.chunk_id for c in view.chunks] == ["high", "low", "unscored"]
     assert view.chunks[0].rerank_scores == {COHERE_STAGE: 0.95}
+
+
+# --- Per-sub-query Cohere head (the control for the confounded comparison) --------------------
+
+
+@pytest.mark.asyncio
+async def test_agentic_cohere_per_query_scores_each_sub_query_separately():
+    """The control stage: Cohere with agentic_rerank's fusion.
+
+    agentic_rerank (Azure, per sub-query, best score per chunk) and agentic_cohere (Cohere, one
+    global pass vs the original question) differ in reranker AND fusion, so neither could be
+    attributed. This head applies Cohere with the per-sub-query fusion, which makes the reranker
+    the only difference from agentic_rerank and the fusion the only difference from agentic_cohere.
+    """
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        body = json.loads(request.content)
+        asked.append(body["query"])
+        # Each sub-query rates its own chunk highly; the union must keep the best score per chunk.
+        wanted = {"sub-a": "a-best", "sub-b": "b-best", "base": "base hit"}.get(body["query"])
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"index": i, "relevance_score": 0.95 if t == wanted else 0.1}
+                    for i, t in enumerate(body["documents"])
+                ]
+            },
+        )
+
+    provider = QueryAwareProvider(
+        {
+            ("base", "keyword"): [_doc("b1", snippet="base hit")],
+            ("base", "hybrid"): [_doc("b1", snippet="base hit")],
+            ("sub-a", "keyword"): [_doc("a1", snippet="a-best")],
+            ("sub-a", "hybrid"): [_doc("a1", snippet="a-best"), _doc("a2", snippet="b-best")],
+            ("sub-b", "hybrid"): [_doc("a2", snippet="b-best")],
+        }
+    )
+    async with _client(handler) as client:
+        res = await assemble_pool(
+            provider,
+            "base",
+            modes=["keyword"],
+            agentic_queries=[AgenticQuery("sub-a"), AgenticQuery("sub-b")],
+            agentic_rerank_depth=50,
+            cohere=CONFIG,
+            http_client=client,
+        )
+    by_id = {c.chunk_id: c for c in res.chunks}
+    assert AGENTIC_COHERE_MAX_STAGE in res.heads_ran
+    # Unlike the global pass, this one scores against each SUB-query.
+    assert {"sub-a", "sub-b"} <= set(asked)
+    # a2 scored 0.1 under sub-a and 0.95 under sub-b: the best score per chunk wins, matching how
+    # agentic_rerank fuses Azure's scores.
+    assert by_id["a2"].rerank_scores[AGENTIC_COHERE_MAX_STAGE] == 0.95
+    assert by_id["a1"].rerank_scores[AGENTIC_COHERE_MAX_STAGE] == 0.95
+    ranked = [c.chunk_id for c in ranked_chunks_for_head(res.chunks, AGENTIC_COHERE_MAX_STAGE)]
+    assert set(ranked) == {"a1", "a2"}
+
+
+@pytest.mark.asyncio
+async def test_agentic_cohere_per_query_is_skipped_without_a_rerank_depth():
+    """No depth means the Azure per-sub-query pass is off too; keep the comparison symmetric."""
+
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("must not rerank per sub-query without a depth")
+
+    provider = QueryAwareProvider({("base", "keyword"): [_doc("b1", snippet="x")]})
+    async with _client(handler) as client:
+        res = await assemble_pool(
+            provider,
+            "base",
+            modes=["keyword"],
+            agentic_queries=[AgenticQuery("sub-a")],
+            http_client=client,
+        )
+    assert AGENTIC_COHERE_MAX_STAGE not in res.heads_ran
+
+
+def test_per_query_cohere_head_is_registered_as_a_cohere_scale_stage():
+    # Cohere's 0-1 scale, not Azure's 0-4 — the threshold slider must not mislabel it.
+    assert RERANK_SCALE_MAX[AGENTIC_COHERE_MAX_STAGE] == 1.0
+    assert AGENTIC_COHERE_MAX_STAGE in {head for head, _label in STAGE_LABELS}

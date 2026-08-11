@@ -34,8 +34,14 @@ logger = logging.getLogger(__name__)
 # Pool heads + display labels for the two Cohere stages (see the module docstring).
 COHERE_STAGE = "cohere_rerank"
 AGENTIC_COHERE_STAGE = "agentic_cohere"
+# Cohere applied the way ``agentic_rerank`` applies Azure's ranker: per sub-query, keeping the best
+# score per chunk. Exists to separate "which reranker" from "how the sub-queries are fused" —
+# comparing it with ``agentic_rerank`` isolates the reranker, and with ``agentic_cohere`` the
+# fusion. Without it the two are confounded and neither question can be answered.
+AGENTIC_COHERE_MAX_STAGE = "agentic_cohere_max"
 COHERE_STAGE_LABEL = "Cohere rerank"
 AGENTIC_COHERE_STAGE_LABEL = "Agentic + Cohere"
+AGENTIC_COHERE_MAX_STAGE_LABEL = "Agentic + Cohere/query"
 
 # Cohere relevance scores are normalized to 0..1 (unlike Azure's 0-4 rerankerScore), so the
 # score-threshold sweep needs a different scale for these stages.

@@ -103,6 +103,7 @@ export const RETRIEVERS: { value: string; label: string }[] = [
   { value: "cohere_rerank", label: "Cohere rerank" },
   { value: "agentic", label: "Agentic" },
   { value: "agentic_rerank", label: "Agentic + rerank" },
+  { value: "agentic_cohere_max", label: "Agentic + Cohere/query" },
   { value: "agentic_cohere", label: "Agentic + Cohere" },
   { value: "agent", label: "Custom agent" },
   { value: "best", label: "Best available" },
@@ -110,7 +111,7 @@ export const RETRIEVERS: { value: string; label: string }[] = [
 
 // Retrievers that only exist when the project configured a Cohere Rerank endpoint, so the selector
 // hides them rather than offering a stage that can never have numbers.
-export const COHERE_RETRIEVERS = ["cohere_rerank", "agentic_cohere"];
+export const COHERE_RETRIEVERS = ["cohere_rerank", "agentic_cohere", "agentic_cohere_max"];
 
 export const DEFAULT_RETRIEVER = "agentic";
 
@@ -162,6 +163,8 @@ export const RETRIEVER_NOTES: Record<string, string> = {
     "the same hybrid top-50 the semantic reranker sees, reordered by the Cohere cross-encoder instead. Compare it against Reranked to see which reranker suits your corpus.",
   agentic: "the agentic retrieval path (multi-query planning), ordered by best retrieval position.",
   agentic_rerank: "the agentic pool reordered by the semantic (L2) reranker score, top 50 per sub-query.",
+  agentic_cohere_max:
+    "each sub-query's own top-50 scored by the Cohere cross-encoder, keeping the best score per chunk — the same fusion Agentic + rerank uses, with Cohere instead of Azure. Compare the two to isolate the reranker, and compare this against Agentic + Cohere to isolate the fusion.",
   agentic_cohere:
     "the whole agentic pool scored by the Cohere cross-encoder against your original question in one pass, so candidates from different sub-queries compare on one scale (the positional merge cannot).",
   agent: "your real retrieval agent's own ranking, fetched live from its configured endpoint (not LoopLM re-querying the index). Configure it under Settings → Evaluations.",

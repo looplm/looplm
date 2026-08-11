@@ -31,6 +31,8 @@ from app.schemas.retrieval import (
     StageMetrics,
 )
 from app.services.cohere_rerank import (
+    AGENTIC_COHERE_MAX_STAGE,
+    AGENTIC_COHERE_MAX_STAGE_LABEL,
     AGENTIC_COHERE_STAGE,
     AGENTIC_COHERE_STAGE_LABEL,
     COHERE_SCORE_MAX,
@@ -65,6 +67,7 @@ STAGE_LABELS: tuple[tuple[str, str], ...] = (
     (COHERE_STAGE, COHERE_STAGE_LABEL),
     ("agentic", "Agentic"),
     ("agentic_rerank", "Agentic + rerank"),
+    (AGENTIC_COHERE_MAX_STAGE, AGENTIC_COHERE_MAX_STAGE_LABEL),
     (AGENTIC_COHERE_STAGE, AGENTIC_COHERE_STAGE_LABEL),
 )
 
@@ -74,6 +77,7 @@ RERANK_SCALE_MAX: dict[str, float] = {
     "agentic_rerank": 4.0,
     COHERE_STAGE: COHERE_SCORE_MAX,
     AGENTIC_COHERE_STAGE: COHERE_SCORE_MAX,
+    AGENTIC_COHERE_MAX_STAGE: COHERE_SCORE_MAX,
 }
 
 # Sweep each scale in 40 steps so the UI slider can pick a score-threshold cutoff from the data
