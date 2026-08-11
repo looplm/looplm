@@ -63,6 +63,14 @@ from app.services.retrieval_probe import cached_probe_chunk_ids
 # index. Matches the labeling page's per-case pool concurrency.
 PROBE_CONCURRENCY = 4
 
+# The custom-agent stage gets its own, lower cap. The index probes hit Azure, which absorbs four
+# concurrent callers happily; the agent is the customer's own deployment, and at 4 it returned
+# 500s / degraded keyword-fallback runs for 5 then 15 of 96 cases across consecutive runs. Those
+# cases leave the stage's average (see build_by_stage_metrics), so flakiness doesn't corrupt the
+# number — but it does make the average cover a shifting subset, which is useless for comparing
+# one run against the next. Serialising the agent trades wall clock for a stable denominator.
+AGENT_PROBE_CONCURRENCY = 1
+
 # The cross-encoder stages, dropped from the by-stage comparison when no reranker is configured.
 COHERE_HEADS = (COHERE_STAGE, AGENTIC_COHERE_STAGE, AGENTIC_COHERE_MAX_STAGE)
 
@@ -399,7 +407,7 @@ async def compute_by_stage_metrics(
         # Probe at the shared depth, not max(AGG_KS), so this run and the labeling pool hit the
         # same cache entry instead of calling the customer's agent twice per case.
         k = AGENT_PROBE_DEPTH
-        agent_sem = asyncio.Semaphore(PROBE_CONCURRENCY)
+        agent_sem = asyncio.Semaphore(AGENT_PROBE_CONCURRENCY)
 
         async def _agent_case(
             client: httpx.AsyncClient, test_id: str, query: str
