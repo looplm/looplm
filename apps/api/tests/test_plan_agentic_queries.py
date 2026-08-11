@@ -135,3 +135,34 @@ def test_plan_agentic_is_not_part_of_the_cache_key(test_project):
         result_cache_key(test_project.id, "by-stage", ds, "synthetic", 1, True)
         != result_cache_key(test_project.id, "by-stage", ds, "synthetic", 1, False)
     )
+
+
+@pytest.mark.asyncio
+async def test_pool_agent_head_failure_does_not_exclude_cases(
+    db_session, test_project, test_user, monkeypatch, planned
+):
+    """The pool's "agent" head must not drive the metrics agent stage's exclusions.
+
+    ``labeling_pool`` marks that head failed whenever its (shallower) agent fetch came back
+    empty, including a genuinely empty ranking. The metrics agent stage is sourced from its own
+    deeper probe, so folding the pool's verdict in excluded cases the agent had actually
+    answered — which silently dropped real hits out of the average.
+    """
+    dataset = await _dataset_with_gold(db_session, test_project.id, n=2)
+
+    async def pool_with_agent_head_failed(*args, **kwargs):
+        pool = SimpleNamespace(
+            chunks=[],
+            heads_failed={"agent": "agent returned no ranking for this query", "vector": "boom"},
+        )
+        return pool, False, True
+
+    monkeypatch.setattr(rlm, "assemble_case_pool", pool_with_agent_head_failed)
+    res = await rlm.compute_by_stage_metrics(
+        db_session, test_project, [dataset], "synthetic", refresh=True
+    )
+    by_stage = {s.stage: s for s in res.stages}
+    # The real head failure is still honoured...
+    assert by_stage["vector"].cases_failed == 2
+    # ...but the agent head's "no ranking" is not treated as a measurement failure here.
+    assert "agent" not in by_stage or by_stage.get("agent") is None

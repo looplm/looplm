@@ -369,6 +369,13 @@ async def compute_by_stage_metrics(
             if not connected:
                 return
             for head, reason in (pool.heads_failed or {}).items():
+                # Skip the pool's own "agent" head. The metrics agent stage is sourced from a
+                # separate, deeper probe below (probe_agent_chunk_ids at AGENT_PROBE_DEPTH), and
+                # the pool sets this head "failed" whenever its shallower fetch came back empty —
+                # including a genuinely empty ranking, which is a real miss, not a failure.
+                # Folding it in here excluded cases the agent had actually answered.
+                if head == AGENT_STAGE:
+                    continue
                 failed_by_stage.setdefault(head, {})[test_id] = str(reason)
             for head in heads:
                 # Rerank heads order by relevance score (desc), the rest by positional rank.
