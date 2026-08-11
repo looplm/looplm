@@ -49,6 +49,21 @@ def _odata_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _interleave(groups: list[list[dict]]) -> list[dict]:
+    """Round-robin the groups into one list, so trimming the result keeps every group.
+
+    Concatenation would order the output by group, which makes any downstream ``[:n]`` drop the
+    trailing groups wholesale — the reason a stratified sample could still come back as a single
+    content type.
+    """
+    out: list[dict] = []
+    for row in range(max((len(g) for g in groups), default=0)):
+        for group in groups:
+            if row < len(group):
+                out.append(group[row])
+    return out
+
+
 def _is_empty(v: object) -> bool:
     """True for values that mean 'the field carries nothing' in a sampled doc."""
     if v is None:
@@ -432,6 +447,10 @@ class AzureSearchIndexProvider(BaseIndexProvider):
     # so beyond it we fall back to a flat paged sample.
     _MAX_STRATA = 40
     _SCAN_PAGE = 1000  # Azure's per-request `top` ceiling.
+    _MAX_SKIP = 100_000  # Azure rejects `$skip` beyond this.
+    # How many evenly spaced windows a spread fetch walks. Bounds the extra requests a spread
+    # costs (at most this many per slice) while still crossing the whole slice.
+    _SPREAD_WINDOWS = 20
 
     @staticmethod
     def _strip_internal(doc: dict) -> dict:
@@ -458,15 +477,78 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         facetable.sort(key=lambda f: f.name)
         return facetable[0].name
 
-    async def _fetch_full(self, *, filter_expr: str | None, top: int) -> list[dict]:
+    async def _fetch_full(
+        self, *, filter_expr: str | None, top: int, skip: int = 0
+    ) -> list[dict]:
         """Up to ``top`` documents with every field, internal keys stripped."""
-        results = await self._search_client.search(
-            search_text="*", filter=filter_expr, top=max(1, top)
-        )
+        # ``skip`` is passed only when non-zero: some backends (and the tests' fakes) treat an
+        # explicit skip=None differently from an absent one.
+        kwargs = {"search_text": "*", "filter": filter_expr, "top": max(1, top)}
+        if skip:
+            kwargs["skip"] = skip
+        results = await self._search_client.search(**kwargs)
         out: list[dict] = []
         async for doc in results:
             out.append(self._strip_internal(dict(doc)))
         return out
+
+    async def _slice_count(self, filter_expr: str | None) -> int:
+        """How many documents match ``filter_expr``, or 0 when the count is unavailable.
+
+        A backend that cannot report a count is not an error: the caller then simply fetches
+        without spreading rather than failing the whole sample.
+        """
+        try:
+            results = await self._search_client.search(
+                search_text="*", filter=filter_expr, top=1, include_total_count=True
+            )
+            async for _doc in results:  # advance the iterator before the count is available
+                break
+            return int(await results.get_count() or 0)
+        except Exception:  # noqa: BLE001 — degrade to an unspread fetch, never break sampling
+            logger.warning("Could not count the slice; sampling without spread", exc_info=True)
+            return 0
+
+    async def _spread_fetch(self, *, filter_expr: str | None, top: int) -> list[dict]:
+        """``top`` documents drawn from evenly spaced windows across the filtered slice.
+
+        Taking the first ``top`` documents is not a sample: Azure returns them in its own
+        internal order, which keeps a document's chunks adjacent, so the head of a slice is a
+        handful of documents rather than a cross-section of the corpus. This walks the slice in
+        a bounded number of windows instead, so the cost stays comparable to a single fetch
+        while the result spans the whole slice.
+        """
+        total = await self._slice_count(filter_expr)
+        if total <= top or total <= 1:
+            return await self._fetch_full(filter_expr=filter_expr, top=top)
+
+        reachable = min(total, self._MAX_SKIP)
+        windows = max(1, min(self._SPREAD_WINDOWS, top))
+        block = max(1, min(self._SCAN_PAGE, -(-top // windows)))  # ceil division
+        step = reachable / windows
+        key_field = next((f.name for f in (await self._get_fields()).values() if f.is_key), None)
+
+        out: list[dict] = []
+        seen: set[str] = set()
+        for i in range(windows):
+            offset = min(int(i * step), max(0, reachable - block))
+            try:
+                page = await self._fetch_full(filter_expr=filter_expr, top=block, skip=offset)
+            except Exception:  # noqa: BLE001 — one lost window must not lose the whole sample
+                logger.warning("Spread fetch failed at offset %d", offset, exc_info=True)
+                continue
+            for doc in page:
+                # Windows can overlap when a slice shrinks between calls; de-dupe by key so the
+                # same chunk never enters the sample twice.
+                key = str(doc.get(key_field) or "") if key_field else ""
+                if key and key in seen:
+                    continue
+                if key:
+                    seen.add(key)
+                out.append(doc)
+            if len(out) >= top:
+                break
+        return out[:top]
 
     async def get_field_schema(self, *, sample_size: int = 50) -> list[FieldSchema]:
         fields = await self._get_fields()
@@ -534,7 +616,7 @@ class AzureSearchIndexProvider(BaseIndexProvider):
             buckets = await self.get_partition_distribution(field_name)
             total = sum(b.doc_count for b in buckets)
             if buckets and total > 0 and len(buckets) <= self._MAX_STRATA:
-                out: list[dict] = []
+                per_bucket: list[list[dict]] = []
                 for b in buckets:
                     alloc = max(1, round(n * b.doc_count / total))
                     alloc = min(alloc, b.doc_count)
@@ -544,30 +626,18 @@ class AzureSearchIndexProvider(BaseIndexProvider):
                         if info and info.is_collection
                         else f"{field_name} eq '{esc}'"
                     )
-                    out.extend(await self._fetch_full(filter_expr=clause, top=alloc))
-                    if len(out) >= n:
-                        break
-                return out[:n]
+                    # Spread within the stratum: the head of a bucket is a few documents'
+                    # chunks, not a cross-section of it.
+                    per_bucket.append(await self._spread_fetch(filter_expr=clause, top=alloc))
+                # Interleave the buckets rather than concatenating them. Concatenation puts one
+                # stratum's whole allocation first, so any caller that trims the result to a
+                # smaller size silently loses the last strata entirely.
+                return _interleave(per_bucket)[:n]
 
-        # Flat fallback (no facetable field to stratify on): page the corpus in
-        # index order until we have n. Less representative than the stratified
-        # path, but the only option when the index exposes no facets.
-        return await self._paged_scan(n)
-
-    async def _paged_scan(self, n: int) -> list[dict]:
-        """Collect ~n full docs by paging `top`+`$skip` (Azure caps $skip at 100k)."""
-        out: list[dict] = []
-        skip = 0
-        while len(out) < n and skip < 100_000:
-            results = await self._search_client.search(
-                search_text="*", top=self._SCAN_PAGE, skip=skip
-            )
-            page = [self._strip_internal(dict(doc)) async for doc in results]
-            if not page:
-                break
-            out.extend(page)
-            skip += self._SCAN_PAGE
-        return out[:n]
+        # Flat fallback (no facetable field to stratify on): spread the draw across the whole
+        # corpus. Less representative than the stratified path (nothing balances the content
+        # types), but far better than the first n documents in index order.
+        return await self._spread_fetch(filter_expr=None, top=n)
 
     # ── Filename search → chunks-of-a-file (Data Sources "Files" tab) ────────────
     # The implementation lives in ``azure_search_files`` to keep this file focused;

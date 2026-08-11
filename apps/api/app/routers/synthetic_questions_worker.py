@@ -36,11 +36,13 @@ from app.services.query_embedding import build_query_embedder
 from app.services.synthetic_dataset import persist_questions, resolve_dataset
 from app.services.synthetic_negatives import generate_negatives, verify_negatives
 from app.services.synthetic_questions import (
+    DEFAULT_PER_DOCUMENT_CAP,
     ChunkSelection,
     GeneratedQuestion,
     SourceChunk,
     chunk_from_document,
     dedupe_questions,
+    diversify,
     generate_questions,
     select_chunks,
 )
@@ -49,11 +51,11 @@ logger = logging.getLogger(__name__)
 
 SERVICE_NAME = "synthetic_questions_worker"
 
-# Sampling overdraw. Junk chunks are filtered *after* sampling, so asking for exactly
-# ``sample_size`` reliably returns fewer usable chunks than requested. Overdrawing by half
-# absorbs a typical junk rate without a second round trip. The request schema caps
-# ``sample_size``, so this needs no cap of its own.
-OVERDRAW = 1.5
+# Sampling overdraw. Two things eat into the draw before it becomes a benchmark: junk chunks are
+# filtered out, and the per-document cap discards the tail of any document that is over-represented
+# in the sample. Drawing 4x the target leaves enough material for both without a second round trip.
+# The request schema caps ``sample_size``, so this needs no cap of its own.
+OVERDRAW = 4.0
 
 
 def negatives_wanted(positives: int, negative_share: int) -> int:
@@ -128,6 +130,7 @@ async def run_synthetic_question_generation(
     negative_share: int,
     verify: bool,
     persist: bool,
+    per_document_cap: int = DEFAULT_PER_DOCUMENT_CAP,
     dataset_id: UUID | None,
     dataset_name: str | None,
     user_settings: dict | None,
@@ -180,12 +183,20 @@ async def run_synthetic_question_generation(
             sample_size=sample_size,
         )
         selection: ChunkSelection = select_chunks(candidates)
-        chunks = selection.kept[:sample_size]
+        # Spread the pick across documents instead of slicing the head of the sample. Slicing
+        # produced benchmarks made of two PDFs, because a backend returns one document's chunks
+        # adjacent to each other and its last stratum gets truncated away entirely.
+        chunks = diversify(selection.kept, sample_size, per_document_cap=per_document_cap)
         if not chunks:
             raise ValueError(
                 "No usable chunks were sampled. Every sampled chunk was empty, too short, "
                 "mis-decoded or markup. Check the index and the chunk quality report."
             )
+        documents = len({c.document for c in chunks})
+        logger.info(
+            "Synthetic run %s sampled %d chunks from %d documents (%d raw, %d filtered)",
+            run_id, len(chunks), documents, raw_sampled, selection.skipped_total,
+        )
 
         await _set_state(db_factory, run_id, stage="generating", total=len(chunks), processed=0)
 
@@ -226,6 +237,7 @@ async def run_synthetic_question_generation(
         counts = {
             "chunks_sampled": raw_sampled,
             "chunks_used": len(chunks),
+            "documents_used": documents,
             "chunks_skipped": selection.skipped,
             "questions_generated": len(questions),
             "duplicates_dropped": duplicates_dropped,

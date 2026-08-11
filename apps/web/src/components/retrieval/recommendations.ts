@@ -179,23 +179,45 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
     }
   }
 
-  // --- Coverage: some relevant chunks are never retrieved (a ceiling reranking can't lift). ---
+  // --- Coverage vs ranking: low recall@k has two very different causes. ----------------------
+  // bpref scores the whole returned ranking, not just the top k, so bpref well above recall@k
+  // means the relevant chunks WERE pulled and then buried below the cutoff. Blaming indexing
+  // there sends the reader upstream to fix something that is not broken.
   if (recall != null && !meets(recall, targets.recall) && !hitHigh) {
-    recs.push({
-      id: "recall-ceiling",
-      severity: "high",
-      stage: "index",
-      title: "Not all relevant chunks are being retrieved",
-      detail:
-        `Recall@${k} is ${pct(recall)}, below the ${pct(targets.recall)} target` +
-        (hit != null ? `, and hit-rate is ${pct(hit)}` : "") +
-        `. Reranking can't fix this — the missing chunks were never pulled. The fix is upstream: ` +
-        `indexing (chunking, embeddings, coverage) or retrieval breadth (query expansion, hybrid). ` +
-        `Use per-case Diagnose to see whether misses are not-in-index / missing-embedding / ` +
-        `bad-chunk (indexer) versus buried (ranking).`,
-      action: { label: "Diagnose worst cases", kind: "diagnose" },
-      basis: [`Recall@${k}`, `Hit-rate@${k}`],
-    });
+    const buried = bpref != null && bpref - recall >= 0.15;
+    recs.push(
+      buried
+        ? {
+            id: "recall-buried",
+            severity: "high",
+            stage: "rerank",
+            title: "Relevant chunks are retrieved but ranked below the cutoff",
+            detail:
+              `Recall@${k} is ${pct(recall)}, below the ${pct(targets.recall)} target, but bpref ` +
+              `is ${pct(bpref)} — bpref scores the whole returned ranking, so the relevant chunks ` +
+              `are being pulled and then buried past rank ${k}. This is a ranking problem, not an ` +
+              `indexing one: check the reranker and the score cutoff before touching chunking or ` +
+              `embeddings. Per-case Diagnose shows where each missed chunk actually landed.`,
+            action: { label: "Diagnose worst cases", kind: "diagnose" },
+            basis: [`Recall@${k}`, "bpref"],
+          }
+        : {
+            id: "recall-ceiling",
+            severity: "high",
+            stage: "index",
+            title: "Not all relevant chunks are being retrieved",
+            detail:
+              `Recall@${k} is ${pct(recall)}, below the ${pct(targets.recall)} target` +
+              (hit != null ? `, and hit-rate is ${pct(hit)}` : "") +
+              (bpref != null ? `, with bpref at ${pct(bpref)}` : "") +
+              `. Reranking can't fix this — the missing chunks were never pulled. The fix is ` +
+              `upstream: indexing (chunking, embeddings, coverage) or retrieval breadth (query ` +
+              `expansion, hybrid). Use per-case Diagnose to see whether misses are not-in-index / ` +
+              `missing-embedding / bad-chunk (indexer) versus buried (ranking).`,
+            action: { label: "Diagnose worst cases", kind: "diagnose" },
+            basis: bpref != null ? [`Recall@${k}`, `Hit-rate@${k}`, "bpref"] : [`Recall@${k}`, `Hit-rate@${k}`],
+          },
+    );
   }
 
   // --- Cutoff: precision@k is capped by how few chunks are relevant per query. ----------------
@@ -219,8 +241,11 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
 
   // --- Cross-stage rules (need By-stage data). ------------------------------------------------
   if (byStage?.available) {
+    // A stage that returned no ranking is absent, not zero. Treating its 0.0 as a measurement
+    // produced advice like "switch the production reranker, Cohere scores 0% vs 42%" about a
+    // head that never ran.
     const stage = (v: string): StageMetrics | null =>
-      byStage.stages.find((s) => s.stage === v) ?? null;
+      byStage.stages.find((s) => s.stage === v && s.available !== false) ?? null;
     const recallOf = (v: string): number | null => num(stage(v)?.recall_at_k?.[lk]);
     const ndcgOf = (v: string): number | null => num(stage(v)?.ndcg_at_k?.[lk]);
 

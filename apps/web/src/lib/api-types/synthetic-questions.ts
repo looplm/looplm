@@ -39,6 +39,8 @@ export interface SyntheticQuestionItem {
 export interface SyntheticQuestionCounts {
   chunks_sampled: number;
   chunks_used: number;
+  /** Distinct source documents behind the run. The tell for whether a benchmark is representative. */
+  documents_used?: number;
   /** Quality flag slug -> chunks it disqualified (empty, tiny, mojibake, markup_heavy, duplicate). */
   chunks_skipped: Record<string, number>;
   questions_generated: number;

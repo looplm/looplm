@@ -66,9 +66,10 @@ export function ByStageComparison({
   };
   // Best (max) value per column, to highlight the winning stage.
   const bestByCol = new Map<string, number>();
+  const scored = data.stages.filter((s) => s.available !== false);
   for (const c of cols) {
     let best = -Infinity;
-    for (const s of data.stages) {
+    for (const s of scored) {
       const v = cellValue(s, c.key);
       if (typeof v === "number" && v > best) best = v;
     }
@@ -99,12 +100,25 @@ export function ByStageComparison({
             </tr>
           </thead>
           <tbody>
-            {data.stages.map((s) => (
+            {data.stages.map((s) => {
+              const unavailable = s.available === false;
+              return (
               <tr key={s.stage} className="border-b border-gray-100/50 dark:border-slate-800/50">
-                <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{s.label}</td>
+                <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                  {s.label}
+                  {unavailable && (
+                    <span
+                      className="ml-2 px-1.5 py-0.5 rounded text-[11px] font-normal bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400"
+                      title="This stage returned no ranking for any case: it is not configured, it failed, or it had nothing to run. Its numbers are absent, not zero."
+                    >
+                      not run
+                    </span>
+                  )}
+                </td>
                 {cols.map((c) => {
-                  const v = cellValue(s, c.key);
-                  const isBest = typeof v === "number" && v === bestByCol.get(c.key) && data.stages.length > 1;
+                  const v = unavailable ? null : cellValue(s, c.key);
+                  const isBest =
+                    !unavailable && typeof v === "number" && v === bestByCol.get(c.key) && scored.length > 1;
                   return (
                     <td
                       key={c.key}
@@ -114,15 +128,16 @@ export function ByStageComparison({
                           : "text-gray-700 dark:text-slate-300"
                       }`}
                     >
-                      {c.fmt(v)}
+                      {unavailable ? "—" : c.fmt(v)}
                     </td>
                   );
                 })}
                 <td className="px-4 py-3 text-right text-gray-400 dark:text-slate-500 tabular-nums">
-                  {s.evaluated_cases}
+                  {unavailable ? "—" : s.evaluated_cases}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

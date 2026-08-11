@@ -9,6 +9,7 @@ from app.services.synthetic_questions import (
     build_user_prompt,
     chunk_from_document,
     dedupe_questions,
+    diversify,
     generate_questions,
     parse_questions,
     select_chunks,
@@ -300,3 +301,72 @@ async def test_generate_questions_with_no_chunks_makes_no_calls():
 
 async def _record(sink, n):
     sink.append(n)
+
+
+# --- document grouping + diversify ---------------------------------------------
+
+
+def test_derive_document_key_strips_the_chunk_ordinal():
+    from app.services.synthetic_questions import derive_document_key
+
+    assert (
+        derive_document_key("page_288ef0fd_attachment_Beschluss_pdf_chunk_12")
+        == "page_288ef0fd_attachment_Beschluss_pdf"
+    )
+    assert derive_document_key("page_629899265_chunk_0") == "page_629899265"
+    # Nothing to strip degrades to "no grouping", never to a wrong grouping.
+    assert derive_document_key("opaque-key") == "opaque-key"
+
+
+def test_document_key_field_wins_over_the_derived_one():
+    chunk = chunk_from_document(
+        {"id": "page_1_chunk_4", "chunk_text": GOOD_TEXT, "page_id": "page_1"}
+    )
+    assert chunk is not None
+    assert chunk.document == "page_1"
+
+
+def test_diversify_spreads_across_documents_instead_of_taking_the_head():
+    # Two long documents: the head of this list is 10 chunks of doc A, which is exactly the
+    # benchmark-of-one-PDF failure the cap exists to prevent.
+    chunks = [_chunk(f"docA_chunk_{i}") for i in range(10)] + [
+        _chunk(f"docB_chunk_{i}") for i in range(10)
+    ]
+    picked = diversify(chunks, 6, per_document_cap=3)
+    docs = {c.document for c in picked}
+    assert docs == {"docA", "docB"}
+    assert len(picked) == 6
+    assert sum(1 for c in picked if c.document == "docA") == 3
+
+
+def test_diversify_keeps_every_document_when_the_last_stratum_is_at_the_tail():
+    # The bug this reproduces: attachments came first, pages last, and a head slice dropped
+    # every page chunk.
+    chunks = [_chunk(f"attach{i}_chunk_0") for i in range(50)] + [
+        _chunk(f"page{i}_chunk_0") for i in range(7)
+    ]
+    picked = diversify(chunks, 50, per_document_cap=3)
+    assert any(c.document.startswith("page") for c in picked)
+
+
+def test_diversify_relaxes_the_cap_rather_than_returning_a_short_run():
+    chunks = [_chunk(f"docA_chunk_{i}") for i in range(10)]
+    picked = diversify(chunks, 6, per_document_cap=2)
+    # Only one document exists, so the cap cannot be honoured; a short run would be worse.
+    assert len(picked) == 6
+
+
+def test_diversify_is_deterministic_and_order_preserving():
+    chunks = [_chunk(f"docA_chunk_{i}") for i in range(4)] + [
+        _chunk(f"docB_chunk_{i}") for i in range(4)
+    ]
+    first = [c.chunk_id for c in diversify(chunks, 5, per_document_cap=3)]
+    assert first == [c.chunk_id for c in diversify(chunks, 5, per_document_cap=3)]
+    assert first[0] == "docA_chunk_0" and first[1] == "docB_chunk_0"
+
+
+def test_selection_reports_how_many_documents_it_covers():
+    selection = select_chunks(
+        [_chunk("docA_chunk_0"), _chunk("docA_chunk_1"), _chunk("docB_chunk_0")]
+    )
+    assert selection.documents == 2

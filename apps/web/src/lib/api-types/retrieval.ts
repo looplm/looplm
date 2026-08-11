@@ -310,6 +310,9 @@ export interface RerankThresholdPoint {
 export interface StageMetrics {
   stage: string;
   label: string;
+  // False when the stage returned no ranking for any case: not configured, failed, or nothing to
+  // run. Its metrics are all 0.0 and must be shown as absent, never compared against.
+  available?: boolean;
   evaluated_cases: number;
   recall_at_k: Record<string, number>;
   precision_at_k: Record<string, number>;

@@ -59,10 +59,11 @@ async def test_corpus_sampling_overdraws_and_resolves_fields():
     chunks, raw = await sample_chunks(
         provider, scope="corpus", partition_key=None, partition_value=None, sample_size=10
     )
-    # Junk is filtered after sampling, so the draw is deliberately larger than the target.
-    assert provider.corpus_calls == [15]
-    assert raw == 15
-    assert len(chunks) == 15
+    # Junk filtering and the per-document cap both eat into the draw, so it is deliberately
+    # much larger than the target.
+    assert provider.corpus_calls == [40]
+    assert raw == 40
+    assert len(chunks) == 40
     assert chunks[0].chunk_id == "page_1_chunk_0"
     assert chunks[0].title == "T"
 
@@ -99,8 +100,8 @@ async def test_partition_sampling_spreads_across_the_slice():
         sample_size=10,
     )
     # spread=True: without it, one large document supplies the whole sample.
-    assert provider.partition_calls == [("tags", "finance", 15, True)]
-    assert raw == 15
+    assert provider.partition_calls == [("tags", "finance", 40, True)]
+    assert raw == 40
     assert chunks[0].chunk_id == "c0"
     assert chunks[0].url == "https://x"
 

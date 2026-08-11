@@ -60,17 +60,25 @@ export function useRetrievalDisplay(args: {
   // The custom-agent retriever only exists when a project configured an agent endpoint AND it
   // returned a ranking (backend appends the "agent" stage then), so hide the option otherwise.
   // Same for the Cohere stages, which the backend omits unless a reranker is configured.
-  const hasAgentStage = !!byStage?.stages.some((s) => s.stage === "agent");
-  const stageValues = byStage?.stages.map((s) => s.stage);
+  // A stage that never ran is not offered as a retriever: selecting it would paint a full
+  // Overall block of zeros as though the retriever had been measured and scored nothing.
+  const ranStages = byStage?.stages.filter((s) => s.available !== false);
+  const hasAgentStage = !!ranStages?.some((s) => s.stage === "agent");
+  const stageValues = ranStages?.map((s) => s.stage);
   const hasCohereStages = !!stageValues?.some((s) => COHERE_RETRIEVERS.includes(s));
+  const unavailableStages = useMemo(
+    () => new Set((byStage?.stages ?? []).filter((s) => s.available === false).map((s) => s.stage)),
+    [byStage],
+  );
   const retrieverOptions = useMemo(
     () =>
       RETRIEVERS.filter(
         (r) =>
+          !unavailableStages.has(r.value) &&
           (r.value !== "agent" || hasAgentStage) &&
           (!COHERE_RETRIEVERS.includes(r.value) || hasCohereStages),
       ),
-    [hasAgentStage, hasCohereStages],
+    [hasAgentStage, hasCohereStages, unavailableStages],
   );
   // Prefer the stage's own (per-project) label from the response; fall back to the static one.
   const retrieverLabel =

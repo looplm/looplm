@@ -86,11 +86,31 @@ export function ResultsView({ run }: { run: SyntheticQuestionRunDetail }) {
   const skipped = Object.entries(counts.chunks_skipped ?? {}).filter(([, n]) => n > 0);
   const total = questions.length;
 
+  // A benchmark drawn from a handful of documents measures those documents, not the corpus, and
+  // its recall numbers are not a verdict on retrieval. Say so on the run rather than leaving the
+  // reader to work it out from a scoreboard.
+  const docs = counts.documents_used ?? 0;
+  const concentrated = docs > 0 && counts.chunks_used / docs > 4;
+
   return (
     <div>
+      {concentrated && (
+        <div className="rounded-xl border border-amber-100 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-3 mb-5 text-xs text-amber-900 dark:text-amber-200">
+          <p className="font-medium mb-0.5">Narrow coverage</p>
+          <p>
+            {counts.chunks_used.toLocaleString()} chunks came from only {docs.toLocaleString()}{" "}
+            document{docs === 1 ? "" : "s"}, so these questions measure those documents rather
+            than the corpus. Scores from this dataset are not a verdict on retrieval overall.
+            Sample more chunks, or scope the run to a category with more documents in it.
+          </p>
+        </div>
+      )}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         <StatCard label="Questions" value={total.toLocaleString()} />
-        <StatCard label="Chunks used" value={counts.chunks_used.toLocaleString()} />
+        <StatCard
+          label="Documents covered"
+          value={(counts.documents_used ?? 0).toLocaleString()}
+        />
         <StatCard
           label="Unanswerable"
           value={questions.filter((q) => q.style === "negative").length.toLocaleString()}
@@ -126,7 +146,8 @@ export function ResultsView({ run }: { run: SyntheticQuestionRunDetail }) {
         <ul className="space-y-0.5">
           <li>
             Sampled {counts.chunks_sampled.toLocaleString()} chunks, used{" "}
-            {counts.chunks_used.toLocaleString()}
+            {counts.chunks_used.toLocaleString()} from{" "}
+            {(counts.documents_used ?? 0).toLocaleString()} documents
             {skipped.length > 0 && (
               <>
                 {" "}

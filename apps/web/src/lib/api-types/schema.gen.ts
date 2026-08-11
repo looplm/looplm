@@ -11867,6 +11867,11 @@ export interface components {
          */
         StageMetrics: {
             /**
+             * Available
+             * @default true
+             */
+            available: boolean;
+            /**
              * Evaluated Cases
              * @default 0
              */

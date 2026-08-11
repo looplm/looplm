@@ -91,6 +91,26 @@ _TEXT_FIELDS = ["chunk_text", "content", "text", "body", "page_content"]
 _TITLE_FIELDS = ["attachment_filename", "page_title", "title", "name", "filename"]
 _URL_FIELDS = ["page_url", "attachment_url", "url", "source_url", "link"]
 _ID_FIELDS = ["id", "chunk_id", "key", "doc_id"]
+# Fields identifying the parent document a chunk belongs to, for the per-document cap.
+_PARENT_FIELDS = ["attachment_filename", "page_id", "parent_id", "document_id", "file_id"]
+
+# How many chunks one document may contribute to a run. Without a cap, a single long PDF
+# supplies the entire benchmark: index backends return a document's chunks adjacent to each
+# other, so any sample drawn from a contiguous window is really a sample of a few documents.
+DEFAULT_PER_DOCUMENT_CAP = 3
+
+# Trailing chunk ordinal in a backend-generated chunk key (Azure: ``…_chunk_7``).
+_CHUNK_ORDINAL_RE = re.compile(r"[_\-/]chunk[_\-]?\d+$", re.IGNORECASE)
+
+
+def derive_document_key(chunk_id: str) -> str:
+    """The parent document a chunk key belongs to, by stripping its trailing chunk ordinal.
+
+    Fallback for backends that expose no parent-id field: index keys almost always end in the
+    chunk's ordinal within its document. When nothing can be stripped the key stands for itself,
+    which degrades to "no grouping" rather than to a wrong grouping.
+    """
+    return _CHUNK_ORDINAL_RE.sub("", chunk_id.strip()) or chunk_id
 
 
 @dataclass
@@ -101,6 +121,13 @@ class SourceChunk:
     text: str
     title: str | None = None
     url: str | None = None
+    # Parent document, used to stop one file dominating the benchmark. Falls back to the chunk
+    # key with its ordinal stripped when the index exposes no parent field.
+    document_key: str | None = None
+
+    @property
+    def document(self) -> str:
+        return self.document_key or derive_document_key(self.chunk_id)
 
     def preview(self, limit: int = 500) -> str:
         """Short body snapshot, for the label row and the results table."""
@@ -146,6 +173,16 @@ class ChunkSelection:
     def skipped_total(self) -> int:
         return sum(self.skipped.values())
 
+    @property
+    def documents(self) -> int:
+        """How many distinct source documents the kept chunks come from.
+
+        The single best indicator of whether a run produced a benchmark or an accident: a
+        50-chunk sample spread over 40 documents measures the corpus, the same 50 chunks taken
+        from 2 documents measures those 2 documents.
+        """
+        return len({c.document for c in self.kept})
+
 
 def chunk_from_document(doc: dict) -> SourceChunk | None:
     """Build a :class:`SourceChunk` from a raw index document, resolving field names.
@@ -164,11 +201,14 @@ def chunk_from_document(doc: dict) -> SourceChunk | None:
         return None
     title_field = pick_field(keys, _TITLE_FIELDS)
     url_field = pick_field(keys, _URL_FIELDS)
+    parent_field = pick_field(keys, _PARENT_FIELDS)
+    parent = as_text(doc.get(parent_field)).strip() if parent_field else ""
     return SourceChunk(
         chunk_id=chunk_id,
         text=text,
         title=as_text(doc.get(title_field)).strip() or None if title_field else None,
         url=as_text(doc.get(url_field)).strip() or None if url_field else None,
+        document_key=parent or None,
     )
 
 
@@ -194,6 +234,89 @@ def select_chunks(candidates: Iterable[SourceChunk]) -> ChunkSelection:
             continue
         selection.kept.append(chunk)
     return selection
+
+
+def spread_order(count: int, wanted: int) -> list[int]:
+    """Indices ``0..count-1`` reordered so the first ``wanted`` are evenly spaced across the range.
+
+    Round-robin alone is not enough when there are more documents than the run needs: taking the
+    first ``wanted`` documents in list order still lands entirely in whichever content type the
+    backend happened to return first. Striding across the list first, then falling back to the
+    remainder in order, keeps the pick spread while staying deterministic.
+    """
+    if count <= 0:
+        return []
+    if wanted >= count or wanted <= 0:
+        return list(range(count))
+    step = count / wanted
+    order: list[int] = []
+    seen: set[int] = set()
+    for i in range(wanted):
+        idx = min(int(i * step), count - 1)
+        if idx not in seen:
+            seen.add(idx)
+            order.append(idx)
+    order.extend(i for i in range(count) if i not in seen)
+    return order
+
+
+def diversify(
+    chunks: Sequence[SourceChunk],
+    limit: int,
+    *,
+    per_document_cap: int = DEFAULT_PER_DOCUMENT_CAP,
+) -> list[SourceChunk]:
+    """Pick up to ``limit`` chunks spread across as many documents as possible.
+
+    Two things go wrong without this, and both were observed in practice:
+
+    * Index backends return a document's chunks adjacent to one another, so slicing the head of
+      a sample yields a contiguous run: a "50 chunk" benchmark that is really two PDFs.
+    * Slicing the head also truncates whichever stratum the backend returned last, silently
+      dropping an entire content type (e.g. every page chunk, leaving only attachments).
+
+    So the selection goes round-robin over documents, taking one chunk from each in turn, up to
+    ``per_document_cap`` passes. Document order (and chunk order within a document) is preserved
+    from the input, so the result stays deterministic and reproducible. The cap is relaxed only
+    if it would leave the run short of ``limit`` and there are chunks left to give.
+    """
+    if limit <= 0:
+        return []
+
+    grouped: dict[str, list[SourceChunk]] = {}
+    for chunk in chunks:
+        grouped.setdefault(chunk.document, []).append(chunk)
+
+    # Visit documents strided across the whole list, not in list order — otherwise a run that
+    # needs fewer documents than the sample contains takes them all from the head.
+    ordered = list(grouped.values())
+    buckets = [ordered[i] for i in spread_order(len(ordered), limit)]
+
+    picked: list[SourceChunk] = []
+    cap = max(1, per_document_cap)
+    for round_index in range(cap):
+        for bucket in buckets:
+            if len(picked) >= limit:
+                return picked
+            if round_index < len(bucket):
+                picked.append(bucket[round_index])
+
+    # Every document has given its cap and we are still short: keep going rather than return a
+    # smaller run than asked for. A relaxed cap still beats a contiguous slice, because the extra
+    # chunks are again taken one document at a time.
+    round_index = cap
+    while len(picked) < limit:
+        added = False
+        for bucket in buckets:
+            if len(picked) >= limit:
+                break
+            if round_index < len(bucket):
+                picked.append(bucket[round_index])
+                added = True
+        if not added:
+            break
+        round_index += 1
+    return picked
 
 
 def style_plan(questions_per_chunk: int) -> list[str]:

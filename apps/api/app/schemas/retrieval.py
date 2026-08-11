@@ -643,6 +643,11 @@ class StageMetrics(BaseModel):
     # agentic_cohere | agent
     stage: str
     label: str  # display label (Sparse / Dense / RRF / Reranked / Cohere rerank / Agentic / ...)
+    # False when the stage returned no ranking for any case — the head is not configured, failed,
+    # or had nothing to run (e.g. the agentic heads without planned sub-queries). Its metrics are
+    # then all 0.0, which reads as "ranks nothing correctly" when it means "never ran"; readers
+    # and the recommendation rules must skip it rather than compare against it.
+    available: bool = True
     evaluated_cases: int = 0
     recall_at_k: dict[str, float] = Field(default_factory=dict)
     precision_at_k: dict[str, float] = Field(default_factory=dict)

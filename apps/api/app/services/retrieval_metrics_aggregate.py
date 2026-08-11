@@ -182,9 +182,15 @@ def build_by_stage_metrics(
     per_case: dict[str, dict[str, Any]] = {}
     evaluated = 0
     for head, label in stage_labels:
+        rankings = retrieved_by_stage.get(head, {})
+        # A head that returned nothing for every case did not run: it is unconfigured, it errored,
+        # or it had no input (the agentic heads need planned sub-queries). Scoring it yields a row
+        # of 0.0 that reads as a measured result, and readers — including the recommendation
+        # rules — then compare a working stage against a stage that never happened.
+        available = any(rankings.values())
         m = aggregate_retrieval_metrics_from_labels(
             cases,
-            retrieved_by_stage.get(head, {}),
+            rankings,
             relevant_by_test,
             nonrelevant_by_test,
             slice_by_test,
@@ -192,12 +198,15 @@ def build_by_stage_metrics(
             ks=ks,
             dataset_by_test=dataset_by_test,
         )
-        evaluated = max(evaluated, m.evaluated_cases)
+        # Only stages that actually produced a ranking count toward the run's evaluated total.
+        if available:
+            evaluated = max(evaluated, m.evaluated_cases)
         stages.append(
             StageMetrics(
                 stage=head,
                 label=label,
-                evaluated_cases=m.evaluated_cases,
+                available=available,
+                evaluated_cases=m.evaluated_cases if available else 0,
                 recall_at_k=m.recall_at_k,
                 precision_at_k=m.precision_at_k,
                 hit_rate_at_k=m.hit_rate_at_k,
@@ -208,8 +217,11 @@ def build_by_stage_metrics(
         )
         for c in m.cases:
             slot = per_case.setdefault(c.test_id, {"input": c.input, "recall": {}, "ndcg": {}})
-            slot["recall"][head] = (c.recall_at_k or {}).get(lk)
-            slot["ndcg"][head] = (c.ndcg_at_k or {}).get(lk)
+            # Leave an unavailable stage's cells empty rather than 0 — the grid should show a
+            # gap where nothing ran, not a perfect score of zero.
+            if available:
+                slot["recall"][head] = (c.recall_at_k or {}).get(lk)
+                slot["ndcg"][head] = (c.ndcg_at_k or {}).get(lk)
 
     rows = [
         ByStageCaseMetrics(
