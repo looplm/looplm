@@ -27,6 +27,14 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
   const [azureEmbeddingDeployment, setAzureEmbeddingDeployment] = useState("");
   const [openaiEmbeddingModel, setOpenaiEmbeddingModel] = useState("");
   const [embeddingDimensions, setEmbeddingDimensions] = useState("");
+  // Which backend embeds queries. Empty = follow the evaluator LLM above; "cohere" for an index
+  // whose vectors a Cohere model built (an equal-length vector from another model is accepted by
+  // the search backend and scored against the wrong space, with no error anywhere).
+  const [embeddingProvider, setEmbeddingProvider] = useState("");
+  const [cohereEmbedEndpoint, setCohereEmbedEndpoint] = useState("");
+  const [cohereEmbedKey, setCohereEmbedKey] = useState("");
+  const [cohereEmbedKeyMask, setCohereEmbedKeyMask] = useState("");
+  const [cohereEmbedModel, setCohereEmbedModel] = useState("");
   // Masked secret values from the projects API (shown as placeholders)
   const [openaiKeyMask, setOpenaiKeyMask] = useState("");
   const [azureKeyMask, setAzureKeyMask] = useState("");
@@ -48,6 +56,11 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
       setAzureEmbeddingDeployment((s.azure_openai_embedding_deployment as string) || "");
       setOpenaiEmbeddingModel((s.openai_embedding_model as string) || "");
       setEmbeddingDimensions(s.embedding_dimensions != null ? String(s.embedding_dimensions) : "");
+      setEmbeddingProvider((s.embedding_provider as string) || "");
+      setCohereEmbedEndpoint((s.cohere_embed_endpoint as string) || "");
+      setCohereEmbedModel((s.cohere_embed_model as string) || "");
+      setCohereEmbedKey("");
+      setCohereEmbedKeyMask((s.cohere_embed_key as string) || "");
       setError("");
       setSaved(false);
       setTestResult(null);
@@ -91,13 +104,21 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
       }
       const dims = parseInt(embeddingDimensions.trim(), 10);
       settings.embedding_dimensions = Number.isFinite(dims) && dims > 0 ? dims : null;
+      settings.embedding_provider = embeddingProvider || null;
+      if (embeddingProvider === "cohere") {
+        settings.cohere_embed_endpoint = cohereEmbedEndpoint.trim();
+        settings.cohere_embed_model = cohereEmbedModel.trim();
+        if (cohereEmbedKey.trim()) settings.cohere_embed_key = cohereEmbedKey.trim();
+      }
       const updated = await updateProject(currentProjectId, { settings });
       const s = updated.settings || {};
       setOpenaiKeyMask((s.openai_api_key as string) || "");
       setAzureKeyMask((s.azure_openai_api_key as string) || "");
+      setCohereEmbedKeyMask((s.cohere_embed_key as string) || "");
       // Clear password fields after save
       setOpenaiKey("");
       setAzureKey("");
+      setCohereEmbedKey("");
       setSaved(true);
       setTestResult(null);
       setTimeout(() => setSaved(false), 3000);
@@ -236,6 +257,66 @@ export default function EvaluatorLlm({ currentProjectId, projects }: EvaluatorLl
                 placeholder="3072"
                 className={inputClass}
               />
+            </div>
+          </>
+        )}
+
+        <div className="pt-4 border-t border-gray-100 dark:border-slate-800">
+          <label className={labelClass}>Query Embedding Backend</label>
+          <select
+            value={embeddingProvider}
+            onChange={(e) => setEmbeddingProvider(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">Follow evaluator LLM (above)</option>
+            <option value="cohere">Cohere</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+            Whatever model built your index&apos;s vector field decides this, not the evaluator
+            LLM. A vector of the right length from the wrong model is accepted by the search
+            backend and scored against a space it does not belong to, so retrieval degrades to
+            noise with no error. Use &quot;Test embedding&quot; to confirm the dimensions.
+          </p>
+        </div>
+
+        {embeddingProvider === "cohere" && (
+          <>
+            <div>
+              <label className={labelClass}>Cohere Embed Endpoint</label>
+              <input
+                type="url"
+                value={cohereEmbedEndpoint}
+                onChange={(e) => setCohereEmbedEndpoint(e.target.value)}
+                placeholder="https://your-resource.services.ai.azure.com"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+                An Azure AI Foundry resource (&quot;/providers/cohere/v2/embed&quot; is appended)
+                or Cohere&apos;s own API base.
+              </p>
+            </div>
+            <div>
+              <label className={labelClass}>Cohere Embed API Key</label>
+              <input
+                type="password"
+                value={cohereEmbedKey}
+                onChange={(e) => setCohereEmbedKey(e.target.value)}
+                placeholder={cohereEmbedKeyMask || "Enter API key"}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Cohere Embed Model</label>
+              <input
+                type="text"
+                value={cohereEmbedModel}
+                onChange={(e) => setCohereEmbedModel(e.target.value)}
+                placeholder="embed-v-4-0"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+                Sent with the Embedding Dimensions above as the requested output dimension.
+              </p>
             </div>
           </>
         )}

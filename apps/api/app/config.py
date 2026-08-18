@@ -46,6 +46,18 @@ class Settings(BaseSettings):
     cohere_rerank_api_key: str = ""
     cohere_rerank_model: str = "rerank-v3.5"
 
+    # Query-embedding backend: "openai" | "azure_openai" | "cohere". Empty follows
+    # analysis_llm_provider (the pre-Cohere behaviour). Set it to "cohere" for an index whose
+    # vectors were built by a Cohere model — an Azure OpenAI vector of the same length is
+    # accepted by Azure AI Search and scored against the wrong space, silently.
+    embedding_provider: str = ""
+    # Cohere Embed (see services/query_embedding.py). Endpoint is an Azure AI Foundry resource
+    # (https://<name>.services.ai.azure.com — "/providers/cohere/v2/embed" is appended) or
+    # Cohere's own API base. Empty endpoint or key => the Cohere backend is unavailable.
+    cohere_embed_endpoint: str = ""
+    cohere_embed_api_key: str = ""
+    cohere_embed_model: str = "embed-v-4-0"
+
     # Eval runner
     eval_target_endpoint: str = ""
     eval_default_concurrency: int = 2

@@ -47,6 +47,133 @@ def test_build_query_embedder_azure_configured():
     assert emb._dimensions == 1536
 
 
+# --- Cohere embedding backend ---
+
+
+def test_build_query_embedder_cohere_selected_by_embedding_provider():
+    """``embedding_provider`` overrides the analysis-LLM provider, which stays OpenAI."""
+    from app.services.query_embedding import CohereQueryEmbedder
+
+    emb = build_query_embedder(
+        {
+            "llm_provider": "azure_openai",
+            "embedding_provider": "cohere",
+            "cohere_embed_endpoint": "https://r.services.ai.azure.com",
+            "cohere_embed_key": "k",
+            "cohere_embed_model": "embed-v-4-0",
+            "embedding_dimensions": 1536,
+        }
+    )
+    assert isinstance(emb, CohereQueryEmbedder)
+    assert emb.model == "embed-v-4-0"
+    # The Foundry route the deployment actually serves, appended to the bare resource URL.
+    assert emb.url == "https://r.services.ai.azure.com/providers/cohere/v2/embed"
+
+
+def test_build_query_embedder_cohere_none_when_half_configured():
+    # A key without an endpoint is not a usable backend; leave vector search off rather than
+    # failing per query.
+    assert (
+        build_query_embedder({"embedding_provider": "cohere", "cohere_embed_key": "k"}) is None
+    )
+
+
+def test_cohere_embed_url_uses_configured_route_verbatim():
+    from app.services.query_embedding import CohereQueryEmbedder
+
+    emb = CohereQueryEmbedder("https://api.cohere.com/v2/embed", "k", "embed-v-4-0", 1536)
+    assert emb.url == "https://api.cohere.com/v2/embed"
+
+
+class _FakeResponse:
+    def __init__(self, status_code, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("not json")
+        return self._payload
+
+
+class _FakeHttpClient:
+    """Records requests and replays queued responses."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls: list[dict] = []
+        self.closed = False
+
+    async def post(self, url, json=None, headers=None, timeout=None):
+        self.calls.append({"url": url, "json": json, "headers": headers})
+        return self._responses.pop(0)
+
+    async def aclose(self):
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_cohere_embed_sends_query_input_type_and_parses_v2_shape():
+    from app.services.query_embedding import CohereQueryEmbedder
+
+    http = _FakeHttpClient([_FakeResponse(200, {"embeddings": {"float": [[0.1, 0.2, 0.3]]}})])
+    emb = CohereQueryEmbedder("https://r.services.ai.azure.com", "k", "embed-v-4-0", 3, client=http)
+
+    assert await emb.embed("wie geht das?") == [0.1, 0.2, 0.3]
+    body = http.calls[0]["json"]
+    # Cohere embeddings are asymmetric — a document input_type here would score a document
+    # vector against the corpus.
+    assert body["input_type"] == "search_query"
+    assert body["texts"] == ["wie geht das?"]
+    assert body["output_dimension"] == 3
+    assert http.calls[0]["headers"]["api-key"] == "k"
+
+
+@pytest.mark.asyncio
+async def test_cohere_embed_falls_back_to_bearer_auth_on_401():
+    """Foundry takes api-key, Cohere's own API takes Bearer; unset tries both."""
+    from app.services.query_embedding import CohereQueryEmbedder
+
+    http = _FakeHttpClient(
+        [
+            _FakeResponse(401, text="unauthorized"),
+            _FakeResponse(200, {"embeddings": [[0.5, 0.6]]}),  # v1 response shape
+        ]
+    )
+    emb = CohereQueryEmbedder("https://api.cohere.com", "k", "embed-v-4-0", None, client=http)
+
+    assert await emb.embed("q") == [0.5, 0.6]
+    assert "api-key" in http.calls[0]["headers"]
+    assert http.calls[1]["headers"]["Authorization"] == "Bearer k"
+
+
+@pytest.mark.asyncio
+async def test_cohere_embed_rejects_dimension_mismatch():
+    """The mismatch is named here rather than surfacing as an opaque search-backend 400 —
+    or, worse, as a silently wrong ranking."""
+    from app.services.query_embedding import CohereQueryEmbedder
+
+    http = _FakeHttpClient([_FakeResponse(200, {"embeddings": {"float": [[0.1, 0.2]]}})])
+    emb = CohereQueryEmbedder("https://r.services.ai.azure.com", "k", "m", 1536, client=http)
+
+    with pytest.raises(RuntimeError, match="expected 1536"):
+        await emb.embed("q")
+
+
+@pytest.mark.asyncio
+async def test_cohere_embed_batch_preserves_order_and_closes():
+    from app.services.query_embedding import CohereQueryEmbedder
+
+    http = _FakeHttpClient([_FakeResponse(200, {"embeddings": {"float": [[0.1], [0.2]]}})])
+    emb = CohereQueryEmbedder("https://r.services.ai.azure.com", "k", "m", 1, client=http)
+
+    assert await emb.embed_batch(["a", "b"]) == [[0.1], [0.2]]
+    assert http.calls[0]["json"]["texts"] == ["a", "b"]
+    await emb.aclose()
+    assert http.closed is True
+
+
 @pytest.mark.asyncio
 async def test_embed_query_returns_none_when_no_embedder():
     # Unconfigured → None, no exception.

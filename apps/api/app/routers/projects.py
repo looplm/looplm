@@ -40,6 +40,7 @@ _SECRET_SETTINGS_KEYS = {
     "azure_openai_api_key",
     "agent_retrieval_token",
     "cohere_rerank_key",
+    "cohere_embed_key",
 }
 
 

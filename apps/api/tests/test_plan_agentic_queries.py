@@ -5,6 +5,7 @@ labeling workbench — which is every synthetic dataset, since the whole point o
 they need no human labeling. Planning is opt-in because it costs one LLM call per unplanned case.
 """
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -37,6 +38,22 @@ async def _dataset_with_gold(db, project_id, n=2):
 
 
 @pytest.fixture
+def case_sessions(db_session):
+    """Hand the pooling fan-out the test session instead of letting it open real ones.
+
+    Production gives each concurrent case its own session (an AsyncSession is not safe for
+    concurrent use), which means a real engine; the SQLite test engine holds a single
+    connection, so replaying the fixture session keeps these tests on it.
+    """
+
+    @asynccontextmanager
+    async def factory():
+        yield db_session
+
+    return factory
+
+
+@pytest.fixture
 def stubbed_pool(monkeypatch):
     """Report the index as unconnected, so no live probe is needed to exercise the plan pass."""
 
@@ -61,7 +78,7 @@ def planned(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_plan_agentic_plans_every_case_with_gold(
-    db_session, test_project, test_user, stubbed_pool, planned
+    db_session, test_project, test_user, stubbed_pool, planned, case_sessions
 ):
     dataset = await _dataset_with_gold(db_session, test_project.id)
     await rlm.compute_by_stage_metrics(
@@ -72,25 +89,43 @@ async def test_plan_agentic_plans_every_case_with_gold(
         refresh=True,
         plan_agentic=True,
         user=test_user,
+        db_factory=case_sessions,
     )
     assert sorted(planned) == ["syn-abcd1234-0001", "syn-abcd1234-0002"]
 
 
 @pytest.mark.asyncio
-async def test_planning_is_opt_in(db_session, test_project, test_user, stubbed_pool, planned):
+async def test_planning_is_opt_in(
+    db_session, test_project, test_user, stubbed_pool, planned, case_sessions
+):
     dataset = await _dataset_with_gold(db_session, test_project.id)
     await rlm.compute_by_stage_metrics(
-        db_session, test_project, [dataset], "synthetic", refresh=True, user=test_user
+        db_session,
+        test_project,
+        [dataset],
+        "synthetic",
+        refresh=True,
+        user=test_user,
+        db_factory=case_sessions,
     )
     # Default off: a metrics read must never quietly spend an LLM call per case.
     assert planned == []
 
 
 @pytest.mark.asyncio
-async def test_planning_needs_a_user(db_session, test_project, stubbed_pool, planned):
+async def test_planning_needs_a_user(
+    db_session, test_project, stubbed_pool, planned, case_sessions
+):
     dataset = await _dataset_with_gold(db_session, test_project.id)
     await rlm.compute_by_stage_metrics(
-        db_session, test_project, [dataset], "synthetic", refresh=True, plan_agentic=True, user=None
+        db_session,
+        test_project,
+        [dataset],
+        "synthetic",
+        refresh=True,
+        plan_agentic=True,
+        user=None,
+        db_factory=case_sessions,
     )
     # No user means no LLM settings to plan with; skip rather than fail the whole compute.
     assert planned == []
@@ -98,7 +133,7 @@ async def test_planning_needs_a_user(db_session, test_project, stubbed_pool, pla
 
 @pytest.mark.asyncio
 async def test_cases_without_gold_are_not_planned(
-    db_session, test_project, test_user, stubbed_pool, planned
+    db_session, test_project, test_user, stubbed_pool, planned, case_sessions
 ):
     dataset = await _dataset_with_gold(db_session, test_project.id, n=1)
     db_session.add(TestCase(dataset_id=dataset.id, test_id="syn-abcd1234-0099", prompt="Ungolded?"))
@@ -111,6 +146,7 @@ async def test_cases_without_gold_are_not_planned(
         refresh=True,
         plan_agentic=True,
         user=test_user,
+        db_factory=case_sessions,
     )
     # The aggregator drops cases without gold anyway, so planning them is wasted spend.
     assert planned == ["syn-abcd1234-0001"]
@@ -139,7 +175,7 @@ def test_plan_agentic_is_not_part_of_the_cache_key(test_project):
 
 @pytest.mark.asyncio
 async def test_pool_agent_head_failure_does_not_exclude_cases(
-    db_session, test_project, test_user, monkeypatch, planned
+    db_session, test_project, test_user, monkeypatch, planned, case_sessions
 ):
     """The pool's "agent" head must not drive the metrics agent stage's exclusions.
 
@@ -159,10 +195,35 @@ async def test_pool_agent_head_failure_does_not_exclude_cases(
 
     monkeypatch.setattr(rlm, "assemble_case_pool", pool_with_agent_head_failed)
     res = await rlm.compute_by_stage_metrics(
-        db_session, test_project, [dataset], "synthetic", refresh=True
+        db_session, test_project, [dataset], "synthetic", refresh=True, db_factory=case_sessions
     )
     by_stage = {s.stage: s for s in res.stages}
     # The real head failure is still honoured...
     assert by_stage["vector"].cases_failed == 2
     # ...but the agent head's "no ranking" is not treated as a measurement failure here.
     assert "agent" not in by_stage or by_stage.get("agent") is None
+
+
+@pytest.mark.asyncio
+async def test_pooling_opens_one_session_per_case(
+    db_session, test_project, stubbed_pool, planned, case_sessions
+):
+    """Each pooled case gets its own session rather than sharing the caller's.
+
+    An AsyncSession is not safe for concurrent use, and this fan-out runs several cases at once:
+    sharing one session deadlocks the whole compute (the first case holds the connection, the
+    rest wait forever) with no error raised and no case ever completing.
+    """
+    dataset = await _dataset_with_gold(db_session, test_project.id, n=3)
+    opened: list[int] = []
+
+    @asynccontextmanager
+    async def counting_factory():
+        opened.append(1)
+        async with case_sessions() as session:
+            yield session
+
+    await rlm.compute_by_stage_metrics(
+        db_session, test_project, [dataset], "synthetic", refresh=True, db_factory=counting_factory
+    )
+    assert len(opened) == 3

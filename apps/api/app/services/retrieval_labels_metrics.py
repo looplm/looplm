@@ -11,12 +11,15 @@ serves without touching the index or embedding API.
 from __future__ import annotations
 
 import asyncio
+from contextlib import AbstractAsyncContextManager
+from typing import Callable
 from uuid import UUID
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import async_session
 from app.index_providers.registry import build_index_provider
 from app.services.agent_retrieval import (
     AGENT_PROBE_DEPTH,
@@ -268,6 +271,7 @@ async def compute_by_stage_metrics(
     include_agent: bool = False,
     plan_agentic: bool = False,
     user: User | None = None,
+    db_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]] = async_session,
 ) -> ByStageMetricsResponse:
     """Deterministic per-stage retrieval metrics (sparse/dense/RRF/reranked/agentic) vs gold.
 
@@ -283,6 +287,9 @@ async def compute_by_stage_metrics(
     of the cache key: it is an action ("plan what's missing"), not a result dimension. Planned
     queries persist on the case, so once planned a later run without the flag reads them and
     produces the same numbers, and the panel's warm-cache read still hits.
+
+    ``db_factory`` opens the per-case sessions of the pooling fan-out (see ``_pool_case``); it is
+    a parameter so tests can hand back their own session instead of opening real ones.
     """
     if not datasets:
         return ByStageMetricsResponse(
@@ -356,15 +363,21 @@ async def compute_by_stage_metrics(
     sem = asyncio.Semaphore(PROBE_CONCURRENCY)
 
     async def _pool_case(test_id: str, query: str) -> None:
-        async with sem:
+        # Every concurrent case gets its OWN session. An AsyncSession is not safe for concurrent
+        # use: sharing the caller's session across this fan-out deadlocks the moment two cases
+        # query at once — one holds the connection and the rest wait forever, so the job hangs
+        # with a Postgres session idle in transaction and no error raised anywhere. ``project``
+        # is only read here, and the sessionmaker keeps instances usable after commit
+        # (expire_on_commit=False), so passing it across sessions is safe.
+        async with sem, db_factory() as case_db:
             # A test_id lives in one of the selected datasets; use the first with planned queries.
             agentic: list[str] = []
             for dsid in dataset_uuids:
-                agentic = await _dataset_case_agentic_queries(db, dsid, test_id)
+                agentic = await _dataset_case_agentic_queries(case_db, dsid, test_id)
                 if agentic:
                     break
             pool, _computed, connected = await assemble_case_pool(
-                db,
+                case_db,
                 project,
                 test_id,
                 str(query or ""),
