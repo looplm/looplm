@@ -1,15 +1,23 @@
-.PHONY: dev infra web api stop stop-infra logs release-patch release-minor release-major
+.PHONY: dev infra web api stop stop-infra logs secrets release-patch release-minor release-major
 
 # Start everything: infra in Docker + web and api locally with hot reload
 dev: infra web api
 
-# Start only Docker services (postgres, redis, minio)
+# Print a ready-to-paste secret block for .env (run before the first boot)
+secrets:
+	@python3 -c 'import secrets; \
+print("API_SECRET_KEY=" + secrets.token_urlsafe(48)); \
+print("POSTGRES_PASSWORD=" + secrets.token_urlsafe(24)); \
+print("REDIS_PASSWORD=" + secrets.token_urlsafe(24))'
+	@echo "# Replacing an existing API_SECRET_KEY? Set ENCRYPTION_SECRET to the old value."
+
+# Start only Docker services (postgres, redis)
 infra:
-	docker compose up -d postgres redis minio
+	docker compose up -d postgres redis
 	@echo "Waiting for postgres..."
-	@until docker compose exec postgres pg_isready -U looplm > /dev/null 2>&1; do sleep 0.5; done
+	@until docker compose exec postgres pg_isready -U $${POSTGRES_USER:-looplm} > /dev/null 2>&1; do sleep 0.5; done
 	@echo "Waiting for redis..."
-	@until docker compose exec redis redis-cli ping > /dev/null 2>&1; do sleep 0.5; done
+	@until docker compose exec redis sh -c 'redis-cli -a "$$REDIS_PASSWORD" ping' > /dev/null 2>&1; do sleep 0.5; done
 	@echo "Infrastructure ready."
 
 # Start Next.js dev server (hot reload)
@@ -34,7 +42,7 @@ stop-infra:
 
 # Tail logs from Docker services
 logs:
-	docker compose logs -f postgres redis minio
+	docker compose logs -f postgres redis
 
 # Cut a release (bump manifests, tag, push — triggers Docker Hub publish)
 release-patch:

@@ -1,4 +1,10 @@
-"""Fernet symmetric encryption for API keys."""
+"""Fernet symmetric encryption for API keys.
+
+The key is derived from ``encryption_secret``, falling back to ``api_secret_key`` so existing
+deployments keep decrypting what they already stored. Set ``ENCRYPTION_SECRET`` to the old
+``API_SECRET_KEY`` when rotating the JWT signing key - otherwise every stored integration
+credential, index-provider key and GitHub App secret becomes undecryptable.
+"""
 
 from __future__ import annotations
 
@@ -11,18 +17,26 @@ from app.config import settings
 
 
 def _derive_key(secret: str) -> bytes:
-    """Derive a 32-byte Fernet key from the API secret."""
+    """Derive a 32-byte Fernet key from the encryption secret."""
     digest = hashlib.sha256(secret.encode()).digest()
     return base64.urlsafe_b64encode(digest)
 
 
+def _encryption_secret() -> str:
+    return settings.encryption_secret or settings.api_secret_key
+
+
 _fernet: Fernet | None = None
+_fernet_secret: str | None = None
 
 
 def _get_fernet() -> Fernet:
-    global _fernet
-    if _fernet is None:
-        _fernet = Fernet(_derive_key(settings.api_secret_key))
+    """Fernet for the current secret, rebuilt if the secret changed (tests, key rotation)."""
+    global _fernet, _fernet_secret
+    secret = _encryption_secret()
+    if _fernet is None or _fernet_secret != secret:
+        _fernet = Fernet(_derive_key(secret))
+        _fernet_secret = secret
     return _fernet
 
 

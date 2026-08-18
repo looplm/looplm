@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     api_secret_key: str = "change-me-in-production"
     cors_allowed_origins: str = "http://localhost:3000,http://localhost:3001,http://localhost:3100"
 
+    # Secret the settings-encryption key is derived from. Empty => api_secret_key, which is the
+    # historical behaviour. Set this to the *old* api_secret_key when rotating api_secret_key, or
+    # every stored integration credential becomes undecryptable.
+    encryption_secret: str = ""
+
+    # Serve /docs, /redoc and /openapi.json. Off by default: the schema maps every route for
+    # anyone who can reach the host. `debug` also enables them.
+    docs_enabled: bool = False
+
     # Analysis LLM
     analysis_llm_provider: Literal["openai", "azure_openai"] = "openai"
     openai_api_key: str = ""

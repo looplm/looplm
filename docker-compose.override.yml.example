@@ -1,0 +1,14 @@
+# Copy to docker-compose.override.yml for direct host access to the data plane during
+# development. Never use this on an internet-reachable machine: Docker's port publishing
+# bypasses ufw/firewalld, so these bind to every interface.
+
+services:
+  postgres:
+    ports:
+      - "0.0.0.0:5432:5432"
+  redis:
+    ports:
+      - "0.0.0.0:6379:6379"
+  api:
+    ports:
+      - "0.0.0.0:8000:8000"

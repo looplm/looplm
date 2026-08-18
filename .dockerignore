@@ -2,3 +2,6 @@
 **/.next
 **/.venv
 **/__pycache__
+**/.env
+**/.env.*
+!**/.env.example

@@ -25,11 +25,14 @@ logger = logging.getLogger("looplm")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Guard: refuse to start with default secret key in production
-    if not settings.debug and settings.api_secret_key == "change-me-in-production":
+    # Guard: refuse to start without a real signing secret. Unconditional - `debug` used to
+    # bypass this, which made "set DEBUG=true" the fastest way to silence the error.
+    if settings.api_secret_key in ("", "change-me-in-production"):
         raise RuntimeError(
-            "FATAL: api_secret_key is set to the default value. "
-            "Set a strong API_SECRET_KEY environment variable before running in production."
+            "FATAL: API_SECRET_KEY is unset or still the shipped default. It signs every JWT.\n"
+            "Generate one with:  make secrets\n"
+            "If you are replacing an existing API_SECRET_KEY, also set ENCRYPTION_SECRET to the "
+            "old value or stored integration credentials become undecryptable."
         )
 
     # Startup: create tables if needed
@@ -202,11 +205,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await engine.dispose()
 
 
+# /docs, /redoc and /openapi.json map every route for anyone who can reach the host, so they are
+# opt-in. `scripts/dump_openapi.py` calls app.openapi() in-process and is unaffected.
+_docs_enabled = settings.docs_enabled or settings.debug
+
 app = FastAPI(
     title=settings.app_name,
     version=__version__,
     description="LoopLM — LLM debugging platform API",
     lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
 # --- CORS — env-configurable, no wildcard with credentials ---

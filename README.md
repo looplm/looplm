@@ -49,7 +49,7 @@ LangSmith / Langfuse / other sources
       Python connector layer
                 |
                 v
- FastAPI API + PostgreSQL + Redis + MinIO
+ FastAPI API + PostgreSQL + Redis
                 |
                 v
         Next.js frontend
@@ -65,19 +65,36 @@ LangSmith / Langfuse / other sources
 - Python 3.12+
 - Poetry
 
-### Docker Compose
+### Docker Compose (single host)
 
 ```bash
 cp .env.example .env
+make secrets        # generates API_SECRET_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD - paste into .env
 docker compose up --build
 ```
 
 Services:
 
 - Frontend: `http://localhost:3000`
-- API: `http://localhost:8000`
-- API docs: `http://localhost:8000/docs`
-- MinIO console: `http://localhost:9001`
+- API: reachable through the frontend at `/api/*` (not published on the host)
+- API docs: set `DOCS_ENABLED=true` in `.env`, then `http://localhost:3000/api/docs`
+
+Every port is bound to `127.0.0.1`. Docker's port publishing writes iptables rules that bypass
+`ufw`/`firewalld`, so binding the database to `0.0.0.0` on a cloud VM exposes it to the internet.
+For direct host access to Postgres or Redis while developing, copy
+`docker-compose.override.yml.example` to `docker-compose.override.yml`.
+
+### Running it on a server
+
+This compose file is not a production deployment on its own. Before exposing an instance:
+
+- Terminate TLS in a reverse proxy in front of the frontend. Bearer tokens travel in headers and
+  the compose stack speaks plain HTTP.
+- Leave `DEBUG=false`. Debug mode returns exception messages and tracebacks to clients and echoes
+  every SQL statement, including bound parameters, to the log.
+- Set every secret in the generated block, and keep `DOCS_ENABLED=false`.
+- Do not publish `5432`, `6379` or `8000` on a public interface.
+- Read [SECURITY.md](SECURITY.md).
 
 ### Local Development
 
