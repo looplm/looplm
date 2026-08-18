@@ -10,11 +10,13 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from unittest.mock import AsyncMock
 from app.config import settings
 from app.models.evaluations import EvalRun
 from app.models.github import GithubInstallation, ProjectGithubApp
 from app.models.project import Project
 from app.services import github_app
+from app.services.github_install_grant import issue_grant
 from app.services.github_app import GithubAppCreds
 
 
@@ -79,10 +81,13 @@ async def test_get_installation_returns_null_when_unset(
 
 @pytest.mark.asyncio
 async def test_select_and_disconnect_lifecycle(
-    client, auth_headers, test_project, db_session, monkeypatch
+    client, auth_headers, test_project, test_user, db_session, monkeypatch
 ) -> None:
     # Pretend the App is configured so the POST passes the enabled check.
     monkeypatch.setattr(github_app, "is_enabled", lambda creds: True)
+
+    # First link needs the grant from /callback - the installation is not yet ours.
+    grant = issue_grant(test_user.id, test_project.id, [12345])
 
     body = {
         "installation_id": 12345,
@@ -92,7 +97,7 @@ async def test_select_and_disconnect_lifecycle(
         "repo_default_branch": "main",
     }
     resp = await client.post(
-        "/api/github/installation",
+        f"/api/github/installation?grant={grant}",
         headers={**auth_headers, "X-Project-Id": str(test_project.id)},
         json=body,
     )
@@ -342,3 +347,158 @@ async def test_code_agent_trigger_uses_github_clone(
 
     # Cleanup
     shutil.rmtree(fake_clone, ignore_errors=True)
+
+
+# ── Installation binding ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_repos_rejects_unowned_installation(
+    client, auth_headers, test_project, monkeypatch
+) -> None:
+    """An installation id in a URL proves nothing - ids are small sequential integers.
+
+    The token mint must not even be reached: with a shared instance-wide App, minting a token
+    for someone else's installation is the whole vulnerability.
+    """
+    monkeypatch.setattr(github_app, "is_enabled", lambda creds: True)
+    mint = AsyncMock(side_effect=AssertionError("must not mint a token for an unowned id"))
+    monkeypatch.setattr(github_app, "fetch_installation_token", mint)
+
+    resp = await client.get(
+        "/api/github/installations/99999/repos",
+        headers={**auth_headers, "X-Project-Id": str(test_project.id)},
+    )
+    assert resp.status_code == 403
+    mint.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_repos_accepts_a_fresh_grant(
+    client, auth_headers, test_project, test_user, monkeypatch
+) -> None:
+    monkeypatch.setattr(github_app, "is_enabled", lambda creds: True)
+    monkeypatch.setattr(
+        github_app,
+        "list_installation_repos",
+        AsyncMock(return_value=[{"full_name": "acme/ok", "default_branch": "main", "private": True}]),
+    )
+    grant = issue_grant(test_user.id, test_project.id, [4242])
+
+    resp = await client.get(
+        f"/api/github/installations/4242/repos?grant={grant}",
+        headers={**auth_headers, "X-Project-Id": str(test_project.id)},
+    )
+    assert resp.status_code == 200
+    assert resp.json()[0]["full_name"] == "acme/ok"
+
+
+@pytest.mark.asyncio
+async def test_grant_is_not_transferable_between_projects(
+    client, auth_headers, test_project, test_user, db_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(github_app, "is_enabled", lambda creds: True)
+    other = Project(id=uuid4(), owner_id=test_user.id, name="Second")
+    db_session.add(other)
+    await db_session.flush()
+
+    grant = issue_grant(test_user.id, other.id, [4242])
+    resp = await client.get(
+        f"/api/github/installations/4242/repos?grant={grant}",
+        headers={**auth_headers, "X-Project-Id": str(test_project.id)},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_repos_accepts_a_linked_installation(
+    client, auth_headers, test_project, db_session, monkeypatch
+) -> None:
+    """Once linked, no grant is needed - this is the steady-state settings path."""
+    monkeypatch.setattr(github_app, "is_enabled", lambda creds: True)
+    monkeypatch.setattr(github_app, "list_installation_repos", AsyncMock(return_value=[]))
+    db_session.add(
+        GithubInstallation(
+            id=uuid4(),
+            project_id=test_project.id,
+            installation_id=777,
+            account_login="acme",
+            account_type="Organization",
+            repo_full_name="acme/widgets",
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get(
+        "/api/github/installations/777/repos",
+        headers={**auth_headers, "X-Project-Id": str(test_project.id)},
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_installation_writes_require_admin(
+    client, test_project, db_session, monkeypatch
+) -> None:
+    from app.auth import create_access_token, hash_password
+    from app.models.project_member import ProjectMember
+    from app.models.user import User
+
+    monkeypatch.setattr(github_app, "is_enabled", lambda creds: True)
+    member = User(id=uuid4(), email=f"gh-member-{uuid4().hex[:8]}@example.com",
+                  hashed_password=hash_password("pw"))
+    db_session.add(member)
+    await db_session.flush()
+    db_session.add(
+        ProjectMember(
+            id=uuid4(),
+            project_id=test_project.id,
+            user_id=member.id,
+            role="member",
+            allowed_sections=["observe", "evaluate", "improve"],
+        )
+    )
+    await db_session.flush()
+    headers = {
+        "Authorization": f"Bearer {create_access_token(member.id)}",
+        "X-Project-Id": str(test_project.id),
+    }
+
+    resp = await client.post(
+        "/api/github/installation",
+        headers=headers,
+        json={
+            "installation_id": 1,
+            "account_login": "acme",
+            "account_type": "Organization",
+            "repo_full_name": "acme/widgets",
+            "repo_default_branch": "main",
+        },
+    )
+    assert resp.status_code == 403
+
+    resp = await client.delete("/api/github/installation", headers=headers)
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_option_like_branch_is_rejected(
+    client, auth_headers, test_project, test_user, monkeypatch
+) -> None:
+    """repo_branch becomes an argv element of git clone/fetch, so "-"-prefixed refs are out."""
+    monkeypatch.setattr(github_app, "is_enabled", lambda creds: True)
+    grant = issue_grant(test_user.id, test_project.id, [31337])
+
+    resp = await client.post(
+        f"/api/github/installation?grant={grant}",
+        headers={**auth_headers, "X-Project-Id": str(test_project.id)},
+        json={
+            "installation_id": 31337,
+            "account_login": "acme",
+            "account_type": "Organization",
+            "repo_full_name": "acme/widgets",
+            "repo_default_branch": "main",
+            "repo_branch": "--upload-pack=touch /tmp/pwned",
+        },
+    )
+    assert resp.status_code == 422

@@ -10,10 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     create_access_token,
-    create_refresh_token,
     hash_password,
     verify_password,
-    verify_refresh_token,
 )
 from app.config import settings
 from app.db import get_db
@@ -21,6 +19,7 @@ from app.models.project import Project
 from app.models.project_invitation import ProjectInvitation
 from app.models.project_member import ProjectMember
 from app.models.user import User
+from app.services.auth_sessions import issue_refresh, revoke, rotate
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -88,6 +87,9 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
             role=inv.role,
             allowed_sections=inv.allowed_sections,
             allowed_pages=inv.allowed_pages,
+            # Must be carried over: NULL is read as "no write access" by require_write, and
+            # omitting it used to hand every invited member full write on their allowed pages.
+            write_pages=inv.write_pages if inv.write_pages is not None else [],
         )
         db.add(member)
         await db.delete(inv)
@@ -103,7 +105,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
     return TokenResponse(
         access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        refresh_token=await issue_refresh(db, user.id),
         expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
@@ -117,14 +119,15 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
     return TokenResponse(
         access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        refresh_token=await issue_refresh(db, user.id),
         expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    user_id = verify_refresh_token(body.refresh_token)
+    """Exchange a refresh token for a new pair. The presented token is consumed."""
+    user_id, new_refresh_token = await rotate(db, body.refresh_token)
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -133,6 +136,18 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
     return TokenResponse(
         access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+        refresh_token=new_refresh_token,
         expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
+
+
+@router.post("/logout", status_code=204)
+async def logout(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Revoke a refresh token and its rotation family.
+
+    Unauthenticated and idempotent on purpose: holding the token is the proof, and a client
+    clearing its own session must not be blocked by an already-expired access token. The
+    access token itself is stateless and lives out its remaining minutes.
+    """
+    await revoke(db, body.refresh_token)
+    return None

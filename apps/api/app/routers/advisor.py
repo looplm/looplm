@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_project, get_current_user, require_section, require_write
 from app.db import async_session, get_db
-from app.models.models import AdvisorAnalysis
+from app.models.models import AdvisorAnalysis, Integration
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.advisor import AdvisorAnalyzeRequest, AdvisorResponse, AdvisorRunResponse
@@ -30,6 +30,27 @@ router = APIRouter(prefix="/api/advisor", tags=["advisor"], dependencies=[requir
 _SUPPORTED_PROVIDERS = {"openai", "anthropic", "azure_openai"}
 
 _advisor_tasks: dict[UUID, asyncio.Task] = {}
+
+
+async def _assert_project_integration(
+    db: AsyncSession, integration_id: UUID, project_id: UUID
+) -> None:
+    """404 unless the integration belongs to the acting project.
+
+    Every route here is keyed by a caller-supplied integration id, and the persisted analyses
+    carry a nullable project_id (legacy synchronous rows), so ownership has to be established
+    from the integration rather than filtered on the analysis.
+    """
+    owned = (
+        await db.execute(
+            select(Integration.id).where(
+                Integration.id == integration_id,
+                Integration.project_id == project_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if owned is None:
+        raise HTTPException(status_code=404, detail="Integration not found")
 
 
 @router.post(
@@ -49,6 +70,7 @@ async def trigger_analysis(
     suggestions directly. With `use_repo`, resolves the project's connected repo
     and launches an async agentic run; poll `GET /{integration_id}/run`.
     """
+    await _assert_project_integration(db, integration_id, project.id)
     use_repo = bool(body and body.use_repo)
 
     if not use_repo:
@@ -149,6 +171,7 @@ async def get_run(
     project: Project = Depends(get_current_project),
 ):
     """Poll the latest async (repo-aware) advisor run for this integration."""
+    await _assert_project_integration(db, integration_id, project.id)
     result = await get_advisor_run(integration_id, project.id, db)
     if not result:
         raise HTTPException(status_code=404, detail="No advisor run found.")
@@ -162,6 +185,7 @@ async def cancel_run(
     project: Project = Depends(get_current_project),
 ):
     """Cancel a running repo-aware advisor analysis."""
+    await _assert_project_integration(db, integration_id, project.id)
     result = await db.execute(
         select(AdvisorAnalysis)
         .where(
@@ -195,9 +219,10 @@ async def cancel_run(
 async def get_suggestions(
     integration_id: UUID,
     db: AsyncSession = Depends(get_db),
-    _project: Project = Depends(get_current_project),
+    project: Project = Depends(get_current_project),
 ):
     """Get latest persisted architecture suggestions."""
+    await _assert_project_integration(db, integration_id, project.id)
     result = await get_latest_suggestions(integration_id, db)
     if not result:
         raise HTTPException(status_code=404, detail="No suggestions found. Run POST /analyze first.")

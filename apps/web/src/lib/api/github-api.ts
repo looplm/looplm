@@ -37,32 +37,49 @@ export const getGithubAuthUrl = (redirectUri: string) =>
     body: JSON.stringify({ redirect_uri: redirectUri }),
   });
 
+/**
+ * Finishing the browser flow returns a short-lived `grant` alongside the installations. It is
+ * proof that this user controls them, and the API requires it for any installation not already
+ * linked to the project, so keep it for the rest of the connect flow.
+ */
 export const completeGithubCallback = (code: string, state: string) =>
-  request<{ installations: GithubInstallationSummary[] }>("/api/github/callback", {
+  request<{ installations: GithubInstallationSummary[]; grant: string }>("/api/github/callback", {
     method: "POST",
     body: JSON.stringify({ code, state }),
   });
 
-export const listInstallationRepos = (installationId: number) =>
-  request<GithubRepo[]>(`/api/github/installations/${installationId}/repos`);
+const grantQuery = (grant?: string, separator = "?") =>
+  grant ? `${separator}grant=${encodeURIComponent(grant)}` : "";
 
-export const listRepoBranches = (installationId: number, repoFullName: string) =>
+export const listInstallationRepos = (installationId: number, grant?: string) =>
+  request<GithubRepo[]>(
+    `/api/github/installations/${installationId}/repos${grantQuery(grant)}`,
+  );
+
+export const listRepoBranches = (
+  installationId: number,
+  repoFullName: string,
+  grant?: string,
+) =>
   request<string[]>(
-    `/api/github/installations/${installationId}/branches?repo_full_name=${encodeURIComponent(repoFullName)}`,
+    `/api/github/installations/${installationId}/branches?repo_full_name=${encodeURIComponent(repoFullName)}${grantQuery(grant, "&")}`,
   );
 
 export const getProjectGithubInstallation = () =>
   request<GithubInstallation | null>("/api/github/installation");
 
-export const selectProjectGithubInstallation = (body: {
-  installation_id: number;
-  account_login: string;
-  account_type: string;
-  repo_full_name: string;
-  repo_default_branch: string | null;
-  repo_branch?: string | null;
-}) =>
-  request<GithubInstallation>("/api/github/installation", {
+export const selectProjectGithubInstallation = (
+  body: {
+    installation_id: number;
+    account_login: string;
+    account_type: string;
+    repo_full_name: string;
+    repo_default_branch: string | null;
+    repo_branch?: string | null;
+  },
+  grant?: string,
+) =>
+  request<GithubInstallation>(`/api/github/installation${grantQuery(grant)}`, {
     method: "POST",
     body: JSON.stringify(body),
   });

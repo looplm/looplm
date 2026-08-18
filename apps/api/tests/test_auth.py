@@ -165,3 +165,113 @@ async def test_refresh_with_access_token_rejected(client: AsyncClient):
 
     resp = await client.post("/api/auth/refresh", json={"refresh_token": access_token})
     assert resp.status_code == 401
+
+
+# ── Token type confinement and refresh-session lifecycle ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_rejected_as_bearer(client: AsyncClient):
+    """A refresh token must not authenticate ordinary endpoints.
+
+    get_current_user used to read only `sub`, so a 2-day refresh token worked everywhere and
+    the short access-token lifetime bought nothing.
+    """
+    reg = await client.post(
+        "/api/auth/register", json={"email": "bearertype@example.com", "password": "securepass1"}
+    )
+    refresh_token = reg.json()["refresh_token"]
+
+    resp = await client.get("/api/projects", headers={"Authorization": f"Bearer {refresh_token}"})
+    assert resp.status_code == 401
+    assert resp.headers.get("www-authenticate") == "Bearer"
+
+
+@pytest.mark.asyncio
+async def test_github_state_token_rejected_as_bearer(client: AsyncClient):
+    """The GitHub OAuth state is signed with the same key; it is not a credential."""
+    from uuid import uuid4
+
+    from app.routers.github_oauth import _issue_state
+
+    reg = await client.post(
+        "/api/auth/register", json={"email": "statetype@example.com", "password": "securepass1"}
+    )
+    assert reg.status_code == 201
+    state = _issue_state(str(uuid4()), uuid4())
+
+    resp = await client.get("/api/projects", headers={"Authorization": f"Bearer {state}"})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_non_uuid_sub_returns_401_not_500(client: AsyncClient):
+    token = jwt.encode(
+        {
+            "sub": "not-a-uuid",
+            "type": "access",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        },
+        settings.api_secret_key,
+        algorithm=ALGORITHM,
+    )
+    resp = await client.get("/api/projects", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_revokes_the_family(client: AsyncClient):
+    """Replaying a consumed refresh token kills the whole rotation chain."""
+    reg = await client.post(
+        "/api/auth/register", json={"email": "rotation@example.com", "password": "securepass1"}
+    )
+    first = reg.json()["refresh_token"]
+
+    rotated = await client.post("/api/auth/refresh", json={"refresh_token": first})
+    assert rotated.status_code == 200
+    second = rotated.json()["refresh_token"]
+
+    replay = await client.post("/api/auth/refresh", json={"refresh_token": first})
+    assert replay.status_code == 401
+
+    # The successor is revoked too - a replay means the chain is no longer trustworthy.
+    resp = await client.post("/api/auth/refresh", json={"refresh_token": second})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_revokes_refresh_token(client: AsyncClient):
+    reg = await client.post(
+        "/api/auth/register", json={"email": "logout@example.com", "password": "securepass1"}
+    )
+    refresh_token = reg.json()["refresh_token"]
+
+    resp = await client.post("/api/auth/logout", json={"refresh_token": refresh_token})
+    assert resp.status_code == 204
+
+    resp = await client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    assert resp.status_code == 401
+
+    # Idempotent: logging out twice is not an error.
+    resp = await client.post("/api/auth/logout", json={"refresh_token": refresh_token})
+    assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_unknown_refresh_jti_rejected(client: AsyncClient):
+    """A validly signed refresh token with no session row is not accepted."""
+    from uuid import uuid4
+
+    forged = jwt.encode(
+        {
+            "sub": str(uuid4()),
+            "jti": str(uuid4()),
+            "fam": str(uuid4()),
+            "type": "refresh",
+            "exp": datetime.now(timezone.utc) + timedelta(days=1),
+        },
+        settings.api_secret_key,
+        algorithm=ALGORITHM,
+    )
+    resp = await client.post("/api/auth/refresh", json={"refresh_token": forged})
+    assert resp.status_code == 401

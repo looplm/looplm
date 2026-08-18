@@ -266,6 +266,19 @@ export const register = async (email: string, password: string, inviteToken?: st
 };
 
 export const logout = () => {
+  // Revoke server-side first so the refresh token cannot be replayed, then clear locally.
+  // Best-effort: a failed call must never trap the user in a session they asked to end.
+  // Plain fetch, not request(): request() would proactively rotate the very token we are
+  // revoking and redirect on a 401.
+  const refreshToken = getRefreshToken();
+  if (refreshToken) {
+    void fetch(`${API_BASE}/api/auth/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      keepalive: true,
+    }).catch(() => undefined);
+  }
   clearToken();
   clearSelectedProjectId();
   if (typeof window !== "undefined") {

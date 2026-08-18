@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_project, get_current_user, require_project_admin
+from app.auth import get_current_user, get_path_project, require_path_project_admin
 from app.config import settings as app_settings
 from app.db import get_db
 from app.models.project import Project
@@ -25,7 +25,15 @@ from app.schemas.project_members import (
 )
 from app.services.email_service import send_invitation_email
 
-router = APIRouter(prefix="/api/projects/{project_id}/members", tags=["members"])
+# Every route authorizes against the *path* project via `get_path_project`, never
+# X-Project-Id: the two used to disagree, which let an admin of any project manage the members
+# of any other. Handlers deliberately take no `project_id` parameter, so the only project
+# identity in scope is the authorized one.
+router = APIRouter(
+    prefix="/api/projects/{project_id}/members",
+    tags=["members"],
+    dependencies=[Depends(require_path_project_admin)],
+)
 
 
 def _validate_pages(
@@ -116,23 +124,21 @@ def _build_invite_url(token: str, email: str) -> str:
 
 @router.get("", response_model=MemberListResponse)
 async def list_members(
-    project_id: UUID,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
-    _project: Project = Depends(get_current_project),
-    _admin: None = Depends(require_project_admin),
+    project: Project = Depends(get_path_project),
 ):
     # Owner row first (lives on Project.owner_id, not in project_members).
     owner_email = (
-        await db.execute(select(User.email).where(User.id == _project.owner_id))
+        await db.execute(select(User.email).where(User.id == project.owner_id))
     ).scalar_one()
-    members = [_owner_response(_project, owner_email)]
+    members = [_owner_response(project, owner_email)]
 
     # Active members
     result = await db.execute(
         select(ProjectMember, User.email)
         .join(User, User.id == ProjectMember.user_id)
-        .where(ProjectMember.project_id == project_id)
+        .where(ProjectMember.project_id == project.id)
         .order_by(ProjectMember.created_at.asc())
     )
     members += [_member_response(m, email) for m, email in result.all()]
@@ -140,7 +146,7 @@ async def list_members(
     # Pending invitations
     result = await db.execute(
         select(ProjectInvitation)
-        .where(ProjectInvitation.project_id == project_id)
+        .where(ProjectInvitation.project_id == project.id)
         .order_by(ProjectInvitation.created_at.asc())
     )
     for inv in result.scalars().all():
@@ -151,12 +157,10 @@ async def list_members(
 
 @router.post("", response_model=InviteResponse, status_code=201)
 async def invite_member(
-    project_id: UUID,
     body: MemberInvite,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
-    _project: Project = Depends(get_current_project),
-    _admin: None = Depends(require_project_admin),
+    project: Project = Depends(get_path_project),
 ):
     # Validate sections
     invalid = set(body.allowed_sections) - set(ALL_SECTIONS)
@@ -175,12 +179,12 @@ async def invite_member(
 
     if target_user:
         # User exists — create membership directly
-        if target_user.id == _project.owner_id:
+        if target_user.id == project.owner_id:
             raise HTTPException(status_code=400, detail="Cannot add the project owner as a member")
 
         result = await db.execute(
             select(ProjectMember).where(
-                ProjectMember.project_id == project_id,
+                ProjectMember.project_id == project.id,
                 ProjectMember.user_id == target_user.id,
             )
         )
@@ -188,7 +192,7 @@ async def invite_member(
             raise HTTPException(status_code=409, detail="User is already a member of this project")
 
         member = ProjectMember(
-            project_id=project_id,
+            project_id=project.id,
             user_id=target_user.id,
             role=body.role,
             allowed_sections=body.allowed_sections,
@@ -212,7 +216,7 @@ async def invite_member(
     # Check for existing pending invitation
     result = await db.execute(
         select(ProjectInvitation).where(
-            ProjectInvitation.project_id == project_id,
+            ProjectInvitation.project_id == project.id,
             ProjectInvitation.email == body.email,
         )
     )
@@ -224,7 +228,7 @@ async def invite_member(
         )
 
     invitation = ProjectInvitation(
-        project_id=project_id,
+        project_id=project.id,
         invited_by=_user.id,
         email=body.email,
         role=body.role,
@@ -240,7 +244,7 @@ async def invite_member(
     email_sent = send_invitation_email(
         to=body.email,
         inviter_email=_user.email,
-        project_name=_project.name,
+        project_name=project.name,
         invite_url=invite_url,
     )
 
@@ -290,19 +294,17 @@ def _apply_update(
 
 @router.patch("/{member_id}", response_model=MemberResponse)
 async def update_member(
-    project_id: UUID,
     member_id: UUID,
     body: MemberUpdate,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
-    _project: Project = Depends(get_current_project),
-    _admin: None = Depends(require_project_admin),
+    project: Project = Depends(get_path_project),
 ):
     # Try active member first
     result = await db.execute(
         select(ProjectMember).where(
             ProjectMember.id == member_id,
-            ProjectMember.project_id == project_id,
+            ProjectMember.project_id == project.id,
         )
     )
     member = result.scalar_one_or_none()
@@ -318,7 +320,7 @@ async def update_member(
     result = await db.execute(
         select(ProjectInvitation).where(
             ProjectInvitation.id == member_id,
-            ProjectInvitation.project_id == project_id,
+            ProjectInvitation.project_id == project.id,
         )
     )
     inv = result.scalar_one_or_none()
@@ -333,18 +335,16 @@ async def update_member(
 
 @router.delete("/{member_id}", status_code=204)
 async def remove_member(
-    project_id: UUID,
     member_id: UUID,
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
-    _project: Project = Depends(get_current_project),
-    _admin: None = Depends(require_project_admin),
+    project: Project = Depends(get_path_project),
 ):
     # Try active member
     result = await db.execute(
         select(ProjectMember).where(
             ProjectMember.id == member_id,
-            ProjectMember.project_id == project_id,
+            ProjectMember.project_id == project.id,
         )
     )
     member = result.scalar_one_or_none()
@@ -356,7 +356,7 @@ async def remove_member(
     result = await db.execute(
         select(ProjectInvitation).where(
             ProjectInvitation.id == member_id,
-            ProjectInvitation.project_id == project_id,
+            ProjectInvitation.project_id == project.id,
         )
     )
     inv = result.scalar_one_or_none()

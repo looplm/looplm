@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
-REFRESH_TOKEN_EXPIRE_DAYS = 7
+REFRESH_TOKEN_EXPIRE_DAYS = 2
 
 INGEST_KEY_PREFIX = "llm_sk_"
 
@@ -52,46 +52,134 @@ def create_access_token(user_id: UUID, expires_delta: timedelta | None = None) -
     return jwt.encode(payload, settings.api_secret_key, algorithm=ALGORITHM)
 
 
-def create_refresh_token(user_id: UUID) -> str:
+def create_refresh_token(
+    user_id: UUID, *, jti: UUID | None = None, family_id: UUID | None = None
+) -> tuple[str, UUID, UUID, datetime]:
+    """Mint a refresh token.
+
+    Returns ``(token, jti, family_id, expires_at)`` so the caller can persist the matching
+    `RefreshSession` row - a refresh token is only accepted while its row is live.
+    """
     issued_at = datetime.now(timezone.utc)
     expire = issued_at + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    payload = {"sub": str(user_id), "exp": expire, "iat": issued_at, "jti": str(uuid4()), "type": "refresh"}
-    return jwt.encode(payload, settings.api_secret_key, algorithm=ALGORITHM)
+    token_jti = jti or uuid4()
+    token_family = family_id or token_jti
+    payload = {
+        "sub": str(user_id),
+        "exp": expire,
+        "iat": issued_at,
+        "jti": str(token_jti),
+        "fam": str(token_family),
+        "type": "refresh",
+    }
+    return (
+        jwt.encode(payload, settings.api_secret_key, algorithm=ALGORITHM),
+        token_jti,
+        token_family,
+        expire,
+    )
 
 
-def verify_refresh_token(token: str) -> UUID:
-    """Decode and validate a refresh token. Returns the user ID from the sub claim."""
+def decode_refresh_token(token: str) -> tuple[UUID, UUID, UUID | None]:
+    """Decode and validate a refresh token's signature and claims.
+
+    Returns ``(user_id, jti, family_id)``. Says nothing about whether the token has been
+    revoked - that is a database question, see `services.auth_sessions.rotate`.
+    """
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token"
+    )
     try:
         payload = jwt.decode(token, settings.api_secret_key, algorithms=[ALGORITHM])
-        if payload.get("type") != "refresh":
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
-        user_id: str | None = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-        return UUID(user_id)
-    except (JWTError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+    except JWTError:
+        raise invalid
+    if payload.get("type") != "refresh":
+        raise invalid
+    try:
+        user_id = UUID(str(payload.get("sub")))
+        jti = UUID(str(payload.get("jti")))
+    except (TypeError, ValueError):
+        raise invalid
+    fam_raw = payload.get("fam")
+    try:
+        family_id = UUID(str(fam_raw)) if fam_raw else None
+    except (TypeError, ValueError):
+        family_id = None
+    return user_id, jti, family_id
 
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Dependency that extracts and validates JWT, returns the User."""
-    token = credentials.credentials
-    try:
-        payload = jwt.decode(token, settings.api_secret_key, algorithms=[ALGORITHM])
-        user_id: str | None = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    """Dependency that extracts and validates an access JWT, returns the User.
 
-    result = await db.execute(select(User).where(User.id == UUID(user_id)))
+    The ``type`` claim is mandatory. Every token this app signs uses the same key and algorithm
+    (refresh tokens, the GitHub OAuth state, verification links), so without the claim check
+    any of them authenticates every endpoint.
+    """
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(credentials.credentials, settings.api_secret_key, algorithms=[ALGORITHM])
+    except JWTError:
+        raise invalid
+    if payload.get("type") != "access":
+        raise invalid
+    try:
+        user_uuid = UUID(str(payload.get("sub")))
+    except (TypeError, ValueError):
+        raise invalid
+
+    result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
+
+
+async def _load_project_for_user(
+    db: AsyncSession, user: User, project_id: UUID
+) -> Project | None:
+    """The project, if *user* owns it or is a member of it. None otherwise."""
+    # Ownership first - owners have no ProjectMember row.
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.owner_id == user.id)
+    )
+    project = result.scalar_one_or_none()
+    if project is not None:
+        return project
+    result = await db.execute(
+        select(Project)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
+        .where(Project.id == project_id, ProjectMember.user_id == user.id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_path_project(
+    project_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Project:
+    """Resolve the project named in the URL path and assert the caller belongs to it.
+
+    X-Project-Id is ignored on purpose. Authorizing against the header while querying by the
+    path parameter is how cross-tenant access happens, so any router mounted under
+    ``/api/projects/{project_id}/...`` must authorize against the path - the path *is* the
+    resource identity.
+    """
+    project = await _load_project_for_user(db, user, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
 
 
 async def get_current_project(
@@ -101,7 +189,8 @@ async def get_current_project(
 ) -> Project:
     """Dependency that resolves the active project from X-Project-Id header.
 
-    Access is granted if the user owns the project OR is a member.
+    Access is granted if the user owns the project OR is a member. Do not use this on a route
+    that also takes a ``project_id`` path parameter - see `get_path_project`.
     """
     if x_project_id:
         try:
@@ -109,19 +198,7 @@ async def get_current_project(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid project ID format")
 
-        # Check ownership first
-        result = await db.execute(
-            select(Project).where(Project.id == project_uuid, Project.owner_id == _user.id)
-        )
-        project = result.scalar_one_or_none()
-        if not project:
-            # Check membership
-            result = await db.execute(
-                select(Project)
-                .join(ProjectMember, ProjectMember.project_id == Project.id)
-                .where(Project.id == project_uuid, ProjectMember.user_id == _user.id)
-            )
-            project = result.scalar_one_or_none()
+        project = await _load_project_for_user(db, _user, project_uuid)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         return project
@@ -287,7 +364,9 @@ def require_write(section: str, page: str):
         assert member is not None  # guaranteed by _assert_read_access
         if member.role == "admin":
             return
-        if member.write_pages is not None and page not in member.write_pages:
+        # Fail closed. NULL used to mean "legacy full write", which silently upgraded every
+        # invited member to read-write (the invitation path never copied write_pages).
+        if member.write_pages is None or page not in member.write_pages:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Read-only access to the {page} page; write permission required",
@@ -296,26 +375,38 @@ def require_write(section: str, page: str):
     return Depends(_check_write)
 
 
+async def _assert_project_admin(user: User, project: Project, db: AsyncSession) -> None:
+    """Raise 403 unless *user* owns *project* or is an admin member of it."""
+    if project.owner_id == user.id:
+        return
+    member = await _load_member(user, project, db)
+    if not member or member.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+
 async def require_project_admin(
     user: User = Depends(get_current_user),
     project: Project = Depends(get_current_project),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Dependency that ensures the current user is the project owner or an admin member."""
-    if project.owner_id == user.id:
-        return
-    result = await db.execute(
-        select(ProjectMember).where(
-            ProjectMember.project_id == project.id,
-            ProjectMember.user_id == user.id,
-        )
-    )
-    member = result.scalar_one_or_none()
-    if not member or member.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
-        )
+    await _assert_project_admin(user, project, db)
+
+
+async def require_path_project_admin(
+    user: User = Depends(get_current_user),
+    project: Project = Depends(get_path_project),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """`require_project_admin` for routers mounted under ``/api/projects/{project_id}/...``.
+
+    Resolves the project from the path, so the header cannot be used to authorize against one
+    project while the handler reads or writes another.
+    """
+    await _assert_project_admin(user, project, db)
 
 
 def _is_instance_owner_email(email: str) -> bool:

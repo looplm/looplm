@@ -334,6 +334,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logout
+         * @description Revoke a refresh token and its rotation family.
+         *
+         *     Unauthenticated and idempotent on purpose: holding the token is the proof, and a client
+         *     clearing its own session must not be blocked by an already-expired access token. The
+         *     access token itself is stateless and lives out its remaining minutes.
+         */
+        post: operations["logout_api_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/refresh": {
         parameters: {
             query?: never;
@@ -343,7 +367,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Refresh */
+        /**
+         * Refresh
+         * @description Exchange a refresh token for a new pair. The presented token is consumed.
+         */
         post: operations["refresh_api_auth_refresh_post"];
         delete?: never;
         options?: never;
@@ -5646,6 +5673,8 @@ export interface components {
         };
         /** CallbackResponse */
         CallbackResponse: {
+            /** Grant */
+            grant: string;
             /** Installations */
             installations: components["schemas"]["CallbackInstallation"][];
         };
@@ -13970,6 +13999,37 @@ export interface operations {
             };
         };
     };
+    logout_api_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     refresh_api_auth_refresh_post: {
         parameters: {
             query?: never;
@@ -17574,7 +17634,10 @@ export interface operations {
     };
     select_installation_api_github_installation_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grant returned by /callback */
+                grant?: string | null;
+            };
             header?: {
                 "x-project-id"?: string | null;
             };
@@ -17640,6 +17703,8 @@ export interface operations {
         parameters: {
             query: {
                 repo_full_name: string;
+                /** @description Grant returned by /callback */
+                grant?: string | null;
             };
             header?: {
                 "x-project-id"?: string | null;
@@ -17673,7 +17738,10 @@ export interface operations {
     };
     list_repos_api_github_installations__installation_id__repos_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Grant returned by /callback */
+                grant?: string | null;
+            };
             header?: {
                 "x-project-id"?: string | null;
             };
@@ -20263,9 +20331,7 @@ export interface operations {
     list_members_api_projects__project_id__members_get: {
         parameters: {
             query?: never;
-            header?: {
-                "x-project-id"?: string | null;
-            };
+            header?: never;
             path: {
                 project_id: string;
             };
@@ -20296,9 +20362,7 @@ export interface operations {
     invite_member_api_projects__project_id__members_post: {
         parameters: {
             query?: never;
-            header?: {
-                "x-project-id"?: string | null;
-            };
+            header?: never;
             path: {
                 project_id: string;
             };
@@ -20333,12 +20397,10 @@ export interface operations {
     remove_member_api_projects__project_id__members__member_id__delete: {
         parameters: {
             query?: never;
-            header?: {
-                "x-project-id"?: string | null;
-            };
+            header?: never;
             path: {
-                project_id: string;
                 member_id: string;
+                project_id: string;
             };
             cookie?: never;
         };
@@ -20365,12 +20427,10 @@ export interface operations {
     update_member_api_projects__project_id__members__member_id__patch: {
         parameters: {
             query?: never;
-            header?: {
-                "x-project-id"?: string | null;
-            };
+            header?: never;
             path: {
-                project_id: string;
                 member_id: string;
+                project_id: string;
             };
             cookie?: never;
         };

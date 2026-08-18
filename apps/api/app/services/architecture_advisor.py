@@ -154,6 +154,10 @@ async def get_latest_suggestions(
 ) -> AdvisorResponse | None:
     """Return the most recent *completed* advisor analysis for an integration.
 
+    Does not check tenancy: ``AdvisorAnalysis.project_id`` is nullable for legacy synchronous
+    rows, so filtering on it here would hide them. Callers must first establish that the
+    integration belongs to the acting project (see ``routers.advisor._assert_project_integration``).
+
     In-flight / failed async repo runs are skipped so a pending or failed run
     never shadows the last good set of suggestions. Legacy rows have a NULL
     status and are treated as completed.

@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from app.auth import create_access_token, hash_password
 from app.models.project_member import ProjectMember
@@ -80,16 +81,23 @@ async def test_admin_member_can_write(client, db_session, test_project):
 
 
 @pytest.mark.asyncio
-async def test_member_legacy_null_write_pages_can_write(client, db_session, test_project):
-    """Members with write_pages=null (pre-040) retain full write access."""
+async def test_member_null_write_pages_is_read_only(client, db_session, test_project):
+    """write_pages=null fails closed.
+
+    It used to mean "legacy full write", which combined with the registration path never
+    copying write_pages off an invitation to silently give every invited member write access.
+    Migration 092 materialises existing NULLs so nobody loses access they had.
+    """
     _, headers = await _create_member(
         db_session, test_project,
         allowed_pages=["evaluations"],
         write_pages=None,
     )
+    resp = await client.get("/api/evals", headers=headers)
+    assert resp.status_code == 200
     resp = await client.post("/api/evals/import", headers=headers,
                              json=_valid_eval_import_body())
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -235,3 +243,55 @@ async def test_member_with_overview_page_is_allowed(client, db_session, test_pro
     assert resp.status_code == 200
     resp = await client.get("/api/overview/sources", headers=headers)
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_invited_readonly_member_stays_readonly_after_register(
+    client, db_session, test_project
+):
+    """Accepting a read-only invitation must not confer write access.
+
+    invite_member stores write_pages=[] for a read-only invite, but the registration path
+    dropped the field, so it landed NULL and require_write read NULL as legacy full write.
+    """
+    from app.models.project_invitation import ProjectInvitation
+
+    email = f"invited-{uuid4().hex[:8]}@example.com"
+    token = uuid4().hex
+    db_session.add(
+        ProjectInvitation(
+            id=uuid4(),
+            project_id=test_project.id,
+            invited_by=test_project.owner_id,
+            email=email,
+            token=token,
+            role="member",
+            allowed_sections=["evaluate"],
+            allowed_pages=["evaluations"],
+            write_pages=[],
+        )
+    )
+    await db_session.flush()
+
+    reg = await client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "securepass1", "invite_token": token},
+    )
+    assert reg.status_code == 201
+    headers = {
+        "Authorization": f"Bearer {reg.json()['access_token']}",
+        "X-Project-Id": str(test_project.id),
+    }
+
+    resp = await client.get("/api/evals", headers=headers)
+    assert resp.status_code == 200
+    resp = await client.post("/api/evals/import", headers=headers,
+                             json=_valid_eval_import_body())
+    assert resp.status_code == 403
+
+    member = (
+        await db_session.execute(
+            select(ProjectMember).where(ProjectMember.project_id == test_project.id)
+        )
+    ).scalars().all()
+    assert [m.write_pages for m in member if m.allowed_pages == ["evaluations"]] == [[]]

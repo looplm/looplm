@@ -9,14 +9,15 @@ credentials via `github_app.resolve_creds` before talking to GitHub.
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +35,7 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.services import github_app
+from app.services.github_install_grant import assert_installation_allowed, issue_grant
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,15 @@ class CallbackInstallation(BaseModel):
 
 class CallbackResponse(BaseModel):
     installations: list[CallbackInstallation]
+    # Short-lived proof that this user controls the listed installations. Required by the
+    # /installations/* lookups until one of them is linked to the project.
+    grant: str
+
+
+# Git treats a leading "-" as an option, and both of these end up as argv elements of
+# `git clone`/`git fetch` (see services/github_app.py).
+_GIT_REF_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]*$")
+_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
 
 class SelectInstallationRequest(BaseModel):
@@ -81,6 +92,22 @@ class SelectInstallationRequest(BaseModel):
     repo_full_name: str
     repo_default_branch: str | None = None
     repo_branch: str | None = None  # branch to sync; falls back to default when omitted
+
+    @field_validator("repo_full_name")
+    @classmethod
+    def _check_repo_full_name(cls, v: str) -> str:
+        if not _REPO_NAME_RE.match(v):
+            raise ValueError("repo_full_name must look like owner/repo")
+        return v
+
+    @field_validator("repo_default_branch", "repo_branch")
+    @classmethod
+    def _check_branch(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return v
+        if len(v) > 255 or not _GIT_REF_RE.match(v) or ".." in v:
+            raise ValueError("Invalid branch name")
+        return v
 
 
 class InstallationResponse(BaseModel):
@@ -199,6 +226,7 @@ async def github_auth_url(
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
     user: User = Depends(get_current_user),
+    _admin: None = Depends(require_project_admin),
 ) -> AuthUrlResponse:
     """Return the GitHub authorize URL the frontend should redirect the user to."""
     creds = await github_app.resolve_creds(db, project.id)
@@ -223,6 +251,15 @@ async def github_callback(
     short-lived installation tokens.
     """
     project_id = _decode_state(body.state, expected_user_id=str(user.id))
+
+    # Linking a repo is an admin action; the state proves which project, so check membership
+    # against that project rather than the header-resolved one.
+    project = (
+        await db.execute(select(Project).where(Project.id == project_id))
+    ).scalar_one_or_none()
+    if project is None or not await _is_project_admin(db, user, project):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     creds = await github_app.resolve_creds(db, project_id)
     if not github_app.is_enabled(creds):
         raise HTTPException(status_code=503, detail="GitHub App not configured")
@@ -232,6 +269,7 @@ async def github_callback(
     except github_app.GithubAppError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    installation_ids = [int(item["id"]) for item in installs]
     return CallbackResponse(
         installations=[
             CallbackInstallation(
@@ -240,17 +278,22 @@ async def github_callback(
                 account_type=item["account"].get("type", "User"),
             )
             for item in installs
-        ]
+        ],
+        # Completing the browser flow is the only point at which we know the user controls
+        # these installations, so that fact is signed here and required downstream.
+        grant=issue_grant(user.id, project_id, installation_ids),
     )
 
 
 @router.get("/installations/{installation_id}/repos", response_model=list[RepoListItem])
 async def list_repos(
     installation_id: int,
+    grant: str | None = Query(None, description="Grant returned by /callback"),
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
     _user: User = Depends(get_current_user),
 ) -> list[RepoListItem]:
+    await assert_installation_allowed(db, project, _user, installation_id, grant)
     creds = await github_app.resolve_creds(db, project.id)
     if not github_app.is_enabled(creds):
         raise HTTPException(status_code=503, detail="GitHub App not configured")
@@ -272,11 +315,13 @@ async def list_repos(
 async def list_branches(
     installation_id: int,
     repo_full_name: str,
+    grant: str | None = Query(None, description="Grant returned by /callback"),
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
     _user: User = Depends(get_current_user),
 ) -> list[str]:
     """List branch names for a repo, so the user can pick which one to sync."""
+    await assert_installation_allowed(db, project, _user, installation_id, grant)
     creds = await github_app.resolve_creds(db, project.id)
     if not github_app.is_enabled(creds):
         raise HTTPException(status_code=503, detail="GitHub App not configured")
@@ -302,10 +347,13 @@ async def get_installation(
 @router.post("/installation", response_model=InstallationResponse)
 async def select_installation(
     body: SelectInstallationRequest,
+    grant: str | None = Query(None, description="Grant returned by /callback"),
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
     _user: User = Depends(get_current_user),
+    _admin: None = Depends(require_project_admin),
 ) -> GithubInstallation:
+    await assert_installation_allowed(db, project, _user, body.installation_id, grant)
     creds = await github_app.resolve_creds(db, project.id)
     if not github_app.is_enabled(creds):
         raise HTTPException(status_code=503, detail="GitHub App not configured")
@@ -357,6 +405,7 @@ async def disconnect_installation(
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_current_project),
     _user: User = Depends(get_current_user),
+    _admin: None = Depends(require_project_admin),
 ) -> None:
     row = (
         await db.execute(

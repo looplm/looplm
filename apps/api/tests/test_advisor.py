@@ -330,3 +330,88 @@ async def test_get_advisor_run_404_when_none(
 ):
     resp = await client.get(f"/api/advisor/{test_integration.id}/run", headers=auth_headers)
     assert resp.status_code == 404
+
+
+# ── Tenancy ───────────────────────────────────────────────────────────────
+
+
+async def _foreign_integration(db_session):
+    """An integration belonging to a different project."""
+    from app.auth import hash_password
+    from app.models.models import Integration, IntegrationType
+    from app.models.project import Project
+    from app.models.user import User
+
+    owner = User(id=uuid4(), email=f"adv-owner-{uuid4().hex[:8]}@example.com",
+                 hashed_password=hash_password("pw"))
+    db_session.add(owner)
+    await db_session.flush()
+    project = Project(id=uuid4(), owner_id=owner.id, name="Other Tenant")
+    db_session.add(project)
+    await db_session.flush()
+    from app.encryption import encrypt_api_key
+
+    integration = Integration(
+        id=uuid4(),
+        project_id=project.id,
+        type=IntegrationType.langfuse,
+        name="theirs",
+        base_url="https://cloud.langfuse.com",
+        api_key=encrypt_api_key("secret"),
+    )
+    db_session.add(integration)
+    await db_session.flush()
+    return integration
+
+
+@pytest.mark.asyncio
+async def test_suggestions_of_foreign_integration_is_404(
+    client: AsyncClient, auth_headers, db_session
+):
+    """get_latest_suggestions filters on integration_id only, so the router must scope it."""
+    foreign = await _foreign_integration(db_session)
+    db_session.add(
+        AdvisorAnalysis(
+            id=uuid4(),
+            integration_id=foreign.id,
+            project_id=foreign.project_id,
+            status="completed",
+            suggestions=[],
+            analyzed_at=datetime.now(timezone.utc),
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get(f"/api/advisor/{foreign.id}/suggestions", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_analyze_foreign_integration_writes_no_analysis(
+    client: AsyncClient, auth_headers, db_session
+):
+    from sqlalchemy import select
+
+    foreign = await _foreign_integration(db_session)
+    resp = await client.post(
+        f"/api/advisor/{foreign.id}/analyze", headers=auth_headers, json={"use_repo": True}
+    )
+    assert resp.status_code == 404
+
+    rows = (
+        await db_session.execute(
+            select(AdvisorAnalysis).where(AdvisorAnalysis.integration_id == foreign.id)
+        )
+    ).scalars().all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_run_and_cancel_of_foreign_integration_is_404(
+    client: AsyncClient, auth_headers, db_session
+):
+    foreign = await _foreign_integration(db_session)
+    resp = await client.get(f"/api/advisor/{foreign.id}/run", headers=auth_headers)
+    assert resp.status_code == 404
+    resp = await client.post(f"/api/advisor/{foreign.id}/cancel", headers=auth_headers)
+    assert resp.status_code == 404

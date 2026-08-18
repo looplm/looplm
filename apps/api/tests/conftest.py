@@ -23,6 +23,7 @@ from app.models.chunk_labels import (  # noqa: F401 — register tables for crea
     TestCaseLabelingStatus,
 )
 from app.models.retrieval_runs import RetrievalRun  # noqa: F401 — register table for create_all
+from app.models.auth_session import RefreshSession  # noqa: F401 - register table for create_all
 
 # ---------------------------------------------------------------------------
 # Patch PostgreSQL types to work with SQLite before table creation

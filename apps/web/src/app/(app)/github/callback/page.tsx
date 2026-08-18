@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   completeGithubCallback,
@@ -101,6 +101,10 @@ export default function GithubCallbackPage() {
   const [branches, setBranches] = useState<string[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchFilter, setBranchFilter] = useState("");
+  // Proof from /callback that this user controls the listed installations. The API requires it
+  // until one of them is linked to the project. A ref, not state, because the single-installation
+  // path calls handlePickInstallation before a state update would have landed.
+  const grantRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,6 +122,7 @@ export default function GithubCallbackPage() {
       try {
         const data = await promise;
         if (cancelled) return;
+        grantRef.current = data.grant;
         setInstallations(data.installations);
         if (data.installations.length === 0) {
           setPhase("error");
@@ -149,7 +154,7 @@ export default function GithubCallbackPage() {
     setReposLoading(true);
     setFilter("");
     try {
-      const list = await listInstallationRepos(inst.installation_id);
+      const list = await listInstallationRepos(inst.installation_id, grantRef.current);
       setRepos(list);
     } catch (e: unknown) {
       setPhase("error");
@@ -167,7 +172,11 @@ export default function GithubCallbackPage() {
     setBranchFilter("");
     setBranches([]);
     try {
-      const list = await listRepoBranches(selectedInstallation.installation_id, repo.full_name);
+      const list = await listRepoBranches(
+        selectedInstallation.installation_id,
+        repo.full_name,
+        grantRef.current,
+      );
       setBranches(list);
     } catch (e: unknown) {
       setPhase("error");
@@ -181,14 +190,17 @@ export default function GithubCallbackPage() {
     if (!selectedInstallation || !selectedRepo) return;
     setPhase("saving");
     try {
-      await selectProjectGithubInstallation({
-        installation_id: selectedInstallation.installation_id,
-        account_login: selectedInstallation.account_login,
-        account_type: selectedInstallation.account_type,
-        repo_full_name: selectedRepo.full_name,
-        repo_default_branch: selectedRepo.default_branch,
-        repo_branch: branch,
-      });
+      await selectProjectGithubInstallation(
+        {
+          installation_id: selectedInstallation.installation_id,
+          account_login: selectedInstallation.account_login,
+          account_type: selectedInstallation.account_type,
+          repo_full_name: selectedRepo.full_name,
+          repo_default_branch: selectedRepo.default_branch,
+          repo_branch: branch,
+        },
+        grantRef.current,
+      );
       setPhase("done");
       // Hand control back to Settings so the user lands where they came from.
       setTimeout(() => router.replace("/settings"), 800);
