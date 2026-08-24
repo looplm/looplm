@@ -17,6 +17,7 @@ from azure.core.credentials import AzureKeyCredential
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.indexes.aio import SearchIndexClient
 
+from app.index_providers.chunk_quality_common import TEXT_FIELDS
 from app.index_providers.base import (
     BaseIndexProvider,
     CorpusDoc,
@@ -287,6 +288,28 @@ class AzureSearchIndexProvider(BaseIndexProvider):
                     found[str(b["value"])] = int(b.get("count") or 0)
         return found
 
+    async def _content_field(self) -> str | None:
+        """The searchable field holding the chunk's text, or None if the index has none.
+
+        Used to scope the keyword arm. Without it Azure searches EVERY searchable field, and on an
+        index with a title-and-metadata scoring profile that is not a measurement of BM25 at all:
+        on `prod-index-2026-08` the default profile weights `page_title` and `stichwoerter` 3.0,
+        `prozess`/`thema` 2.5 and `chunk_text` 1.0 — the content lowest of the fifteen — while those
+        metadata fields are page-level, identical on every chunk of a page. A term hitting one lifts
+        all of a page's chunks equally, so the ranking cannot pick the chunk that answers the
+        question. Measured over 90 synthetic questions, scoping the text arm to the content field
+        moved recall@10 from 28.9% to 52.2% and recall@1 from 12.2% to 26.7%.
+
+        rde-gpt already does this (`CONTENT_SEARCH_FIELDS = ['chunk_text']`), so an unscoped probe
+        here was measuring something the application never runs.
+        """
+        fields = await self._get_fields()
+        for candidate in TEXT_FIELDS:
+            info = fields.get(candidate)
+            if info is not None and info.searchable:
+                return info.name
+        return None
+
     async def _vector_field(self) -> str | None:
         """The embedding field used for dense/hybrid search, or None if the index has none.
 
@@ -356,6 +379,13 @@ class AzureSearchIndexProvider(BaseIndexProvider):
         # Keyword text: present for everything except vector-only (which ranks purely on ANN
         # score). hybrid/semantic fuse keyword + vector (RRF on Azure).
         kwargs["search_text"] = None if mode == "vector" else query
+        if kwargs["search_text"] is not None:
+            # Scope the text arm to the content field — see `_content_field` for the measurement.
+            # Left unscoped when the index has no recognisable text field, which is the same
+            # behaviour as before rather than a silent no-results query.
+            content_field = await self._content_field()
+            if content_field:
+                kwargs["search_fields"] = [content_field]
 
         if mode == "semantic":
             # L2 semantic reranking on top of the (hybrid) result — the system's true final

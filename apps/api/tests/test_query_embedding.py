@@ -259,6 +259,59 @@ async def test_vector_search_uses_vectorized_query_when_vector_given(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_keyword_arm_is_scoped_to_the_content_field():
+    """The text arm must not search every searchable field.
+
+    An index can carry a scoring profile that weights titles and metadata above the content — on
+    `prod-index-2026-08` the default profile puts `page_title` and `stichwoerter` at 3.0 and
+    `chunk_text` at 1.0 — and those metadata fields are page-level, identical on every chunk of a
+    page. Unscoped, a term hitting one lifts a whole page uniformly and the probe measures the
+    profile rather than BM25: recall@10 28.9% unscoped against 52.2% scoped, over 90 questions.
+    """
+    from app.index_providers.azure_search import _FieldInfo
+
+    p = _azure_provider()
+    p._fields["chunk_text"] = _FieldInfo("chunk_text", "Edm.String", False, False, searchable=True)
+    captured: dict = {}
+
+    class _FakeClient:
+        async def search(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeResults([{"id": "c1", "@search.score": 3.0}])
+
+    p._search_client = _FakeClient()
+
+    await p.search_documents("Lieferantenwechsel", 5, None, mode="keyword")
+    assert captured["search_fields"] == ["chunk_text"]
+
+    # Hybrid fuses the same text arm, so it is scoped too.
+    captured.clear()
+    await p.search_documents("q", 5, None, mode="hybrid", query_vector=[0.1, 0.2])
+    assert captured["search_fields"] == ["chunk_text"]
+
+    # Vector-only has no text arm, so there is nothing to scope.
+    captured.clear()
+    await p.search_documents("q", 5, None, mode="vector", query_vector=[0.1, 0.2])
+    assert "search_fields" not in captured
+
+
+@pytest.mark.asyncio
+async def test_keyword_arm_unscoped_when_no_text_field_is_recognisable():
+    """No recognisable content field means the previous behaviour, not an empty query."""
+    p = _azure_provider()
+    captured: dict = {}
+
+    class _FakeClient:
+        async def search(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeResults([])
+
+    p._search_client = _FakeClient()
+    await p.search_documents("q", 5, None, mode="keyword")
+    assert "search_fields" not in captured
+
+
+@pytest.mark.asyncio
 async def test_semantic_mode_requires_config_then_sets_query_type():
     p = _azure_provider()
     captured: dict = {}
