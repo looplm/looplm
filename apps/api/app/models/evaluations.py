@@ -49,7 +49,7 @@ class EvalJob(Base):
     project_id = Column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    test_suite = Column(String(255), nullable=False, server_default=text("''"))
+    test_suite = Column(Text, nullable=False, server_default=text("''"))
     dataset_ids = Column(JSONB, nullable=True)
     status = Column(
         Enum(EvalJobStatus, name="eval_job_status"), nullable=False, server_default=text("'pending'")
@@ -120,7 +120,7 @@ class EvalRun(Base):
     project_id = Column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    name = Column(String(512), nullable=False)
+    name = Column(Text, nullable=False)
     source = Column(String(256))
     tags = Column(JSONB, nullable=False, server_default=text("'[]'"))
     total = Column(Integer, nullable=False, server_default=text("0"))
@@ -232,7 +232,7 @@ class EvalSession(Base):
     project_id = Column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    name = Column(String(512), nullable=False)
+    name = Column(Text, nullable=False)
     status = Column(
         Enum(EvalJobStatus, name="eval_job_status", create_type=False),
         nullable=False,
